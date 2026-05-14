@@ -10,7 +10,7 @@ services:
     environment:
       SECRET_KEY: "${SECRET_KEY}"
       DEBUG: "false"
-      ALLOWED_HOSTS: "${ALLOWED_HOSTS:-ararasuite.com.br}"
+      ALLOWED_HOSTS: "${CP_DOMAIN:-ararasuite.com.br}"
       POSTGRES_DB: "${POSTGRES_DB:-erp_cp}"
       POSTGRES_USER: "${POSTGRES_USER:-erp_cp}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
@@ -49,12 +49,12 @@ services:
         max_attempts: 3
       labels:
         - "traefik.enable=true"
-        - "traefik.http.routers.ararasuite-cp.rule=Host(`ararasuite.com.br`)"
+        - "traefik.http.routers.ararasuite-cp.rule=Host(`${CP_DOMAIN:-ararasuite.com.br}`)"
         - "traefik.http.routers.ararasuite-cp.entrypoints=websecure"
         - "traefik.http.routers.ararasuite-cp.tls.certresolver=le"
         - "traefik.http.services.ararasuite-cp.loadbalancer.server.port=8000"
         - "traefik.http.middlewares.ararasuite-cp-redirect.redirectscheme.scheme=https"
-        - "traefik.http.routers.ararasuite-cp-http.rule=Host(`ararasuite.com.br`)"
+        - "traefik.http.routers.ararasuite-cp-http.rule=Host(`${CP_DOMAIN:-ararasuite.com.br}`)"
         - "traefik.http.routers.ararasuite-cp-http.entrypoints=web"
         - "traefik.http.routers.ararasuite-cp-http.middlewares=ararasuite-cp-redirect"
 
