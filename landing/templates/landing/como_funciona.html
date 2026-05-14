@@ -1,0 +1,194 @@
+{% extends "landing/base.html" %}
+{% block title %}Como Funciona — AraraSuite ERP{% endblock %}
+{% block description %}Entenda como o AraraSuite ERP funciona: do cadastro ao sistema no ar em minutos, com infraestrutura dedicada e suporte completo.{% endblock %}
+
+{% block content %}
+
+<!-- Hero -->
+<section class="relative pt-32 pb-20 bg-slate-900 overflow-hidden">
+  <div class="absolute inset-0 hero-grid opacity-50"></div>
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[250px] bg-violet-600/10 rounded-full blur-3xl pointer-events-none"></div>
+  <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+    <span class="text-indigo-400 font-semibold text-sm uppercase tracking-widest" data-aos="fade-up">Simples e transparente</span>
+    <h1 class="text-5xl font-black mt-3 mb-5" data-aos="fade-up" data-aos-delay="50">Como o <span class="gradient-text">AraraSuite</span> funciona</h1>
+    <p class="text-slate-400 text-lg max-w-2xl mx-auto" data-aos="fade-up" data-aos-delay="100">
+      Do cadastro ao sistema funcionando em menos de 10 minutos — automaticamente, sem suporte técnico necessário.
+    </p>
+  </div>
+</section>
+
+<!-- Passos -->
+<section class="bg-white py-24">
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+
+    <div class="relative pl-16 pb-14 border-l-2 border-indigo-100 ml-5" data-aos="fade-up">
+      <div class="absolute -left-5 top-0 w-10 h-10 rounded-full gradient-bg flex items-center justify-center font-black text-sm shadow-lg shadow-indigo-500/30">1</div>
+      <h3 class="text-xl font-black text-slate-900 mb-2">Você preenche o cadastro</h3>
+      <p class="text-slate-500 leading-relaxed">Informe os dados da sua empresa (nome, CNPJ, e-mail), escolha seu plano e defina o endereço de acesso — por exemplo, <span class="text-indigo-600 font-medium">suaempresa.ararasuite.com.br</span>. Leva menos de 2 minutos e não requer cartão de crédito.</p>
+    </div>
+
+    <div class="relative pl-16 pb-14 border-l-2 border-indigo-100 ml-5" data-aos="fade-up" data-aos-delay="100">
+      <div class="absolute -left-5 top-0 w-10 h-10 rounded-full gradient-bg flex items-center justify-center font-black text-sm shadow-lg shadow-indigo-500/30">2</div>
+      <h3 class="text-xl font-black text-slate-900 mb-2">Nossa plataforma cria seu ambiente</h3>
+      <p class="text-slate-500 leading-relaxed">Automaticamente, provisionamos um servidor exclusivo para sua empresa na nossa infraestrutura em Anápolis/Brasília. Isso inclui banco de dados PostgreSQL isolado, servidor de aplicação, certificado SSL/HTTPS e roteamento pelo seu domínio — sem intervenção humana.</p>
+    </div>
+
+    <div class="relative pl-16 pb-14 border-l-2 border-indigo-100 ml-5" data-aos="fade-up" data-aos-delay="200">
+      <div class="absolute -left-5 top-0 w-10 h-10 rounded-full gradient-bg flex items-center justify-center font-black text-sm shadow-lg shadow-indigo-500/30">3</div>
+      <h3 class="text-xl font-black text-slate-900 mb-2">Módulos configurados automaticamente</h3>
+      <p class="text-slate-500 leading-relaxed">Conforme o plano escolhido, os módulos são ativados: Financeiro, Tarefas, Estoque, Assistente com IA, entre outros. As migrações do banco de dados e as configurações iniciais são executadas automaticamente.</p>
+    </div>
+
+    <div class="relative pl-16 pb-14 border-l-2 border-indigo-100 ml-5" data-aos="fade-up" data-aos-delay="300">
+      <div class="absolute -left-5 top-0 w-10 h-10 rounded-full gradient-bg flex items-center justify-center font-black text-sm shadow-lg shadow-indigo-500/30">4</div>
+      <h3 class="text-xl font-black text-slate-900 mb-2">Você recebe as credenciais por e-mail</h3>
+      <p class="text-slate-500 leading-relaxed">Assim que o ambiente estiver pronto, você recebe um e-mail com o link de acesso, usuário e senha temporária. Basta clicar, fazer login, alterar a senha e começar.</p>
+    </div>
+
+    <div class="relative pl-16 ml-5" data-aos="fade-up" data-aos-delay="400">
+      <div class="absolute -left-5 top-0 w-10 h-10 rounded-full gradient-bg flex items-center justify-center font-black text-sm shadow-lg shadow-indigo-500/30">5</div>
+      <h3 class="text-xl font-black text-slate-900 mb-2">Comece a gestão do seu negócio</h3>
+      <p class="text-slate-500 leading-relaxed">Seu sistema está no ar, disponível 24h por dia, 7 dias por semana. Acesse de qualquer dispositivo pelo navegador. Atualizações são aplicadas automaticamente sem interromper o serviço.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Infraestrutura -->
+<section class="bg-slate-900 py-20 relative overflow-hidden">
+  <div class="absolute inset-0 hero-grid opacity-30"></div>
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-14" data-aos="fade-up">
+      <h2 class="text-3xl font-black mb-3">Infraestrutura que você pode confiar</h2>
+      <p class="text-slate-400 max-w-xl mx-auto">Servidores próprios no Brasil com alta disponibilidade e segurança.</p>
+    </div>
+    <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div class="glass rounded-2xl p-6 text-center" data-aos="fade-up">
+        <div class="text-3xl font-black gradient-text mb-1">99.9%</div>
+        <div class="text-slate-300 font-medium text-sm">Disponibilidade</div>
+        <div class="text-slate-500 text-xs mt-1">SLA garantido</div>
+      </div>
+      <div class="glass rounded-2xl p-6 text-center" data-aos="fade-up" data-aos-delay="100">
+        <div class="text-3xl font-black gradient-text mb-1">&lt; 5 min</div>
+        <div class="text-slate-300 font-medium text-sm">Tempo de deploy</div>
+        <div class="text-slate-500 text-xs mt-1">Provisionamento automático</div>
+      </div>
+      <div class="glass rounded-2xl p-6 text-center" data-aos="fade-up" data-aos-delay="200">
+        <div class="text-3xl font-black gradient-text mb-1">100%</div>
+        <div class="text-slate-300 font-medium text-sm">Dados isolados</div>
+        <div class="text-slate-500 text-xs mt-1">Servidor exclusivo</div>
+      </div>
+      <div class="glass rounded-2xl p-6 text-center" data-aos="fade-up" data-aos-delay="300">
+        <div class="text-3xl font-black gradient-text mb-1">BR</div>
+        <div class="text-slate-300 font-medium text-sm">Dados no Brasil</div>
+        <div class="text-slate-500 text-xs mt-1">Conformidade LGPD</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="bg-slate-50 py-20">
+  <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-12" data-aos="fade-up">
+      <h2 class="text-3xl font-black text-slate-900 mb-3">Perguntas frequentes</h2>
+      <p class="text-slate-500">Tire suas dúvidas sobre o funcionamento da plataforma.</p>
+    </div>
+    <div class="space-y-3" x-data="{ open: null }">
+
+      {% for faq in faq_items %}
+      <div class="bg-white border border-slate-200 rounded-2xl overflow-hidden" data-aos="fade-up">
+        <button @click="open = open === {{ forloop.counter0 }} ? null : {{ forloop.counter0 }}"
+                class="w-full flex items-center justify-between px-6 py-4 text-left font-semibold text-slate-900 hover:bg-slate-50 transition-colors">
+          {{ faq.q }}
+          <svg :class="open === {{ forloop.counter0 }} ? 'rotate-180' : ''"
+               class="w-5 h-5 text-slate-400 shrink-0 ml-4 transition-transform duration-200"
+               fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </button>
+        <div x-show="open === {{ forloop.counter0 }}" x-transition class="px-6 pb-5 text-slate-500 text-sm leading-relaxed border-t border-slate-100 pt-4">
+          {{ faq.a }}
+        </div>
+      </div>
+      {% empty %}
+      <!-- FAQ estático -->
+      {% for idx, q, a in faq_static %}{{ idx }}{% empty %}
+      <div class="bg-white border border-slate-200 rounded-2xl overflow-hidden" data-aos="fade-up" x-data="{open:false}">
+        <button @click="open=!open" class="w-full flex items-center justify-between px-6 py-4 text-left font-semibold text-slate-900 hover:bg-slate-50 transition-colors">
+          Preciso instalar algo no meu computador?
+          <svg :class="open?'rotate-180':''" class="w-5 h-5 text-slate-400 shrink-0 ml-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="open" x-transition class="px-6 pb-5 text-slate-500 text-sm leading-relaxed border-t border-slate-100 pt-4">
+          Não. O AraraSuite é 100% web. Basta um navegador moderno (Chrome, Firefox, Edge) e acesso à internet. Funciona em computadores, tablets e celulares sem instalar nada.
+        </div>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-2xl overflow-hidden" data-aos="fade-up" x-data="{open:false}">
+        <button @click="open=!open" class="w-full flex items-center justify-between px-6 py-4 text-left font-semibold text-slate-900 hover:bg-slate-50 transition-colors">
+          Quanto tempo leva para meu sistema estar no ar?
+          <svg :class="open?'rotate-180':''" class="w-5 h-5 text-slate-400 shrink-0 ml-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="open" x-transition class="px-6 pb-5 text-slate-500 text-sm leading-relaxed border-t border-slate-100 pt-4">
+          Em média menos de 5 minutos. Após o cadastro, nosso sistema provisiona automaticamente toda a infraestrutura e você recebe o acesso por e-mail.
+        </div>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-2xl overflow-hidden" data-aos="fade-up" x-data="{open:false}">
+        <button @click="open=!open" class="w-full flex items-center justify-between px-6 py-4 text-left font-semibold text-slate-900 hover:bg-slate-50 transition-colors">
+          Meus dados ficam no Brasil?
+          <svg :class="open?'rotate-180':''" class="w-5 h-5 text-slate-400 shrink-0 ml-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="open" x-transition class="px-6 pb-5 text-slate-500 text-sm leading-relaxed border-t border-slate-100 pt-4">
+          Sim. Toda a infraestrutura do AraraSuite está localizada no Brasil (Anápolis e Brasília – GO/DF), garantindo conformidade com a LGPD.
+        </div>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-2xl overflow-hidden" data-aos="fade-up" x-data="{open:false}">
+        <button @click="open=!open" class="w-full flex items-center justify-between px-6 py-4 text-left font-semibold text-slate-900 hover:bg-slate-50 transition-colors">
+          Posso cancelar quando quiser?
+          <svg :class="open?'rotate-180':''" class="w-5 h-5 text-slate-400 shrink-0 ml-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="open" x-transition class="px-6 pb-5 text-slate-500 text-sm leading-relaxed border-t border-slate-100 pt-4">
+          Sim. Não há fidelidade ou multa de cancelamento. Você pode cancelar a qualquer momento pelo painel ou entrando em contato conosco.
+        </div>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-2xl overflow-hidden" data-aos="fade-up" x-data="{open:false}">
+        <button @click="open=!open" class="w-full flex items-center justify-between px-6 py-4 text-left font-semibold text-slate-900 hover:bg-slate-50 transition-colors">
+          Posso mudar de plano depois?
+          <svg :class="open?'rotate-180':''" class="w-5 h-5 text-slate-400 shrink-0 ml-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="open" x-transition class="px-6 pb-5 text-slate-500 text-sm leading-relaxed border-t border-slate-100 pt-4">
+          Sim. Você pode fazer upgrade ou downgrade do seu plano a qualquer momento pelo painel administrativo, sem perder nenhum dado.
+        </div>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-2xl overflow-hidden" data-aos="fade-up" x-data="{open:false}">
+        <button @click="open=!open" class="w-full flex items-center justify-between px-6 py-4 text-left font-semibold text-slate-900 hover:bg-slate-50 transition-colors">
+          O que acontece com meus dados se eu cancelar?
+          <svg :class="open?'rotate-180':''" class="w-5 h-5 text-slate-400 shrink-0 ml-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="open" x-transition class="px-6 pb-5 text-slate-500 text-sm leading-relaxed border-t border-slate-100 pt-4">
+          Você tem 30 dias após o cancelamento para exportar seus dados. Após esse prazo, os dados são excluídos permanentemente dos nossos servidores.
+        </div>
+      </div>
+      {% endfor %}
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="bg-white py-20 border-t border-slate-100">
+  <div class="max-w-2xl mx-auto px-4 text-center" data-aos="fade-up">
+    <h2 class="text-3xl font-black text-slate-900 mb-4">Ainda tem dúvidas?</h2>
+    <p class="text-slate-500 mb-8">Fale com nossa equipe ou comece agora — é grátis.</p>
+    <div class="flex flex-col sm:flex-row gap-4 justify-center">
+      <a href="{% url 'landing:cadastro' %}" class="gradient-bg hover:opacity-90 text-white font-bold px-8 py-4 rounded-2xl shadow-lg shadow-indigo-500/25 transition-all">
+        Começar grátis →
+      </a>
+      <a href="https://wa.me/556199226395" target="_blank"
+         class="flex items-center justify-center gap-2 border border-slate-200 hover:border-green-300 text-slate-700 hover:text-green-700 font-medium px-8 py-4 rounded-2xl transition-all">
+        <svg class="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+        Falar no WhatsApp
+      </a>
+    </div>
+  </div>
+</section>
+
+{% endblock %}

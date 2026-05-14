@@ -1,0 +1,124 @@
+{% extends "landing/base.html" %}
+{% block title %}Política de Privacidade — AraraSuite ERP{% endblock %}
+
+{% block content %}
+<div class="bg-slate-900 pt-32 pb-16 relative overflow-hidden">
+  <div class="absolute inset-0 hero-grid opacity-30"></div>
+  <div class="relative max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+    <h1 class="text-4xl font-black mb-4">Política de Privacidade</h1>
+    <p class="text-slate-400">Última atualização: {% now "d \d\e F \d\e Y" %}</p>
+  </div>
+</div>
+
+<div class="bg-white py-16">
+  <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 prose prose-slate max-w-none">
+    <style>
+      .doc h2 { font-size: 1.375rem; font-weight: 800; color: #0f172a; margin-top: 2.5rem; margin-bottom: .75rem; padding-bottom: .5rem; border-bottom: 1px solid #e2e8f0; }
+      .doc h3 { font-size: 1.05rem; font-weight: 700; color: #1e293b; margin-top: 1.5rem; margin-bottom: .5rem; }
+      .doc p  { color: #475569; line-height: 1.8; margin-bottom: 1rem; font-size: .9375rem; }
+      .doc ul { color: #475569; line-height: 1.8; margin-bottom: 1rem; padding-left: 1.5rem; font-size: .9375rem; }
+      .doc li { margin-bottom: .4rem; }
+      .doc strong { color: #1e293b; }
+      .doc a  { color: #6366f1; text-decoration: underline; }
+    </style>
+    <div class="doc">
+
+      <p>A <strong>AraraSuite</strong> (&ldquo;nós&rdquo;, &ldquo;nosso&rdquo; ou &ldquo;plataforma&rdquo;) valoriza a privacidade dos seus usuários. Esta Política de Privacidade descreve como coletamos, usamos, armazenamos e protegemos as informações pessoais, em conformidade com a <strong>Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018)</strong>.</p>
+
+      <h2>1. Quem somos</h2>
+      <p>AraraSuite é um sistema de gestão empresarial (ERP) fornecido como serviço (SaaS). Nossos servidores estão localizados no Brasil, nas cidades de Anápolis e Brasília (GO/DF).</p>
+      <p><strong>Contato:</strong> contato@ararasuite.com.br</p>
+
+      <h2>2. Dados que coletamos</h2>
+      <h3>2.1 Dados de cadastro</h3>
+      <ul>
+        <li>Nome da empresa e CNPJ</li>
+        <li>Nome e e-mail do responsável</li>
+        <li>Telefone de contato (opcional)</li>
+        <li>Endereço de acesso escolhido (slug)</li>
+        <li>Plano contratado</li>
+      </ul>
+      <h3>2.2 Dados de uso</h3>
+      <ul>
+        <li>Logs de acesso (endereço IP, data/hora, navegador)</li>
+        <li>Páginas acessadas e funcionalidades utilizadas</li>
+        <li>Dados inseridos no sistema pelo próprio usuário (lançamentos financeiros, tarefas, etc.)</li>
+      </ul>
+      <h3>2.3 Dados de pagamento</h3>
+      <p>Informações de pagamento (cartão, dados bancários) são processadas diretamente pela plataforma <strong>Asaas</strong>, que possui sua própria política de privacidade. Não armazenamos dados completos de cartão de crédito em nossos servidores.</p>
+
+      <h2>3. Como usamos os dados</h2>
+      <ul>
+        <li>Provisionar e manter o ambiente exclusivo de cada cliente</li>
+        <li>Enviar credenciais de acesso e comunicações operacionais</li>
+        <li>Processar pagamentos e emitir cobranças</li>
+        <li>Oferecer suporte técnico</li>
+        <li>Melhorar a plataforma com base em análises de uso agregadas e anonimizadas</li>
+        <li>Cumprir obrigações legais e regulatórias</li>
+      </ul>
+
+      <h2>4. Base legal para o tratamento (LGPD)</h2>
+      <ul>
+        <li><strong>Execução de contrato</strong> — tratamento necessário para prestar o serviço contratado (art. 7º, V)</li>
+        <li><strong>Legítimo interesse</strong> — melhoria da plataforma e comunicações operacionais (art. 7º, IX)</li>
+        <li><strong>Cumprimento de obrigação legal</strong> — guarda de registros exigida por lei (art. 7º, II)</li>
+        <li><strong>Consentimento</strong> — para comunicações de marketing, quando aplicável (art. 7º, I)</li>
+      </ul>
+
+      <h2>5. Compartilhamento de dados</h2>
+      <p>Não vendemos, alugamos ou compartilhamos seus dados pessoais com terceiros para fins comerciais. Os dados podem ser compartilhados apenas com:</p>
+      <ul>
+        <li><strong>Asaas</strong> — processamento de pagamentos</li>
+        <li><strong>Prestadores de infraestrutura</strong> — servidores e conectividade (sob acordos de confidencialidade)</li>
+        <li><strong>Autoridades públicas</strong> — quando exigido por lei, ordem judicial ou regulação aplicável</li>
+      </ul>
+
+      <h2>6. Isolamento e segurança dos dados</h2>
+      <p>Cada cliente da AraraSuite possui um <strong>servidor exclusivo e isolado</strong>. Seus dados nunca são armazenados em ambientes compartilhados com outros clientes. Adotamos as seguintes medidas de segurança:</p>
+      <ul>
+        <li>Comunicação criptografada via HTTPS/TLS em todos os ambientes</li>
+        <li>Banco de dados com acesso restrito por rede privada</li>
+        <li>Senhas armazenadas com hash seguro (nunca em texto simples)</li>
+        <li>Acesso administrativo protegido por autenticação multifator</li>
+        <li>Monitoramento contínuo de disponibilidade e anomalias</li>
+      </ul>
+
+      <h2>7. Retenção dos dados</h2>
+      <ul>
+        <li>Dados ativos são mantidos durante toda a vigência do contrato</li>
+        <li>Após o cancelamento, os dados são mantidos por <strong>30 dias</strong> para eventual exportação</li>
+        <li>Após os 30 dias, os dados são excluídos permanentemente de todos os nossos sistemas</li>
+        <li>Logs de acesso são mantidos pelo prazo mínimo exigido pelo Marco Civil da Internet (6 meses)</li>
+      </ul>
+
+      <h2>8. Seus direitos (LGPD)</h2>
+      <p>Como titular dos dados, você tem os seguintes direitos:</p>
+      <ul>
+        <li><strong>Acesso</strong> — solicitar a confirmação da existência e acesso aos seus dados</li>
+        <li><strong>Correção</strong> — solicitar a atualização de dados incompletos ou desatualizados</li>
+        <li><strong>Eliminação</strong> — solicitar a exclusão dos dados tratados com base em consentimento</li>
+        <li><strong>Portabilidade</strong> — solicitar a exportação dos seus dados em formato estruturado</li>
+        <li><strong>Revogação do consentimento</strong> — para tratamentos baseados em consentimento</li>
+        <li><strong>Oposição</strong> — opor-se a tratamentos realizados com base em legítimo interesse</li>
+      </ul>
+      <p>Para exercer seus direitos, entre em contato: <a href="mailto:privacidade@ararasuite.com.br">privacidade@ararasuite.com.br</a></p>
+
+      <h2>9. Cookies</h2>
+      <p>Utilizamos cookies essenciais para o funcionamento da plataforma (sessão, autenticação, preferências). Não utilizamos cookies de rastreamento ou publicidade comportamental.</p>
+
+      <h2>10. Transferência internacional</h2>
+      <p>Todos os dados são armazenados e processados exclusivamente no Brasil. Não realizamos transferência internacional de dados pessoais.</p>
+
+      <h2>11. Alterações nesta política</h2>
+      <p>Esta política pode ser atualizada periodicamente. Quando houver alterações relevantes, notificaremos os clientes por e-mail com pelo menos 15 dias de antecedência. O uso continuado do serviço após a notificação implica aceitação da nova versão.</p>
+
+      <h2>12. Contato e encarregado de dados (DPO)</h2>
+      <p>Para dúvidas, solicitações ou reclamações relacionadas à privacidade e proteção de dados:</p>
+      <ul>
+        <li>E-mail: <a href="mailto:privacidade@ararasuite.com.br">privacidade@ararasuite.com.br</a></li>
+        <li>WhatsApp Anápolis: <a href="https://wa.me/556299226395">(62) 99226-3958</a></li>
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

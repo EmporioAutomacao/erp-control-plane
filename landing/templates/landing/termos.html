@@ -1,0 +1,131 @@
+{% extends "landing/base.html" %}
+{% block title %}Termos de Uso — AraraSuite ERP{% endblock %}
+
+{% block content %}
+<div class="bg-slate-900 pt-32 pb-16 relative overflow-hidden">
+  <div class="absolute inset-0 hero-grid opacity-30"></div>
+  <div class="relative max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+    <h1 class="text-4xl font-black mb-4">Termos de Uso</h1>
+    <p class="text-slate-400">Última atualização: {% now "d \d\e F \d\e Y" %}</p>
+  </div>
+</div>
+
+<div class="bg-white py-16">
+  <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+    <style>
+      .doc h2 { font-size: 1.375rem; font-weight: 800; color: #0f172a; margin-top: 2.5rem; margin-bottom: .75rem; padding-bottom: .5rem; border-bottom: 1px solid #e2e8f0; }
+      .doc h3 { font-size: 1.05rem; font-weight: 700; color: #1e293b; margin-top: 1.5rem; margin-bottom: .5rem; }
+      .doc p  { color: #475569; line-height: 1.8; margin-bottom: 1rem; font-size: .9375rem; }
+      .doc ul { color: #475569; line-height: 1.8; margin-bottom: 1rem; padding-left: 1.5rem; font-size: .9375rem; }
+      .doc li { margin-bottom: .4rem; }
+      .doc strong { color: #1e293b; }
+      .doc a  { color: #6366f1; text-decoration: underline; }
+    </style>
+    <div class="doc">
+
+      <p>Ao utilizar a plataforma <strong>AraraSuite</strong>, você (&ldquo;Cliente&rdquo; ou &ldquo;Usuário&rdquo;) concorda com os presentes Termos de Uso. Leia-os atentamente antes de criar sua conta.</p>
+
+      <h2>1. Definições</h2>
+      <ul>
+        <li><strong>Plataforma</strong> — o sistema AraraSuite ERP fornecido como serviço (SaaS) acessível via internet</li>
+        <li><strong>Cliente</strong> — a pessoa jurídica ou física que contrata e utiliza a plataforma</li>
+        <li><strong>Usuário</strong> — qualquer pessoa com acesso autorizado pelo Cliente à instância contratada</li>
+        <li><strong>Instância</strong> — o ambiente exclusivo e isolado provisionado para cada Cliente</li>
+        <li><strong>AraraSuite</strong> — a empresa fornecedora da plataforma, com sede em Anápolis – GO</li>
+      </ul>
+
+      <h2>2. Aceitação dos termos</h2>
+      <p>Ao completar o cadastro e criar uma conta, o Cliente declara ter lido, compreendido e aceito integralmente estes Termos de Uso e a <a href="{% url 'landing:privacidade' %}">Política de Privacidade</a>. Caso não concorde, não utilize a plataforma.</p>
+
+      <h2>3. Contratação e planos</h2>
+      <p>A plataforma é oferecida em diferentes planos com recursos e preços distintos, conforme descrito na <a href="{% url 'landing:planos' %}">página de planos</a>. O Cliente escolhe o plano no momento do cadastro e pode alterá-lo a qualquer momento.</p>
+      <p>A contratação é mensal, sem fidelidade mínima, e pode ser cancelada a qualquer momento sem multa.</p>
+
+      <h2>4. Provisionamento</h2>
+      <p>Após o cadastro, a AraraSuite provisiona automaticamente uma instância exclusiva para o Cliente. O prazo de provisionamento é de até 10 minutos. As credenciais de acesso são enviadas por e-mail assim que o ambiente estiver disponível.</p>
+
+      <h2>5. Uso permitido</h2>
+      <p>O Cliente pode utilizar a plataforma para:</p>
+      <ul>
+        <li>Gestão financeira, operacional e comercial da própria empresa</li>
+        <li>Gestão de filiais e empresas vinculadas, conforme o plano contratado</li>
+        <li>Armazenamento de dados relacionados à atividade empresarial legítima</li>
+      </ul>
+
+      <h2>6. Uso proibido</h2>
+      <p>É expressamente vedado ao Cliente:</p>
+      <ul>
+        <li>Utilizar a plataforma para fins ilícitos ou em desacordo com a legislação brasileira</li>
+        <li>Tentar acessar sistemas, dados ou contas de outros clientes</li>
+        <li>Realizar engenharia reversa, descompilar ou extrair o código-fonte da plataforma</li>
+        <li>Revender, sublicenciar ou ceder o acesso à plataforma a terceiros sem autorização expressa</li>
+        <li>Armazenar ou transmitir conteúdo ilegal, difamatório, ou que viole direitos de terceiros</li>
+        <li>Sobrecarregar deliberadamente a infraestrutura com requisições excessivas (abuso de recursos)</li>
+      </ul>
+
+      <h2>7. Responsabilidades do Cliente</h2>
+      <ul>
+        <li>Manter as credenciais de acesso em sigilo e notificar imediatamente caso suspeite de acesso não autorizado</li>
+        <li>Garantir que os usuários autorizados conheçam e respeitem estes Termos</li>
+        <li>Manter os dados cadastrais atualizados (CNPJ, e-mail, responsável)</li>
+        <li>Realizar backups periódicos dos dados críticos, especialmente antes de exclusões em massa</li>
+        <li>Manter os pagamentos em dia para garantir a continuidade do serviço</li>
+      </ul>
+
+      <h2>8. Responsabilidades da AraraSuite</h2>
+      <ul>
+        <li>Manter a plataforma disponível com uptime mínimo de 99,0% ao mês (exceto manutenções programadas)</li>
+        <li>Notificar o Cliente com antecedência sobre manutenções que causem indisponibilidade superior a 30 minutos</li>
+        <li>Tratar os dados do Cliente conforme a <a href="{% url 'landing:privacidade' %}">Política de Privacidade</a> e a LGPD</li>
+        <li>Aplicar atualizações de segurança sem interromper o serviço sempre que possível</li>
+        <li>Oferecer suporte técnico por e-mail durante dias úteis</li>
+      </ul>
+
+      <h2>9. Pagamento e inadimplência</h2>
+      <p>O pagamento é mensal e deve ser realizado até a data de vencimento. Em caso de inadimplência:</p>
+      <ul>
+        <li>Após 3 dias: envio de lembretes por e-mail</li>
+        <li>Após 7 dias: suspensão temporária do acesso (dados mantidos)</li>
+        <li>Após 30 dias: cancelamento definitivo e início do prazo de exclusão de dados</li>
+      </ul>
+      <p>Após a regularização do pagamento, o acesso é restabelecido automaticamente em até 1 hora.</p>
+
+      <h2>10. Cancelamento e portabilidade</h2>
+      <p>O Cliente pode cancelar o serviço a qualquer momento pelo painel administrativo ou por e-mail. Após o cancelamento:</p>
+      <ul>
+        <li>O acesso ao sistema é encerrado ao fim do período já pago</li>
+        <li>Os dados ficam disponíveis para exportação por 30 dias</li>
+        <li>Após 30 dias, os dados são excluídos permanentemente</li>
+      </ul>
+      <p>A AraraSuite disponibilizará ferramentas de exportação de dados nos formatos CSV e JSON, sem custo adicional.</p>
+
+      <h2>11. Propriedade intelectual</h2>
+      <p>A plataforma AraraSuite, incluindo seu código, design, marcas e funcionalidades, é de propriedade exclusiva da AraraSuite. O Cliente recebe apenas uma licença de uso limitada, não exclusiva e intransferível durante a vigência do contrato.</p>
+      <p>Os dados inseridos pelo Cliente são de sua propriedade e responsabilidade exclusiva. A AraraSuite não reivindica qualquer direito sobre o conteúdo do Cliente.</p>
+
+      <h2>12. Limitação de responsabilidade</h2>
+      <p>A AraraSuite não se responsabiliza por:</p>
+      <ul>
+        <li>Danos decorrentes do uso inadequado da plataforma pelo Cliente ou seus usuários</li>
+        <li>Perdas de dados causadas por ações do próprio Cliente (exclusões acidentais, etc.)</li>
+        <li>Indisponibilidades causadas por falhas em infraestrutura de terceiros (provedores de internet, etc.)</li>
+        <li>Decisões de negócio tomadas com base em informações geradas pela plataforma</li>
+      </ul>
+      <p>Em qualquer caso, a responsabilidade da AraraSuite fica limitada ao valor pago pelo Cliente nos últimos 3 meses de serviço.</p>
+
+      <h2>13. Alterações nos termos</h2>
+      <p>A AraraSuite pode atualizar estes Termos de Uso mediante notificação ao Cliente por e-mail com pelo menos <strong>15 dias de antecedência</strong>. O uso continuado do serviço após esse prazo implica aceitação dos novos termos. Caso o Cliente não concorde, poderá cancelar o serviço sem ônus dentro do prazo de notificação.</p>
+
+      <h2>14. Foro e legislação aplicável</h2>
+      <p>Estes Termos de Uso são regidos pelas leis da República Federativa do Brasil. Fica eleito o foro da Comarca de Anápolis – GO para dirimir quaisquer controvérsias decorrentes deste instrumento, com renúncia de qualquer outro, por mais privilegiado que seja.</p>
+
+      <h2>15. Contato</h2>
+      <ul>
+        <li>E-mail: <a href="mailto:contato@ararasuite.com.br">contato@ararasuite.com.br</a></li>
+        <li>WhatsApp Anápolis: <a href="https://wa.me/556299226395">(62) 99226-3958</a></li>
+        <li>WhatsApp Brasília: <a href="https://wa.me/556130466866">(61) 3046-6866</a></li>
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

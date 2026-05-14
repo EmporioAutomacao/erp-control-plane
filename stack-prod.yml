@@ -1,0 +1,154 @@
+version: "3.8"
+
+# Deploy: export $(cat /opt/cp/.env | xargs) && docker stack deploy --with-registry-auth -c stack-prod.yml ararasuite-cp
+
+services:
+
+  web:
+    image: emporioautomacao/ararasuite-cp:${CP_VERSION:-latest}
+    command: ["./entrypoint.sh"]
+    environment:
+      SECRET_KEY: "${SECRET_KEY}"
+      DEBUG: "false"
+      ALLOWED_HOSTS: "${ALLOWED_HOSTS:-ararasuite.com.br}"
+      POSTGRES_DB: "${POSTGRES_DB:-erp_cp}"
+      POSTGRES_USER: "${POSTGRES_USER:-erp_cp}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_HOST: "db"
+      POSTGRES_PORT: "5432"
+      REDIS_URL: "redis://redis:6379/0"
+      TENANTS_BASE_PATH: "/opt/tenants"
+      ERP_DOMAIN: "${ERP_DOMAIN:-ararasuite.com.br}"
+      SAAS_DOMAIN: "${SAAS_DOMAIN:-ararasuite.com.br}"
+      ERP_LATEST_VERSION: "${ERP_LATEST_VERSION:-latest}"
+      PROVISIONING_CHECK_HTTP: "true"
+      EMAIL_HOST: "${EMAIL_HOST}"
+      EMAIL_PORT: "${EMAIL_PORT:-587}"
+      EMAIL_HOST_USER: "${EMAIL_HOST_USER}"
+      EMAIL_HOST_PASSWORD: "${EMAIL_HOST_PASSWORD}"
+      DEFAULT_FROM_EMAIL: "${DEFAULT_FROM_EMAIL:-noreply@ararasuite.com.br}"
+      GUNICORN_WORKERS: "3"
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+      - type: bind
+        source: /opt/tenants
+        target: /opt/tenants
+    networks:
+      - traefik-public
+      - cp-internal
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.ararasuite-cp.rule=Host(`ararasuite.com.br`)"
+        - "traefik.http.routers.ararasuite-cp.entrypoints=websecure"
+        - "traefik.http.routers.ararasuite-cp.tls.certresolver=le"
+        - "traefik.http.services.ararasuite-cp.loadbalancer.server.port=8000"
+        - "traefik.http.middlewares.ararasuite-cp-redirect.redirectscheme.scheme=https"
+        - "traefik.http.routers.ararasuite-cp-http.rule=Host(`ararasuite.com.br`)"
+        - "traefik.http.routers.ararasuite-cp-http.entrypoints=web"
+        - "traefik.http.routers.ararasuite-cp-http.middlewares=ararasuite-cp-redirect"
+
+  celery:
+    image: emporioautomacao/ararasuite-cp:${CP_VERSION:-latest}
+    command: celery -A core worker --loglevel=info --concurrency=2
+    environment:
+      SECRET_KEY: "${SECRET_KEY}"
+      DEBUG: "false"
+      POSTGRES_DB: "${POSTGRES_DB:-erp_cp}"
+      POSTGRES_USER: "${POSTGRES_USER:-erp_cp}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_HOST: "db"
+      POSTGRES_PORT: "5432"
+      REDIS_URL: "redis://redis:6379/0"
+      TENANTS_BASE_PATH: "/opt/tenants"
+      ERP_DOMAIN: "${ERP_DOMAIN:-ararasuite.com.br}"
+      ERP_LATEST_VERSION: "${ERP_LATEST_VERSION:-latest}"
+      PROVISIONING_CHECK_HTTP: "true"
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+      - type: bind
+        source: /opt/tenants
+        target: /opt/tenants
+    networks:
+      - cp-internal
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  beat:
+    image: emporioautomacao/ararasuite-cp:${CP_VERSION:-latest}
+    command: celery -A core beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    environment:
+      SECRET_KEY: "${SECRET_KEY}"
+      DEBUG: "false"
+      POSTGRES_DB: "${POSTGRES_DB:-erp_cp}"
+      POSTGRES_USER: "${POSTGRES_USER:-erp_cp}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_HOST: "db"
+      POSTGRES_PORT: "5432"
+      REDIS_URL: "redis://redis:6379/0"
+    networks:
+      - cp-internal
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-erp_cp}"
+      POSTGRES_USER: "${POSTGRES_USER:-erp_cp}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - cp-internal
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  redis:
+    image: redis:7-alpine
+    networks:
+      - cp-internal
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+volumes:
+  pgdata:
+
+networks:
+  traefik-public:
+    external: true
+  cp-internal:
+    driver: overlay
+    attachable: false

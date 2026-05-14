@@ -1,0 +1,289 @@
+{% extends "landing/base.html" %}
+{% block title %}Criar conta — AraraSuite{% endblock %}
+
+{% block extra_head %}
+<style>
+  .field-group { @apply flex flex-col gap-1.5; }
+
+  input[type=text], input[type=email], input[type=tel], select {
+    width: 100%;
+    padding: .75rem 1rem;
+    border-radius: .75rem;
+    border: 1px solid #334155;
+    background: #1e293b;
+    color: #f1f5f9;
+    font-size: .9375rem;
+    transition: border-color .2s, box-shadow .2s;
+    outline: none;
+  }
+  input[type=text]:focus, input[type=email]:focus,
+  input[type=tel]:focus, select:focus {
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99,102,241,.15);
+  }
+  input.error, select.error { border-color: #f87171; }
+  .error-msg { color: #f87171; font-size: .8125rem; }
+  label { color: #94a3b8; font-size: .875rem; font-weight: 500; }
+  select option { background: #1e293b; }
+  .slug-preview {
+    display: inline-flex;
+    align-items: center;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: .5rem;
+    padding: .4rem .75rem;
+    font-size: .8125rem;
+    color: #94a3b8;
+    gap: .25rem;
+    margin-top: .5rem;
+  }
+  .slug-preview .slug-val { color: #818cf8; font-weight: 600; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-slate-900 pt-16 flex">
+  <!-- Left panel (desktop) -->
+  <div class="hidden lg:flex flex-col justify-between w-[480px] shrink-0 bg-slate-950 border-r border-slate-800 p-12">
+    <div>
+      <a href="{% url 'landing:inicio' %}" class="flex items-center gap-2.5 mb-12">
+        <div class="w-9 h-9 rounded-xl gradient-bg flex items-center justify-center">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+        </div>
+        <span class="font-bold text-[17px]">Arara<span class="gradient-text">Suite</span></span>
+      </a>
+
+      <h2 class="text-3xl font-black mb-4 leading-tight">Seu sistema estará no ar em <span class="gradient-text">minutos</span></h2>
+      <p class="text-slate-400 text-sm leading-relaxed mb-10">Preencha o cadastro e nossa plataforma cria um ambiente completo e exclusivo para sua empresa automaticamente.</p>
+
+      <div class="space-y-6">
+        {% for benefit in benefits %}
+        <div class="flex items-start gap-4">
+          <div class="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0 mt-0.5">
+            {{ benefit.icon|safe }}
+          </div>
+          <div>
+            <div class="font-semibold text-sm mb-0.5">{{ benefit.title }}</div>
+            <div class="text-slate-400 text-xs leading-relaxed">{{ benefit.desc }}</div>
+          </div>
+        </div>
+        {% empty %}
+        <div class="flex items-start gap-4">
+          <div class="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+          </div>
+          <div>
+            <div class="font-semibold text-sm mb-0.5">Configuração automática</div>
+            <div class="text-slate-400 text-xs leading-relaxed">Banco de dados, servidor e domínio configurados automaticamente pela nossa plataforma.</div>
+          </div>
+        </div>
+        <div class="flex items-start gap-4">
+          <div class="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+            </svg>
+          </div>
+          <div>
+            <div class="font-semibold text-sm mb-0.5">Dados 100% isolados</div>
+            <div class="text-slate-400 text-xs leading-relaxed">Cada empresa tem seu próprio servidor exclusivo. Seus dados nunca são compartilhados.</div>
+          </div>
+        </div>
+        <div class="flex items-start gap-4">
+          <div class="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"/>
+            </svg>
+          </div>
+          <div>
+            <div class="font-semibold text-sm mb-0.5">Suporte dedicado</div>
+            <div class="text-slate-400 text-xs leading-relaxed">Nossa equipe está disponível para ajudar na configuração e no uso do sistema.</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Planos resumo -->
+    <div class="mt-8">
+      <div class="text-xs text-slate-500 uppercase tracking-widest mb-3">Planos disponíveis</div>
+      <div class="space-y-2">
+        {% for p in planos %}
+        <div class="flex items-center justify-between py-2 border-b border-slate-800">
+          <span class="text-slate-300 text-sm font-medium">{{ p.nome }}</span>
+          <span class="text-indigo-400 text-sm font-bold">R$ {{ p.preco_mensal|floatformat:"0" }}/mês</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Form panel -->
+  <div class="flex-1 flex items-center justify-center px-4 sm:px-8 py-12" x-data="formularioCadastro()">
+    <div class="w-full max-w-lg">
+      <div class="lg:hidden mb-8">
+        <a href="{% url 'landing:inicio' %}" class="flex items-center gap-2.5 mb-6">
+          <div class="w-9 h-9 rounded-xl gradient-bg flex items-center justify-center">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+          </div>
+          <span class="font-bold text-[17px]">Arara<span class="gradient-text">Suite</span></span>
+        </a>
+      </div>
+
+      <h1 class="text-3xl font-black mb-2">Criar sua conta</h1>
+      <p class="text-slate-400 text-sm mb-8">Preencha os dados da sua empresa para começar.</p>
+
+      {% if form.non_field_errors %}
+      <div class="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-6">
+        {% for error in form.non_field_errors %}
+        <p class="text-red-400 text-sm">{{ error }}</p>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <form method="post" class="space-y-5">
+        {% csrf_token %}
+
+        <!-- Nome da empresa -->
+        <div>
+          <label for="{{ form.nome.id_for_label }}" class="block mb-1.5">
+            Nome da empresa <span class="text-red-400">*</span>
+          </label>
+          <input type="text" name="{{ form.nome.html_name }}" id="{{ form.nome.id_for_label }}"
+                 value="{{ form.nome.value|default:'' }}"
+                 placeholder="Ex: Minha Empresa Ltda"
+                 @input="gerarSlug($event.target.value)"
+                 class="{% if form.nome.errors %}error{% endif %}">
+          {% for error in form.nome.errors %}
+          <p class="error-msg mt-1">{{ error }}</p>
+          {% endfor %}
+        </div>
+
+        <!-- CNPJ -->
+        <div>
+          <label for="{{ form.cnpj.id_for_label }}" class="block mb-1.5">
+            CNPJ <span class="text-red-400">*</span>
+          </label>
+          <input type="text" name="{{ form.cnpj.html_name }}" id="{{ form.cnpj.id_for_label }}"
+                 value="{{ form.cnpj.value|default:'' }}"
+                 placeholder="00.000.000/0000-00"
+                 maxlength="18"
+                 @input="mascaraCNPJ($event)"
+                 class="{% if form.cnpj.errors %}error{% endif %}">
+          {% for error in form.cnpj.errors %}
+          <p class="error-msg mt-1">{{ error }}</p>
+          {% endfor %}
+        </div>
+
+        <!-- Email + Telefone -->
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label for="{{ form.email.id_for_label }}" class="block mb-1.5">
+              E-mail <span class="text-red-400">*</span>
+            </label>
+            <input type="email" name="{{ form.email.html_name }}" id="{{ form.email.id_for_label }}"
+                   value="{{ form.email.value|default:'' }}"
+                   placeholder="contato@empresa.com.br"
+                   class="{% if form.email.errors %}error{% endif %}">
+            {% for error in form.email.errors %}
+            <p class="error-msg mt-1">{{ error }}</p>
+            {% endfor %}
+          </div>
+          <div>
+            <label for="{{ form.telefone.id_for_label }}" class="block mb-1.5">Telefone</label>
+            <input type="tel" name="{{ form.telefone.html_name }}" id="{{ form.telefone.id_for_label }}"
+                   value="{{ form.telefone.value|default:'' }}"
+                   placeholder="(62) 99999-9999"
+                   class="{% if form.telefone.errors %}error{% endif %}">
+          </div>
+        </div>
+
+        <!-- Plano -->
+        <div>
+          <label for="{{ form.plano.id_for_label }}" class="block mb-1.5">
+            Plano <span class="text-red-400">*</span>
+          </label>
+          <select name="{{ form.plano.html_name }}" id="{{ form.plano.id_for_label }}"
+                  class="{% if form.plano.errors %}error{% endif %}">
+            {% for choice in form.plano %}
+            {{ choice.tag }}
+            {% endfor %}
+          </select>
+          {% for error in form.plano.errors %}
+          <p class="error-msg mt-1">{{ error }}</p>
+          {% endfor %}
+        </div>
+
+        <!-- Slug / endereço -->
+        <div>
+          <label for="{{ form.slug.id_for_label }}" class="block mb-1.5">
+            Endereço de acesso <span class="text-red-400">*</span>
+          </label>
+          <input type="text" name="{{ form.slug.html_name }}" id="{{ form.slug.id_for_label }}"
+                 value="{{ form.slug.value|default:'' }}"
+                 placeholder="minhaempresa"
+                 x-model="slug"
+                 @input="slug = $event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')"
+                 class="lowercase {% if form.slug.errors %}error{% endif %}">
+          <div class="slug-preview">
+            Seu endereço:&nbsp;
+            <span class="slug-val" x-text="slug || 'minhaempresa'"></span>
+            <span>.{{ saas_domain }}</span>
+          </div>
+          <p class="text-slate-500 text-xs mt-1">{{ form.slug.help_text }}</p>
+          {% for error in form.slug.errors %}
+          <p class="error-msg mt-1">{{ error }}</p>
+          {% endfor %}
+        </div>
+
+        <!-- Submit -->
+        <button type="submit"
+                class="w-full gradient-bg hover:opacity-90 text-white font-bold py-4 rounded-2xl text-base shadow-xl shadow-indigo-500/25 transition-all duration-200 mt-2">
+          Criar minha conta →
+        </button>
+
+        <p class="text-center text-slate-500 text-xs">
+          Ao criar sua conta você concorda com nossos
+          <a href="#" class="text-indigo-400 hover:underline">Termos de uso</a> e
+          <a href="#" class="text-indigo-400 hover:underline">Política de privacidade</a>.
+        </p>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  function formularioCadastro() {
+    return {
+      slug: '{{ form.slug.value|default:"" }}',
+
+      gerarSlug(nome) {
+        const s = nome.toLowerCase()
+          .normalize('NFD').replace(/[̀-ͯ]/g, '')
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '')
+          .substring(0, 30);
+        this.slug = s;
+        document.getElementById('{{ form.slug.id_for_label }}').value = s;
+      },
+
+      mascaraCNPJ(event) {
+        let v = event.target.value.replace(/\D/g, '').substring(0, 14);
+        v = v.replace(/^(\d{2})(\d)/, '$1.$2');
+        v = v.replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3');
+        v = v.replace(/\.(\d{3})(\d)/, '.$1/$2');
+        v = v.replace(/(\d{4})(\d)/, '$1-$2');
+        event.target.value = v;
+      },
+    }
+  }
+</script>
+{% endblock %}

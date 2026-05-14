@@ -1,0 +1,211 @@
+{% extends "landing/base.html" %}
+{% block title %}Planos e Preços — AraraSuite ERP{% endblock %}
+{% block description %}Conheça os planos do AraraSuite ERP. Sem taxas escondidas, sem fidelidade. Comece quando quiser.{% endblock %}
+
+{% block content %}
+
+<!-- Hero -->
+<section class="relative pt-32 pb-20 bg-slate-900 overflow-hidden">
+  <div class="absolute inset-0 hero-grid opacity-50"></div>
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[250px] bg-indigo-600/10 rounded-full blur-3xl pointer-events-none"></div>
+  <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+    <span class="text-indigo-400 font-semibold text-sm uppercase tracking-widest" data-aos="fade-up">Transparência total</span>
+    <h1 class="text-5xl font-black mt-3 mb-5" data-aos="fade-up" data-aos-delay="50">
+      Planos para cada <span class="gradient-text">momento</span>
+    </h1>
+    <p class="text-slate-400 text-lg max-w-xl mx-auto" data-aos="fade-up" data-aos-delay="100">
+      Comece pequeno e escale conforme seu negócio cresce. Sem taxas escondidas, sem fidelidade.
+    </p>
+    <!-- Garantias -->
+    <div class="flex flex-wrap items-center justify-center gap-6 mt-8" data-aos="fade-up" data-aos-delay="150">
+      <div class="flex items-center gap-2 text-slate-400 text-sm">
+        <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        Sem cartão de crédito
+      </div>
+      <div class="flex items-center gap-2 text-slate-400 text-sm">
+        <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        Cancele quando quiser
+      </div>
+      <div class="flex items-center gap-2 text-slate-400 text-sm">
+        <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        Dados no Brasil (LGPD)
+      </div>
+      <div class="flex items-center gap-2 text-slate-400 text-sm">
+        <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        Suporte incluído
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Cards dos planos -->
+<section class="bg-slate-50 py-20">
+  <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="grid sm:grid-cols-{% if planos|length == 2 %}2{% elif planos|length >= 3 %}3{% else %}1{% endif %} gap-8">
+      {% for plano in planos %}
+      <div class="relative rounded-3xl overflow-hidden flex flex-col
+                  {% if plano.destaque %}bg-slate-900 text-white ring-2 ring-indigo-500 shadow-2xl shadow-indigo-500/20 scale-105{% else %}bg-white text-slate-900 border border-slate-200 shadow-lg{% endif %}
+                  card-hover" data-aos="fade-up" data-aos-delay="{{ forloop.counter0 }}00">
+        {% if plano.destaque %}
+        <div class="absolute top-0 inset-x-0 h-1 gradient-bg"></div>
+        <div class="absolute top-5 right-5">
+          <span class="gradient-bg text-white text-xs font-bold px-3 py-1 rounded-full shadow">Mais popular</span>
+        </div>
+        {% endif %}
+
+        <div class="p-8 flex-1 flex flex-col">
+          <div>
+            <h2 class="font-bold text-2xl mb-1">{{ plano.nome }}</h2>
+            {% if plano.descricao %}<p class="{% if plano.destaque %}text-slate-400{% else %}text-slate-500{% endif %} text-sm mb-6">{{ plano.descricao }}</p>{% endif %}
+            <div class="flex items-end gap-1 mb-2">
+              <span class="text-slate-400 text-lg font-medium">R$</span>
+              <span class="text-5xl font-black">{{ plano.preco_mensal|floatformat:"0" }}</span>
+              <span class="{% if plano.destaque %}text-slate-400{% else %}text-slate-500{% endif %} text-sm mb-1">/mês</span>
+            </div>
+            <p class="{% if plano.destaque %}text-slate-500{% else %}text-slate-400{% endif %} text-xs mb-8">Cobrado mensalmente · sem contrato</p>
+          </div>
+
+          <a href="{% url 'landing:cadastro' %}?plano={{ plano.slug }}"
+             class="block text-center font-bold py-3.5 rounded-2xl mb-8 transition-all duration-200
+                    {% if plano.destaque %}gradient-bg hover:opacity-90 text-white shadow-lg shadow-indigo-500/30{% else %}bg-slate-900 hover:bg-slate-700 text-white{% endif %}">
+            Começar com {{ plano.nome }}
+          </a>
+
+          <div class="space-y-3 flex-1">
+            <p class="text-xs font-semibold uppercase tracking-widest {% if plano.destaque %}text-slate-400{% else %}text-slate-400{% endif %} mb-4">O que está incluído</p>
+
+            {% if plano.max_usuarios %}
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 rounded-full {% if plano.destaque %}bg-indigo-500/20{% else %}bg-indigo-50{% endif %} flex items-center justify-center shrink-0">
+                <svg class="w-3 h-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+              </div>
+              <span class="text-sm {% if plano.destaque %}text-slate-300{% else %}text-slate-600{% endif %}">
+                {% if plano.max_usuarios == 0 %}Usuários ilimitados{% else %}Até {{ plano.max_usuarios }} usuário{{ plano.max_usuarios|pluralize:"s" }}{% endif %}
+              </span>
+            </div>
+            {% endif %}
+
+            {% if plano.max_empresas %}
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 rounded-full {% if plano.destaque %}bg-indigo-500/20{% else %}bg-indigo-50{% endif %} flex items-center justify-center shrink-0">
+                <svg class="w-3 h-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+              </div>
+              <span class="text-sm {% if plano.destaque %}text-slate-300{% else %}text-slate-600{% endif %}">
+                {% if plano.max_empresas == 0 %}Empresas ilimitadas{% else %}Até {{ plano.max_empresas }} empresa{{ plano.max_empresas|pluralize:"s" }}{% endif %}
+              </span>
+            </div>
+            {% endif %}
+
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 rounded-full {% if plano.destaque %}bg-indigo-500/20{% else %}bg-indigo-50{% endif %} flex items-center justify-center shrink-0">
+                <svg class="w-3 h-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+              </div>
+              <span class="text-sm {% if plano.destaque %}text-slate-300{% else %}text-slate-600{% endif %}">
+                {{ plano.recursos_cpu }} vCPU / {{ plano.recursos_ram_gb }}GB RAM
+              </span>
+            </div>
+
+            {% for modulo in plano.modulos_inclusos.all %}
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 rounded-full {% if plano.destaque %}bg-indigo-500/20{% else %}bg-indigo-50{% endif %} flex items-center justify-center shrink-0">
+                <svg class="w-3 h-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+              </div>
+              <span class="text-sm {% if plano.destaque %}text-slate-300{% else %}text-slate-600{% endif %}">{{ modulo.nome }}</span>
+            </div>
+            {% endfor %}
+
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 rounded-full {% if plano.destaque %}bg-indigo-500/20{% else %}bg-indigo-50{% endif %} flex items-center justify-center shrink-0">
+                <svg class="w-3 h-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+              </div>
+              <span class="text-sm {% if plano.destaque %}text-slate-300{% else %}text-slate-600{% endif %}">Servidor dedicado exclusivo</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 rounded-full {% if plano.destaque %}bg-indigo-500/20{% else %}bg-indigo-50{% endif %} flex items-center justify-center shrink-0">
+                <svg class="w-3 h-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+              </div>
+              <span class="text-sm {% if plano.destaque %}text-slate-300{% else %}text-slate-600{% endif %}">SSL/HTTPS automático</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 rounded-full {% if plano.destaque %}bg-indigo-500/20{% else %}bg-indigo-50{% endif %} flex items-center justify-center shrink-0">
+                <svg class="w-3 h-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+              </div>
+              <span class="text-sm {% if plano.destaque %}text-slate-300{% else %}text-slate-600{% endif %}">Suporte por e-mail</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="text-center text-slate-400 text-sm mt-10" data-aos="fade-up">
+      Não sabe qual plano escolher?
+      <a href="https://wa.me/556199226395" target="_blank" class="text-indigo-600 hover:underline font-medium">Fale conosco no WhatsApp</a> e te ajudamos.
+    </p>
+  </div>
+</section>
+
+<!-- FAQ Planos -->
+<section class="bg-white py-20 border-t border-slate-100">
+  <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-12" data-aos="fade-up">
+      <h2 class="text-3xl font-black text-slate-900 mb-3">Dúvidas sobre os planos</h2>
+    </div>
+    <div class="space-y-3">
+
+      <div class="border border-slate-200 rounded-2xl overflow-hidden" data-aos="fade-up" x-data="{open:false}">
+        <button @click="open=!open" class="w-full flex items-center justify-between px-6 py-4 text-left font-semibold text-slate-900 hover:bg-slate-50 transition-colors">
+          Posso mudar de plano depois?
+          <svg :class="open?'rotate-180':''" class="w-5 h-5 text-slate-400 shrink-0 ml-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="open" x-transition class="px-6 pb-5 text-slate-500 text-sm leading-relaxed border-t border-slate-100 pt-4">
+          Sim. Você pode fazer upgrade ou downgrade do plano a qualquer momento, sem perder dados. A cobrança é ajustada proporcionalmente ao período restante do mês.
+        </div>
+      </div>
+
+      <div class="border border-slate-200 rounded-2xl overflow-hidden" data-aos="fade-up" x-data="{open:false}">
+        <button @click="open=!open" class="w-full flex items-center justify-between px-6 py-4 text-left font-semibold text-slate-900 hover:bg-slate-50 transition-colors">
+          Como funciona a cobrança?
+          <svg :class="open?'rotate-180':''" class="w-5 h-5 text-slate-400 shrink-0 ml-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="open" x-transition class="px-6 pb-5 text-slate-500 text-sm leading-relaxed border-t border-slate-100 pt-4">
+          A cobrança é mensal, renovada automaticamente todo mês. Você pode pagar via boleto, PIX ou cartão de crédito. Não há contrato de fidelidade.
+        </div>
+      </div>
+
+      <div class="border border-slate-200 rounded-2xl overflow-hidden" data-aos="fade-up" x-data="{open:false}">
+        <button @click="open=!open" class="w-full flex items-center justify-between px-6 py-4 text-left font-semibold text-slate-900 hover:bg-slate-50 transition-colors">
+          O que acontece se eu atrasar o pagamento?
+          <svg :class="open?'rotate-180':''" class="w-5 h-5 text-slate-400 shrink-0 ml-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="open" x-transition class="px-6 pb-5 text-slate-500 text-sm leading-relaxed border-t border-slate-100 pt-4">
+          Você receberá lembretes por e-mail. Após 7 dias em atraso, o sistema é suspenso temporariamente — mas seus dados são mantidos. Após a regularização, o sistema é reativado automaticamente.
+        </div>
+      </div>
+
+      <div class="border border-slate-200 rounded-2xl overflow-hidden" data-aos="fade-up" x-data="{open:false}">
+        <button @click="open=!open" class="w-full flex items-center justify-between px-6 py-4 text-left font-semibold text-slate-900 hover:bg-slate-50 transition-colors">
+          Tem desconto para pagamento anual?
+          <svg :class="open?'rotate-180':''" class="w-5 h-5 text-slate-400 shrink-0 ml-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="open" x-transition class="px-6 pb-5 text-slate-500 text-sm leading-relaxed border-t border-slate-100 pt-4">
+          Em breve. Estamos trabalhando em planos anuais com desconto especial. Entre em contato conosco para negociações personalizadas.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA final -->
+<section class="bg-slate-900 py-20 relative overflow-hidden">
+  <div class="absolute inset-0 hero-grid opacity-30"></div>
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[200px] bg-indigo-600/15 rounded-full blur-3xl"></div>
+  <div class="relative max-w-2xl mx-auto px-4 text-center" data-aos="fade-up">
+    <h2 class="text-3xl font-black mb-4">Pronto para começar?</h2>
+    <p class="text-slate-400 mb-8">Crie sua conta agora e tenha um sistema completo funcionando em minutos.</p>
+    <a href="{% url 'landing:cadastro' %}" class="inline-block gradient-bg hover:opacity-90 text-white font-bold px-10 py-4 rounded-2xl shadow-xl shadow-indigo-500/25 transition-all">
+      Criar minha conta grátis →
+    </a>
+  </div>
+</section>
+
+{% endblock %}

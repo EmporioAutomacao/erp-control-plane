@@ -1,0 +1,507 @@
+{% extends "landing/base.html" %}
+{% block title %}AraraSuite ERP — Gerencie seu negócio com inteligência{% endblock %}
+
+{% block content %}
+
+<!-- ═══════════════════════════════════════════════════
+     HERO
+════════════════════════════════════════════════════ -->
+<section class="relative min-h-screen flex items-center overflow-hidden bg-slate-900">
+  <!-- Background grid -->
+  <div class="absolute inset-0 hero-grid opacity-60"></div>
+
+  <!-- Glowing orbs -->
+  <div class="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl animate-pulse-slow pointer-events-none"></div>
+  <div class="absolute bottom-1/4 right-1/4 w-80 h-80 bg-violet-600/20 rounded-full blur-3xl animate-pulse-slow pointer-events-none" style="animation-delay:2s"></div>
+
+  <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-20">
+    <div class="grid lg:grid-cols-2 gap-16 items-center">
+
+      <!-- Text -->
+      <div>
+        <div class="inline-flex items-center gap-2 glass rounded-full px-4 py-1.5 text-sm text-indigo-300 font-medium mb-8
+                    opacity-0-init animate-fade-up" style="animation-fill-mode:forwards">
+          <span class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+          Plataforma 100% brasileira
+        </div>
+
+        <h1 class="text-5xl sm:text-6xl font-black leading-[1.08] tracking-tight mb-6
+                   opacity-0-init animate-fade-up animate-delay-100" style="animation-fill-mode:forwards">
+          Gerencie seu<br>
+          negócio com<br>
+          <span class="gradient-text">inteligência</span>
+        </h1>
+
+        <p class="text-slate-400 text-lg leading-relaxed max-w-lg mb-10
+                  opacity-0-init animate-fade-up animate-delay-200" style="animation-fill-mode:forwards">
+          ERP completo com financeiro, tarefas, estoque, assistente com IA e muito mais — tudo em um único lugar, pronto em minutos.
+        </p>
+
+        <div class="flex flex-col sm:flex-row gap-4
+                    opacity-0-init animate-fade-up animate-delay-300" style="animation-fill-mode:forwards">
+          <a href="{% url 'landing:cadastro' %}"
+             class="gradient-bg hover:opacity-90 text-white font-bold px-8 py-4 rounded-2xl text-base shadow-2xl shadow-indigo-500/30 transition-all duration-200 text-center">
+            Começar grátis agora →
+          </a>
+          <a href="#como-funciona"
+             class="flex items-center justify-center gap-2 text-slate-300 hover:text-white border border-slate-700 hover:border-slate-500 font-medium px-8 py-4 rounded-2xl transition-all duration-200">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            Ver como funciona
+          </a>
+        </div>
+
+        <!-- Trust badges -->
+        <div class="mt-12 flex items-center gap-6 opacity-0-init animate-fade-up" style="animation-delay:.4s;animation-fill-mode:forwards">
+          <div class="flex -space-x-2">
+            {% for c in "ABCDE" %}
+            <div class="w-8 h-8 rounded-full gradient-bg border-2 border-slate-900 flex items-center justify-center text-xs font-bold">{{ c }}</div>
+            {% endfor %}
+          </div>
+          <p class="text-slate-400 text-sm"><span class="text-white font-semibold">Empresas</span> já automatizando seus negócios</p>
+        </div>
+      </div>
+
+      <!-- Dashboard mockup -->
+      <div class="hidden lg:block opacity-0-init animate-fade-up animate-delay-200" style="animation-fill-mode:forwards">
+        <div class="animate-float">
+          <!-- Browser chrome -->
+          <div class="rounded-2xl overflow-hidden shadow-2xl shadow-black/60 border border-slate-700/60 glow">
+            <!-- Browser bar -->
+            <div class="bg-slate-800 px-4 py-3 flex items-center gap-3 border-b border-slate-700">
+              <div class="flex gap-1.5">
+                <div class="w-3 h-3 rounded-full bg-red-500/70"></div>
+                <div class="w-3 h-3 rounded-full bg-yellow-500/70"></div>
+                <div class="w-3 h-3 rounded-full bg-green-500/70"></div>
+              </div>
+              <div class="flex-1 mx-4">
+                <div class="bg-slate-700 rounded-md px-3 py-1 text-xs text-slate-400 flex items-center gap-2">
+                  <svg class="w-3 h-3 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/>
+                  </svg>
+                  suaempresa.ararasuite.com.br
+                </div>
+              </div>
+            </div>
+
+            <!-- App interface -->
+            <div class="bg-slate-900 flex" style="height:380px">
+              <!-- Sidebar -->
+              <div class="w-14 bg-slate-950 flex flex-col items-center py-4 gap-3 border-r border-slate-800">
+                <div class="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center mb-2">
+                  <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                  </svg>
+                </div>
+                {% for opacity in "100 60 60 60 60" %}
+                <div class="w-8 h-8 rounded-lg bg-slate-800 opacity-{{ opacity }}"></div>
+                {% endfor %}
+              </div>
+
+              <!-- Main content -->
+              <div class="flex-1 p-4 overflow-hidden">
+                <!-- Header -->
+                <div class="flex items-center justify-between mb-4">
+                  <div>
+                    <div class="h-2.5 w-32 bg-slate-600 rounded mb-1.5"></div>
+                    <div class="h-2 w-20 bg-slate-700 rounded"></div>
+                  </div>
+                  <div class="flex gap-2 items-center">
+                    <div class="w-7 h-7 rounded-lg bg-slate-700"></div>
+                    <div class="w-7 h-7 rounded-full gradient-bg"></div>
+                  </div>
+                </div>
+
+                <!-- KPI cards -->
+                <div class="grid grid-cols-3 gap-3 mb-4">
+                  <div class="bg-slate-800 rounded-xl p-3">
+                    <div class="h-1.5 w-16 bg-slate-600 rounded mb-2"></div>
+                    <div class="text-indigo-400 font-bold text-lg">R$42k</div>
+                    <div class="flex items-center gap-1 mt-1">
+                      <div class="h-1.5 w-2 bg-green-500 rounded"></div>
+                      <div class="h-1.5 w-8 bg-slate-700 rounded"></div>
+                    </div>
+                  </div>
+                  <div class="bg-slate-800 rounded-xl p-3">
+                    <div class="h-1.5 w-12 bg-slate-600 rounded mb-2"></div>
+                    <div class="text-violet-400 font-bold text-lg">128</div>
+                    <div class="flex items-center gap-1 mt-1">
+                      <div class="h-1.5 w-2 bg-green-500 rounded"></div>
+                      <div class="h-1.5 w-6 bg-slate-700 rounded"></div>
+                    </div>
+                  </div>
+                  <div class="bg-slate-800 rounded-xl p-3">
+                    <div class="h-1.5 w-14 bg-slate-600 rounded mb-2"></div>
+                    <div class="text-emerald-400 font-bold text-lg">98%</div>
+                    <div class="flex items-center gap-1 mt-1">
+                      <div class="h-1.5 w-3 bg-emerald-500 rounded"></div>
+                      <div class="h-1.5 w-8 bg-slate-700 rounded"></div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Chart area -->
+                <div class="bg-slate-800 rounded-xl p-3 mb-4">
+                  <div class="h-1.5 w-24 bg-slate-600 rounded mb-3"></div>
+                  <div class="flex items-end gap-1.5 h-16">
+                    {% for h in "40 55 35 70 50 85 65 90 60 75 45 80" %}
+                    <div class="flex-1 rounded-t" style="height:{{ h }}%;background:linear-gradient(to top,#6366f1,#8b5cf6);opacity:.7"></div>
+                    {% endfor %}
+                  </div>
+                </div>
+
+                <!-- Table rows -->
+                <div class="space-y-2">
+                  {% for _ in "123" %}
+                  <div class="flex items-center gap-3 bg-slate-800/60 rounded-lg px-3 py-2">
+                    <div class="w-6 h-6 rounded gradient-bg opacity-70"></div>
+                    <div class="h-2 flex-1 bg-slate-700 rounded"></div>
+                    <div class="h-2 w-12 bg-slate-700 rounded"></div>
+                    <div class="h-5 w-14 rounded-full bg-green-500/20 border border-green-500/30 flex items-center justify-center">
+                      <div class="h-1.5 w-8 bg-green-500/60 rounded"></div>
+                    </div>
+                  </div>
+                  {% endfor %}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom wave -->
+  <div class="absolute bottom-0 inset-x-0">
+    <svg viewBox="0 0 1440 80" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full">
+      <path d="M0 80L1440 80L1440 40C1200 80 720 0 0 40L0 80Z" fill="#f8fafc"/>
+    </svg>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     STATS
+════════════════════════════════════════════════════ -->
+<section class="bg-slate-50 py-16">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-8 text-center" data-aos="fade-up">
+      {% for stat in stats %}
+      <div>
+        <div class="text-4xl font-black text-slate-900 mb-1">{{ stat.valor }}</div>
+        <div class="text-slate-500 text-sm font-medium">{{ stat.label }}</div>
+      </div>
+      {% empty %}
+      <div>
+        <div class="text-4xl font-black text-slate-900 mb-1">5 <span class="text-indigo-500">min</span></div>
+        <div class="text-slate-500 text-sm font-medium">Para seu sistema estar no ar</div>
+      </div>
+      <div>
+        <div class="text-4xl font-black text-slate-900 mb-1">10<span class="text-indigo-500">+</span></div>
+        <div class="text-slate-500 text-sm font-medium">Módulos disponíveis</div>
+      </div>
+      <div>
+        <div class="text-4xl font-black text-slate-900 mb-1">99.9<span class="text-indigo-500">%</span></div>
+        <div class="text-slate-500 text-sm font-medium">Disponibilidade garantida</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     FUNCIONALIDADES
+════════════════════════════════════════════════════ -->
+<section id="funcionalidades" class="bg-white py-24">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-16" data-aos="fade-up">
+      <span class="text-indigo-600 font-semibold text-sm uppercase tracking-widest">Tudo que você precisa</span>
+      <h2 class="text-4xl font-black text-slate-900 mt-3 mb-4">Funcionalidades completas<br>em uma única plataforma</h2>
+      <p class="text-slate-500 text-lg max-w-xl mx-auto">Do financeiro ao atendimento, do estoque às tarefas — gerencie tudo com eficiência e simplicidade.</p>
+    </div>
+
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      {% for feature in features %}
+      <div class="group bg-slate-50 hover:bg-white border border-slate-100 hover:border-indigo-100 rounded-2xl p-7 card-hover shadow-sm hover:shadow-lg"
+           data-aos="fade-up" data-aos-delay="{{ forloop.counter0 }}00">
+        <div class="w-12 h-12 rounded-xl bg-indigo-50 group-hover:bg-indigo-100 flex items-center justify-center mb-5 transition-colors duration-200">
+          {{ feature.icon|safe }}
+        </div>
+        <h3 class="font-bold text-slate-900 text-lg mb-2">{{ feature.title }}</h3>
+        <p class="text-slate-500 text-sm leading-relaxed">{{ feature.desc }}</p>
+      </div>
+      {% empty %}
+      <!-- Financeiro -->
+      <div class="group bg-slate-50 hover:bg-white border border-slate-100 hover:border-indigo-100 rounded-2xl p-7 card-hover shadow-sm hover:shadow-lg" data-aos="fade-up" data-aos-delay="0">
+        <div class="w-12 h-12 rounded-xl bg-indigo-50 group-hover:bg-indigo-100 flex items-center justify-center mb-5 transition-colors">
+          <svg class="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <h3 class="font-bold text-slate-900 text-lg mb-2">Módulo Financeiro</h3>
+        <p class="text-slate-500 text-sm leading-relaxed">Controle de contas a pagar e receber, fluxo de caixa, conciliação bancária e relatórios gerenciais em tempo real.</p>
+      </div>
+      <!-- Tarefas -->
+      <div class="group bg-slate-50 hover:bg-white border border-slate-100 hover:border-indigo-100 rounded-2xl p-7 card-hover shadow-sm hover:shadow-lg" data-aos="fade-up" data-aos-delay="100">
+        <div class="w-12 h-12 rounded-xl bg-violet-50 group-hover:bg-violet-100 flex items-center justify-center mb-5 transition-colors">
+          <svg class="w-6 h-6 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+          </svg>
+        </div>
+        <h3 class="font-bold text-slate-900 text-lg mb-2">Gestão de Tarefas</h3>
+        <p class="text-slate-500 text-sm leading-relaxed">Organize projetos, atribua responsáveis, defina prazos e acompanhe o progresso da sua equipe com eficiência.</p>
+      </div>
+      <!-- IA Comercial -->
+      <div class="group bg-slate-50 hover:bg-white border border-slate-100 hover:border-indigo-100 rounded-2xl p-7 card-hover shadow-sm hover:shadow-lg" data-aos="fade-up" data-aos-delay="200">
+        <div class="w-12 h-12 rounded-xl bg-emerald-50 group-hover:bg-emerald-100 flex items-center justify-center mb-5 transition-colors">
+          <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+          </svg>
+        </div>
+        <h3 class="font-bold text-slate-900 text-lg mb-2">Assistente com IA</h3>
+        <p class="text-slate-500 text-sm leading-relaxed">Assistente comercial inteligente que responde dúvidas sobre produtos, preços e disponibilidade com base no seu catálogo.</p>
+      </div>
+      <!-- Estoque -->
+      <div class="group bg-slate-50 hover:bg-white border border-slate-100 hover:border-indigo-100 rounded-2xl p-7 card-hover shadow-sm hover:shadow-lg" data-aos="fade-up" data-aos-delay="0">
+        <div class="w-12 h-12 rounded-xl bg-orange-50 group-hover:bg-orange-100 flex items-center justify-center mb-5 transition-colors">
+          <svg class="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+          </svg>
+        </div>
+        <h3 class="font-bold text-slate-900 text-lg mb-2">Controle de Estoque</h3>
+        <p class="text-slate-500 text-sm leading-relaxed">Gerencie seu inventário com entradas, saídas, alertas de estoque mínimo e rastreabilidade completa dos produtos.</p>
+      </div>
+      <!-- Integrações -->
+      <div class="group bg-slate-50 hover:bg-white border border-slate-100 hover:border-indigo-100 rounded-2xl p-7 card-hover shadow-sm hover:shadow-lg" data-aos="fade-up" data-aos-delay="100">
+        <div class="w-12 h-12 rounded-xl bg-cyan-50 group-hover:bg-cyan-100 flex items-center justify-center mb-5 transition-colors">
+          <svg class="w-6 h-6 text-cyan-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+          </svg>
+        </div>
+        <h3 class="font-bold text-slate-900 text-lg mb-2">Integrações Nativas</h3>
+        <p class="text-slate-500 text-sm leading-relaxed">Conecte com fornecedores, sincronize produtos e preços automaticamente, sem planilhas ou processos manuais.</p>
+      </div>
+      <!-- Notificações -->
+      <div class="group bg-slate-50 hover:bg-white border border-slate-100 hover:border-indigo-100 rounded-2xl p-7 card-hover shadow-sm hover:shadow-lg" data-aos="fade-up" data-aos-delay="200">
+        <div class="w-12 h-12 rounded-xl bg-pink-50 group-hover:bg-pink-100 flex items-center justify-center mb-5 transition-colors">
+          <svg class="w-6 h-6 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+          </svg>
+        </div>
+        <h3 class="font-bold text-slate-900 text-lg mb-2">Notificações em Tempo Real</h3>
+        <p class="text-slate-500 text-sm leading-relaxed">Receba alertas instantâneos sobre tarefas, vencimentos e eventos importantes diretamente no sistema via WebSocket.</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     COMO FUNCIONA
+════════════════════════════════════════════════════ -->
+<section id="como-funciona" class="bg-slate-900 py-24 relative overflow-hidden">
+  <div class="absolute inset-0 hero-grid opacity-40"></div>
+  <div class="absolute top-0 left-1/2 -translate-x-1/2 w-px h-full bg-gradient-to-b from-transparent via-indigo-500/20 to-transparent"></div>
+
+  <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-16" data-aos="fade-up">
+      <span class="text-indigo-400 font-semibold text-sm uppercase tracking-widest">Simples assim</span>
+      <h2 class="text-4xl font-black mt-3 mb-4">Comece em <span class="gradient-text">3 passos</span></h2>
+      <p class="text-slate-400 text-lg max-w-xl mx-auto">Do cadastro ao sistema funcionando em menos de 10 minutos.</p>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-8 relative">
+      <!-- Connecting line -->
+      <div class="hidden md:block absolute top-10 left-1/3 right-1/3 h-px bg-gradient-to-r from-indigo-500/40 to-violet-500/40"></div>
+
+      {% for step in steps %}
+      <div class="text-center" data-aos="fade-up" data-aos-delay="{{ forloop.counter0 }}50">
+        <div class="w-20 h-20 rounded-2xl gradient-bg mx-auto mb-6 flex items-center justify-center shadow-2xl shadow-indigo-500/30 relative">
+          <span class="text-2xl font-black">{{ step.num }}</span>
+          {% if not forloop.last %}
+          <div class="hidden md:block absolute -right-10 top-1/2 -translate-y-1/2">
+            <svg class="w-5 h-5 text-indigo-500/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </div>
+          {% endif %}
+        </div>
+        <h3 class="font-bold text-xl mb-3">{{ step.title }}</h3>
+        <p class="text-slate-400 text-sm leading-relaxed">{{ step.desc }}</p>
+      </div>
+      {% empty %}
+      <div class="text-center" data-aos="fade-up" data-aos-delay="0">
+        <div class="w-20 h-20 rounded-2xl gradient-bg mx-auto mb-6 flex items-center justify-center shadow-2xl shadow-indigo-500/30">
+          <span class="text-2xl font-black">1</span>
+        </div>
+        <h3 class="font-bold text-xl mb-3">Cadastre sua empresa</h3>
+        <p class="text-slate-400 text-sm leading-relaxed">Preencha o formulário com os dados básicos da empresa, escolha seu plano e defina o endereço de acesso.</p>
+      </div>
+      <div class="text-center" data-aos="fade-up" data-aos-delay="150">
+        <div class="w-20 h-20 rounded-2xl gradient-bg mx-auto mb-6 flex items-center justify-center shadow-2xl shadow-indigo-500/30">
+          <span class="text-2xl font-black">2</span>
+        </div>
+        <h3 class="font-bold text-xl mb-3">Configuramos tudo</h3>
+        <p class="text-slate-400 text-sm leading-relaxed">Nossa plataforma provisiona automaticamente um ambiente completo e exclusivo para sua empresa em poucos minutos.</p>
+      </div>
+      <div class="text-center" data-aos="fade-up" data-aos-delay="300">
+        <div class="w-20 h-20 rounded-2xl gradient-bg mx-auto mb-6 flex items-center justify-center shadow-2xl shadow-indigo-500/30">
+          <span class="text-2xl font-black">3</span>
+        </div>
+        <h3 class="font-bold text-xl mb-3">Comece a usar</h3>
+        <p class="text-slate-400 text-sm leading-relaxed">Acesse seu sistema pelo endereço exclusivo, importe seus dados e comece a gestão do seu negócio imediatamente.</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     PLANOS
+════════════════════════════════════════════════════ -->
+<section id="planos" class="bg-slate-50 py-24">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-16" data-aos="fade-up">
+      <span class="text-indigo-600 font-semibold text-sm uppercase tracking-widest">Transparência total</span>
+      <h2 class="text-4xl font-black text-slate-900 mt-3 mb-4">Planos para cada momento</h2>
+      <p class="text-slate-500 text-lg max-w-xl mx-auto">Comece pequeno e escale conforme seu negócio cresce. Sem taxas escondidas.</p>
+    </div>
+
+    <div class="grid sm:grid-cols-{% if planos|length == 2 %}2{% elif planos|length >= 3 %}3{% else %}1{% endif %} gap-8 max-w-5xl mx-auto">
+      {% for plano in planos %}
+      <div class="relative rounded-3xl overflow-hidden
+                  {% if plano.destaque %}
+                    bg-slate-900 text-white shadow-2xl shadow-indigo-500/20 ring-2 ring-indigo-500 scale-105
+                  {% else %}
+                    bg-white text-slate-900 shadow-lg border border-slate-200
+                  {% endif %}
+                  card-hover"
+           data-aos="fade-up" data-aos-delay="{{ forloop.counter0 }}00">
+
+        {% if plano.destaque %}
+        <div class="absolute top-0 inset-x-0 h-1 gradient-bg"></div>
+        <div class="absolute top-5 right-5">
+          <span class="gradient-bg text-white text-xs font-bold px-3 py-1 rounded-full">Mais popular</span>
+        </div>
+        {% endif %}
+
+        <div class="p-8">
+          <h3 class="font-bold text-2xl mb-1">{{ plano.nome }}</h3>
+          {% if plano.descricao %}
+          <p class="{% if plano.destaque %}text-slate-400{% else %}text-slate-500{% endif %} text-sm mb-6">{{ plano.descricao }}</p>
+          {% endif %}
+
+          <div class="flex items-end gap-1 mb-8">
+            <span class="{% if plano.destaque %}text-slate-400{% else %}text-slate-400{% endif %} text-lg font-medium">R$</span>
+            <span class="text-5xl font-black">{{ plano.preco_mensal|floatformat:"0" }}</span>
+            <span class="{% if plano.destaque %}text-slate-400{% else %}text-slate-500{% endif %} text-sm mb-1">/mês</span>
+          </div>
+
+          <a href="{% url 'landing:cadastro' %}?plano={{ plano.slug }}"
+             class="block text-center font-bold py-3.5 rounded-2xl mb-8 transition-all duration-200
+                    {% if plano.destaque %}
+                      gradient-bg hover:opacity-90 text-white shadow-lg shadow-indigo-500/30
+                    {% else %}
+                      bg-slate-900 hover:bg-slate-700 text-white
+                    {% endif %}">
+            Começar com {{ plano.nome }}
+          </a>
+
+          <div class="space-y-3">
+            {% if plano.max_usuarios %}
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 rounded-full {% if plano.destaque %}bg-indigo-500/20{% else %}bg-indigo-50{% endif %} flex items-center justify-center shrink-0">
+                <svg class="w-3 h-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                </svg>
+              </div>
+              <span class="text-sm {% if plano.destaque %}text-slate-300{% else %}text-slate-600{% endif %}">
+                {% if plano.max_usuarios == 0 %}Usuários ilimitados{% else %}Até {{ plano.max_usuarios }} usuário{{ plano.max_usuarios|pluralize:"s" }}{% endif %}
+              </span>
+            </div>
+            {% endif %}
+
+            {% if plano.max_empresas %}
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 rounded-full {% if plano.destaque %}bg-indigo-500/20{% else %}bg-indigo-50{% endif %} flex items-center justify-center shrink-0">
+                <svg class="w-3 h-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                </svg>
+              </div>
+              <span class="text-sm {% if plano.destaque %}text-slate-300{% else %}text-slate-600{% endif %}">
+                {% if plano.max_empresas == 0 %}Empresas ilimitadas{% else %}Até {{ plano.max_empresas }} empresa{{ plano.max_empresas|pluralize:"s" }}{% endif %}
+              </span>
+            </div>
+            {% endif %}
+
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 rounded-full {% if plano.destaque %}bg-indigo-500/20{% else %}bg-indigo-50{% endif %} flex items-center justify-center shrink-0">
+                <svg class="w-3 h-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                </svg>
+              </div>
+              <span class="text-sm {% if plano.destaque %}text-slate-300{% else %}text-slate-600{% endif %}">
+                {{ plano.recursos_cpu }} vCPU / {{ plano.recursos_ram_gb }}GB RAM
+              </span>
+            </div>
+
+            {% for modulo in plano.modulos_inclusos.all %}
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 rounded-full {% if plano.destaque %}bg-indigo-500/20{% else %}bg-indigo-50{% endif %} flex items-center justify-center shrink-0">
+                <svg class="w-3 h-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                </svg>
+              </div>
+              <span class="text-sm {% if plano.destaque %}text-slate-300{% else %}text-slate-600{% endif %}">{{ modulo.nome }}</span>
+            </div>
+            {% endfor %}
+
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 rounded-full {% if plano.destaque %}bg-indigo-500/20{% else %}bg-indigo-50{% endif %} flex items-center justify-center shrink-0">
+                <svg class="w-3 h-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                </svg>
+              </div>
+              <span class="text-sm {% if plano.destaque %}text-slate-300{% else %}text-slate-600{% endif %}">Suporte via e-mail</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <p class="text-center text-slate-400 text-sm mt-10" data-aos="fade-up">
+      Não sabe qual plano escolher? <a href="#" class="text-indigo-600 hover:underline font-medium">Fale conosco</a> e te ajudamos.
+    </p>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════
+     CTA FINAL
+════════════════════════════════════════════════════ -->
+<section class="bg-slate-900 py-24 relative overflow-hidden">
+  <div class="absolute inset-0 hero-grid opacity-30"></div>
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[300px] bg-indigo-600/15 rounded-full blur-3xl pointer-events-none"></div>
+
+  <div class="relative max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center" data-aos="fade-up">
+    <h2 class="text-4xl sm:text-5xl font-black mb-6">
+      Pronto para automatizar<br>seu negócio?
+    </h2>
+    <p class="text-slate-400 text-lg mb-10 max-w-xl mx-auto">
+      Crie sua conta agora e tenha um sistema completo funcionando em minutos. Sem complicação.
+    </p>
+    <a href="{% url 'landing:cadastro' %}"
+       class="inline-block gradient-bg hover:opacity-90 text-white font-bold px-10 py-5 rounded-2xl text-lg shadow-2xl shadow-indigo-500/30 transition-all duration-200">
+      Começar grátis agora →
+    </a>
+    <p class="text-slate-500 text-sm mt-5">Configuração automática · Sem cartão de crédito · Suporte incluído</p>
+  </div>
+</section>
+
+{% endblock %}

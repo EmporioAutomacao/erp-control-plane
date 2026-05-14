@@ -1,0 +1,213 @@
+[
+{
+  "model": "registry.modulo",
+  "pk": "assistente_comercial",
+  "fields": {
+    "nome": "Assistente Comercial",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
+  "pk": "cobranca",
+  "fields": {
+    "nome": "Cobrança",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
+  "pk": "contratos",
+  "fields": {
+    "nome": "Contratos",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
+  "pk": "ecommerce",
+  "fields": {
+    "nome": "E-Commerce",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
+  "pk": "financeiro",
+  "fields": {
+    "nome": "Financeiro",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
+  "pk": "flexo",
+  "fields": {
+    "nome": "Flexo",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
+  "pk": "marketing",
+  "fields": {
+    "nome": "Marketing",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
+  "pk": "mercadolivre",
+  "fields": {
+    "nome": "Mercado Livre",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
+  "pk": "metas",
+  "fields": {
+    "nome": "Metas Gamificadas",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
+  "pk": "notificacoes",
+  "fields": {
+    "nome": "Notificações",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
+  "pk": "radar_empresarial",
+  "fields": {
+    "nome": "Radar Empresarial",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
+  "pk": "tarefas",
+  "fields": {
+    "nome": "Tarefas",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
+  "pk": "yampi",
+  "fields": {
+    "nome": "Yampi",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.plano",
+  "pk": "enterprise",
+  "fields": {
+    "nome": "Enterprise",
+    "descricao": "",
+    "preco_mensal": "30.00",
+    "max_usuarios": 0,
+    "max_empresas": 0,
+    "recursos_cpu": 4,
+    "recursos_ram_gb": 8,
+    "ativo": true,
+    "destaque": false,
+    "ordem": 3,
+    "modulos_inclusos": [
+      "assistente_comercial",
+      "cobranca",
+      "contratos",
+      "ecommerce",
+      "financeiro",
+      "flexo",
+      "marketing",
+      "mercadolivre",
+      "metas",
+      "notificacoes",
+      "radar_empresarial",
+      "tarefas",
+      "yampi"
+    ]
+  }
+},
+{
+  "model": "registry.plano",
+  "pk": "pro",
+  "fields": {
+    "nome": "Pro",
+    "descricao": "",
+    "preco_mensal": "20.00",
+    "max_usuarios": 20,
+    "max_empresas": 3,
+    "recursos_cpu": 2,
+    "recursos_ram_gb": 4,
+    "ativo": true,
+    "destaque": true,
+    "ordem": 2,
+    "modulos_inclusos": [
+      "assistente_comercial",
+      "cobranca",
+      "contratos",
+      "ecommerce",
+      "financeiro",
+      "marketing",
+      "metas",
+      "notificacoes",
+      "radar_empresarial",
+      "tarefas"
+    ]
+  }
+},
+{
+  "model": "registry.plano",
+  "pk": "starter",
+  "fields": {
+    "nome": "Starter",
+    "descricao": "",
+    "preco_mensal": "10.00",
+    "max_usuarios": 5,
+    "max_empresas": 1,
+    "recursos_cpu": 1,
+    "recursos_ram_gb": 2,
+    "ativo": true,
+    "destaque": false,
+    "ordem": 1,
+    "modulos_inclusos": [
+      "contratos",
+      "financeiro",
+      "notificacoes",
+      "tarefas"
+    ]
+  }
+}
+]
