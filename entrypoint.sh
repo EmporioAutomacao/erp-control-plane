@@ -8,6 +8,7 @@ done
 echo "[CP] PostgreSQL disponível."
 
 python manage.py migrate --noinput
+python manage.py loaddata registry/fixtures/initial_data.json
 python manage.py collectstatic --noinput --clear
 
 exec gunicorn core.wsgi:application \
