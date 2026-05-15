@@ -10,7 +10,7 @@ services:
     environment:
       SECRET_KEY: "${SECRET_KEY}"
       DEBUG: "false"
-      ALLOWED_HOSTS: "${CP_DOMAIN:-ararasuite.com.br}"
+      ALLOWED_HOSTS: "${CP_DOMAIN}"
       POSTGRES_DB: "${POSTGRES_DB:-erp_cp}"
       POSTGRES_USER: "${POSTGRES_USER:-erp_cp}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
@@ -18,8 +18,8 @@ services:
       POSTGRES_PORT: "5432"
       REDIS_URL: "redis://redis:6379/0"
       TENANTS_BASE_PATH: "/opt/tenants"
-      ERP_DOMAIN: "${CP_DOMAIN:-ararasuite.com.br}"
-      SAAS_DOMAIN: "${CP_DOMAIN:-ararasuite.com.br}"
+      ERP_DOMAIN: "${CP_DOMAIN}"
+      SAAS_DOMAIN: "${CP_DOMAIN}"
       ERP_LATEST_VERSION: "${ERP_LATEST_VERSION:-latest}"
       PROVISIONING_CHECK_HTTP: "true"
       EMAIL_HOST: "${EMAIL_HOST}"
@@ -49,12 +49,12 @@ services:
         max_attempts: 3
       labels:
         - "traefik.enable=true"
-        - "traefik.http.routers.ararasuite-cp.rule=Host(`${CP_DOMAIN:-ararasuite.com.br}`)"
+        - "traefik.http.routers.ararasuite-cp.rule=Host(`${CP_DOMAIN}`)"
         - "traefik.http.routers.ararasuite-cp.entrypoints=websecure"
         - "traefik.http.routers.ararasuite-cp.tls.certresolver=le"
         - "traefik.http.services.ararasuite-cp.loadbalancer.server.port=8000"
         - "traefik.http.middlewares.ararasuite-cp-redirect.redirectscheme.scheme=https"
-        - "traefik.http.routers.ararasuite-cp-http.rule=Host(`${CP_DOMAIN:-ararasuite.com.br}`)"
+        - "traefik.http.routers.ararasuite-cp-http.rule=Host(`${CP_DOMAIN}`)"
         - "traefik.http.routers.ararasuite-cp-http.entrypoints=web"
         - "traefik.http.routers.ararasuite-cp-http.middlewares=ararasuite-cp-redirect"
 
@@ -71,7 +71,7 @@ services:
       POSTGRES_PORT: "5432"
       REDIS_URL: "redis://redis:6379/0"
       TENANTS_BASE_PATH: "/opt/tenants"
-      ERP_DOMAIN: "${CP_DOMAIN:-ararasuite.com.br}"
+      ERP_DOMAIN: "${CP_DOMAIN}"
       ERP_LATEST_VERSION: "${ERP_LATEST_VERSION:-latest}"
       PROVISIONING_CHECK_HTTP: "true"
     volumes:
