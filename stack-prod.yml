@@ -11,6 +11,7 @@ services:
       SECRET_KEY: "${SECRET_KEY}"
       DEBUG: "false"
       ALLOWED_HOSTS: "${CP_DOMAIN}"
+      CSRF_TRUSTED_ORIGINS: "https://${CP_DOMAIN}"
       POSTGRES_DB: "${POSTGRES_DB:-erp_cp}"
       POSTGRES_USER: "${POSTGRES_USER:-erp_cp}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
