@@ -58,13 +58,8 @@ services:
       labels:
         - "traefik.enable=true"
         - "traefik.http.routers.ararasuite-cp.rule=Host(`${CP_DOMAIN}`)"
-        - "traefik.http.routers.ararasuite-cp.entrypoints=websecure"
-        - "traefik.http.routers.ararasuite-cp.tls.certresolver=le"
+        - "traefik.http.routers.ararasuite-cp.entrypoints=web"
         - "traefik.http.services.ararasuite-cp.loadbalancer.server.port=8000"
-        - "traefik.http.middlewares.ararasuite-cp-redirect.redirectscheme.scheme=https"
-        - "traefik.http.routers.ararasuite-cp-http.rule=Host(`${CP_DOMAIN}`)"
-        - "traefik.http.routers.ararasuite-cp-http.entrypoints=web"
-        - "traefik.http.routers.ararasuite-cp-http.middlewares=ararasuite-cp-redirect"
 
   celery:
     image: emporioautomacao/ararasuite-cp:${CP_VERSION:-latest}
