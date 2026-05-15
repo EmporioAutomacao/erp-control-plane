@@ -156,7 +156,7 @@ O stack usa `node.labels.region == {regiao}` para fixar todos os servicos no mes
 | `DJANGO_SUPERUSER_EMAIL` | e-mail do responsavel do tenant |
 | `DJANGO_SUPERUSER_PASSWORD` | senha temporaria gerada com `secrets.token_urlsafe(12)` |
 
-O arquivo `.env` e gravado em `TENANTS_BASE_PATH/{slug}/.env` com permissao `0600` como referencia; o entrypoint.sh do ERP le as variaveis diretamente do ambiente Docker.
+O arquivo `.env` e gravado em `CLIENTES_BASE_PATH/{slug}/.env` com permissao `0600` como referencia; o entrypoint.sh do ERP le as variaveis diretamente do ambiente Docker.
 
 ## 8. Responsabilidades do entrypoint do ERP
 
@@ -173,7 +173,7 @@ Nao ha `docker run --rm` externo para essas operacoes — elas ocorrem dentro do
 
 | Variavel | Padrao | Descricao |
 |---|---|---|
-| `TENANTS_BASE_PATH` | `/opt/tenants` | diretorio base onde ficam os stacks de cada tenant |
+| `CLIENTES_BASE_PATH` | `/opt/clientes` | diretorio base onde ficam os stacks de cada tenant |
 | `ERP_DOMAIN` | `ararasuite.com.br` | dominio base para os subdominios |
 | `PROVISIONING_CHECK_HTTP` | `true` | `false` em desenvolvimento local (sem Traefik/subdominio roteavel) |
 | `SAAS_DOMAIN` | `ararasuite.com.br` | usado na landing page para montar preview de subdominio |
@@ -236,7 +236,7 @@ if result.returncode != 0 and 'AlreadyExists' not in result.stderr:
 
 - O `ProvisioningEngine` depende do socket Docker do host (`docker.from_env()`); o control plane deve rodar no no manager do Swarm ou com acesso ao socket via volume.
 - A senha temporaria do superuser fica gravada no `ProvisionamentoLog` da etapa `criar_superuser` como `senha_temp:{valor}`. Deve ser redefinida pelo cliente no primeiro acesso.
-- O arquivo `.env` do tenant em `/opt/tenants/{slug}/.env` tem permissao `0600` e contem todas as credenciais da instancia — acesso restrito ao usuario do control plane.
+- O arquivo `.env` do tenant em `/opt/clientes/{slug}/.env` tem permissao `0600` e contem todas as credenciais da instancia — acesso restrito ao usuario do control plane.
 - `PROVISIONING_CHECK_HTTP=false` deve ser definido em desenvolvimento local, pois o subdominio `{slug}.ararasuite.com.br` nao resolve para `localhost`.
 
 ## 13. Documentos relacionados

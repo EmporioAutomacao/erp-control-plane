@@ -47,7 +47,7 @@ POST /comecar/  →  view cadastro()
             └── signal post_save  (registry/signals.py)
                     └── task_provisionar_cliente.delay(cliente.pk)  [Celery]
                             └── MotorProvisionamento.executar()
-                                    ├── gera .env e stack.yml em TENANTS_BASE_PATH/{slug}/
+                                    ├── gera .env e stack.yml em CLIENTES_BASE_PATH/{slug}/
                                     ├── docker stack deploy ... {slug}
                                     ├── aguarda {slug}_web ficar Running (180s)
                                     ├── aguarda GET /health/ → 200 (se CHECK_HTTP=true)
@@ -81,7 +81,7 @@ Cada etapa é registrada em `ProvisionamentoLog` via `MotorProvisionamento._log(
 
 ### Infraestrutura por cliente
 
-O `MotorProvisionamento` (`registry/provisioning.py`) gera um Docker Swarm stack com três serviços: `{slug}_web` (ERP Django), `{slug}_db` (PostgreSQL+pgvector), `{slug}_redis`. O placement usa `node.labels.region == {regiao}` do `HostInfraestrutura` associado. Os arquivos ficam em `TENANTS_BASE_PATH/{slug}/`.
+O `MotorProvisionamento` (`registry/provisioning.py`) gera um Docker Swarm stack com três serviços: `{slug}_web` (ERP Django), `{slug}_db` (PostgreSQL+pgvector), `{slug}_redis`. O placement usa `node.labels.region == {regiao}` do `HostInfraestrutura` associado. Os arquivos ficam em `CLIENTES_BASE_PATH/{slug}/`.
 
 ### Admin do django-celery-beat
 
@@ -122,7 +122,7 @@ O deploy é idempotente mas retorna erro se algum serviço já existe. O `MotorP
 | Variável | Padrão | Descrição |
 |---|---|---|
 | `PROVISIONING_CHECK_HTTP` | `true` | Setar `false` em dev local |
-| `TENANTS_BASE_PATH` | `/opt/tenants` | Diretório base dos stacks por cliente |
+| `CLIENTES_BASE_PATH` | `/opt/clientes` | Diretório base dos stacks por cliente |
 | `ERP_DOMAIN` | `ararasuite.com.br` | Domínio base dos subdominios |
 | `SAAS_DOMAIN` | `ararasuite.com.br` | Usado na landing para preview de subdomínio |
 | `ERP_LATEST_VERSION` | `0.0.22` | Versão do ERP para novos clientes |

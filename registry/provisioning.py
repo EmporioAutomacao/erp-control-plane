@@ -8,7 +8,7 @@ from pathlib import Path
 import docker
 from django.utils import timezone
 
-CLIENTES_BASE = Path(os.getenv('TENANTS_BASE_PATH', '/opt/tenants'))
+CLIENTES_BASE = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes'))
 ERP_IMAGE = 'emporioautomacao/erp'
 DOMAIN = os.getenv('ERP_DOMAIN', 'ararasuite.com.br')
 CHECK_HTTP_HEALTH = os.getenv('PROVISIONING_CHECK_HTTP', 'true').lower() == 'true'
