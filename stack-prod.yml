@@ -60,7 +60,7 @@ services:
 
   celery:
     image: emporioautomacao/ararasuite-cp:${CP_VERSION:-latest}
-    command: celery -A core worker --loglevel=info --concurrency=1
+    command: ["./entrypoint-worker.sh", "celery", "-A", "core", "worker", "--loglevel=info", "--concurrency=1"]
     environment:
       SECRET_KEY: "${SECRET_KEY}"
       DEBUG: "false"
@@ -93,7 +93,7 @@ services:
 
   beat:
     image: emporioautomacao/ararasuite-cp:${CP_VERSION:-latest}
-    command: celery -A core beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    command: ["./entrypoint-worker.sh", "celery", "-A", "core", "beat", "--loglevel=info", "--scheduler", "django_celery_beat.schedulers:DatabaseScheduler"]
     environment:
       SECRET_KEY: "${SECRET_KEY}"
       DEBUG: "false"
