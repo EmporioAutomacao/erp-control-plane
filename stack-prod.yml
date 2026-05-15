@@ -27,7 +27,7 @@ services:
       EMAIL_HOST_USER: "${EMAIL_HOST_USER}"
       EMAIL_HOST_PASSWORD: "${EMAIL_HOST_PASSWORD}"
       DEFAULT_FROM_EMAIL: "${DEFAULT_FROM_EMAIL}"
-      GUNICORN_WORKERS: "3"
+      GUNICORN_WORKERS: "${GUNICORN_WORKERS:-1}"
     volumes:
       - type: bind
         source: /var/run/docker.sock
@@ -60,7 +60,7 @@ services:
 
   celery:
     image: emporioautomacao/ararasuite-cp:${CP_VERSION:-latest}
-    command: celery -A core worker --loglevel=info --concurrency=2
+    command: celery -A core worker --loglevel=info --concurrency=1
     environment:
       SECRET_KEY: "${SECRET_KEY}"
       DEBUG: "false"
