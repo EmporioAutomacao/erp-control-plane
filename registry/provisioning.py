@@ -195,8 +195,13 @@ services:
       labels:
         - "traefik.enable=true"
         - "traefik.http.routers.{slug}-erp.rule=Host(`{subdominio}`)"
-        - "traefik.http.routers.{slug}-erp.entrypoints=web"
+        - "traefik.http.routers.{slug}-erp.entrypoints=websecure"
+        - "traefik.http.routers.{slug}-erp.tls.certresolver=le"
         - "traefik.http.services.{slug}-erp.loadbalancer.server.port=8000"
+        - "traefik.http.middlewares.{slug}-redirect.redirectscheme.scheme=https"
+        - "traefik.http.routers.{slug}-erp-http.rule=Host(`{subdominio}`)"
+        - "traefik.http.routers.{slug}-erp-http.entrypoints=web"
+        - "traefik.http.routers.{slug}-erp-http.middlewares={slug}-redirect"
 
   db:
     image: pgvector/pgvector:0.8.0-pg17
