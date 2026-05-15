@@ -18,6 +18,8 @@ services:
       POSTGRES_PORT: "5432"
       REDIS_URL: "redis://redis:6379/0"
       CLIENTES_BASE_PATH: "/opt/clientes"
+      CP_BACKUP_DIR: "${CP_BACKUP_DIR:-/opt/backups/cp}"
+      CP_BACKUP_MANTER: "${CP_BACKUP_MANTER:-7}"
       ERP_DOMAIN: "${CP_DOMAIN}"
       SAAS_DOMAIN: "${CP_DOMAIN}"
       ERP_LATEST_VERSION: "${ERP_LATEST_VERSION:-latest}"
@@ -35,6 +37,9 @@ services:
       - type: bind
         source: /opt/clientes
         target: /opt/clientes
+      - type: bind
+        source: /opt/backups/cp
+        target: /opt/backups/cp
     networks:
       - traefik-public
       - cp-internal
@@ -71,6 +76,8 @@ services:
       POSTGRES_PORT: "5432"
       REDIS_URL: "redis://redis:6379/0"
       CLIENTES_BASE_PATH: "/opt/clientes"
+      CP_BACKUP_DIR: "${CP_BACKUP_DIR:-/opt/backups/cp}"
+      CP_BACKUP_MANTER: "${CP_BACKUP_MANTER:-7}"
       ERP_DOMAIN: "${CP_DOMAIN}"
       ERP_LATEST_VERSION: "${ERP_LATEST_VERSION:-latest}"
       PROVISIONING_CHECK_HTTP: "true"
@@ -81,6 +88,9 @@ services:
       - type: bind
         source: /opt/clientes
         target: /opt/clientes
+      - type: bind
+        source: /opt/backups/cp
+        target: /opt/backups/cp
     networks:
       - cp-internal
     deploy:

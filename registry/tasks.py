@@ -1,5 +1,13 @@
+import logging
+import os
+import tarfile
+from datetime import datetime
+from pathlib import Path
+
 from celery import shared_task
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -79,6 +87,34 @@ def task_verificar_saude_todas():
     clientes = Cliente.objects.filter(status__in=['ativo', 'trial'])
     for cliente in clientes:
         task_verificar_saude_cliente.delay(str(cliente.pk))
+
+
+@shared_task
+def task_backup_clientes():
+    clientes_base = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes'))
+    backup_dir = Path(os.getenv('CP_BACKUP_DIR', '/opt/backups/cp'))
+    manter = int(os.getenv('CP_BACKUP_MANTER', '7'))
+
+    if not clientes_base.exists():
+        logger.warning('CLIENTES_BASE_PATH não existe: %s', clientes_base)
+        return
+
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    nome = f"clientes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.tar.gz"
+    destino = backup_dir / nome
+
+    with tarfile.open(destino, 'w:gz') as tar:
+        tar.add(clientes_base, arcname='clientes')
+
+    tamanho_mb = destino.stat().st_size / 1024 / 1024
+    logger.info('Backup criado: %s (%.1f MB)', destino, tamanho_mb)
+
+    # Remove backups antigos mantendo apenas os N mais recentes
+    backups = sorted(backup_dir.glob('clientes_*.tar.gz'), key=lambda p: p.stat().st_mtime)
+    for antigo in backups[:-manter]:
+        antigo.unlink()
+        logger.info('Backup antigo removido: %s', antigo)
 
 
 @shared_task
