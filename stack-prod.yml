@@ -18,15 +18,15 @@ services:
       POSTGRES_PORT: "5432"
       REDIS_URL: "redis://redis:6379/0"
       TENANTS_BASE_PATH: "/opt/tenants"
-      ERP_DOMAIN: "${ERP_DOMAIN:-ararasuite.com.br}"
-      SAAS_DOMAIN: "${SAAS_DOMAIN:-ararasuite.com.br}"
+      ERP_DOMAIN: "${CP_DOMAIN:-ararasuite.com.br}"
+      SAAS_DOMAIN: "${CP_DOMAIN:-ararasuite.com.br}"
       ERP_LATEST_VERSION: "${ERP_LATEST_VERSION:-latest}"
       PROVISIONING_CHECK_HTTP: "true"
       EMAIL_HOST: "${EMAIL_HOST}"
       EMAIL_PORT: "${EMAIL_PORT:-587}"
       EMAIL_HOST_USER: "${EMAIL_HOST_USER}"
       EMAIL_HOST_PASSWORD: "${EMAIL_HOST_PASSWORD}"
-      DEFAULT_FROM_EMAIL: "${DEFAULT_FROM_EMAIL:-noreply@ararasuite.com.br}"
+      DEFAULT_FROM_EMAIL: "${DEFAULT_FROM_EMAIL:-noreply@${CP_DOMAIN:-ararasuite.com.br}}"
       GUNICORN_WORKERS: "3"
     volumes:
       - type: bind
@@ -71,7 +71,7 @@ services:
       POSTGRES_PORT: "5432"
       REDIS_URL: "redis://redis:6379/0"
       TENANTS_BASE_PATH: "/opt/tenants"
-      ERP_DOMAIN: "${ERP_DOMAIN:-ararasuite.com.br}"
+      ERP_DOMAIN: "${CP_DOMAIN:-ararasuite.com.br}"
       ERP_LATEST_VERSION: "${ERP_LATEST_VERSION:-latest}"
       PROVISIONING_CHECK_HTTP: "true"
     volumes:
