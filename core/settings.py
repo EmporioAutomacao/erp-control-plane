@@ -24,16 +24,53 @@ INSTALLED_APPS = [
     'landing',
 ]
 
+from django.templatetags.static import static
+from django.urls import reverse_lazy
+
 UNFOLD = {
     "SITE_TITLE": "Painel de Controle AraraSuite",
     "SITE_HEADER": "AraraSuite",
     "SITE_SYMBOL": "hub",
     "SHOW_HISTORY": True,
     "SHOW_VIEW_ON_SITE": False,
+    "STYLES": [
+        lambda request: static("registry/admin_custom.css"),
+    ],
+    "SIDEBAR": {
+        "show_search": True,
+        "show_all_applications": False,
+        "navigation": [
+            {
+                "title": "Clientes",
+                "items": [
+                    {"title": "Clientes", "icon": "groups", "link": reverse_lazy("admin:registry_cliente_changelist")},
+                    {"title": "Planos", "icon": "workspace_premium", "link": reverse_lazy("admin:registry_plano_changelist")},
+                    {"title": "Módulos", "icon": "extension", "link": reverse_lazy("admin:registry_modulo_changelist")},
+                    {"title": "Hosts de Infraestrutura", "icon": "dns", "link": reverse_lazy("admin:registry_hostinfraestrutura_changelist")},
+                    {"title": "Verificações de Saúde", "icon": "monitor_heart", "link": reverse_lazy("admin:registry_verificacaosaude_changelist")},
+                ],
+            },
+            {
+                "title": "Agendamentos",
+                "items": [
+                    {"title": "Tarefas Periódicas", "icon": "schedule", "link": reverse_lazy("admin:django_celery_beat_periodictask_changelist")},
+                    {"title": "Intervalos", "icon": "timelapse", "link": reverse_lazy("admin:django_celery_beat_intervalschedule_changelist")},
+                    {"title": "Crontabs", "icon": "event_repeat", "link": reverse_lazy("admin:django_celery_beat_crontabschedule_changelist")},
+                ],
+            },
+            {
+                "title": "Configurações",
+                "items": [
+                    {"title": "E-Mail", "icon": "mail", "link": reverse_lazy("admin:registry_configuracaoemail_changelist")},
+                    {"title": "Ajuda", "icon": "help", "link": reverse_lazy("admin_ajuda")},
+                ],
+            },
+        ],
+    },
 }
 
 SAAS_DOMAIN = os.getenv('SAAS_DOMAIN', 'ararasuite.com.br')
-ERP_LATEST_VERSION = os.getenv('ERP_LATEST_VERSION', '0.0.22')
+ERP_LATEST_VERSION = os.getenv('ERP_LATEST_VERSION', '0.0.23')
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
