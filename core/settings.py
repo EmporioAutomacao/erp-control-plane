@@ -72,7 +72,7 @@ UNFOLD = {
 }
 
 SAAS_DOMAIN = os.getenv('SAAS_DOMAIN', 'ararasuite.com.br')
-ERP_LATEST_VERSION = os.getenv('ERP_LATEST_VERSION', '0.0.23')
+ERP_LATEST_VERSION = os.getenv('ERP_LATEST_VERSION', '0.0.24')
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
