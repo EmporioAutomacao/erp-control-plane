@@ -31,6 +31,16 @@
 },
 {
   "model": "registry.modulo",
+  "pk": "dedetizacao",
+  "fields": {
+    "nome": "Dedetização",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
   "pk": "ecommerce",
   "fields": {
     "nome": "E-Commerce",
@@ -147,6 +157,7 @@
       "assistente_comercial",
       "cobranca",
       "contratos",
+      "dedetizacao",
       "ecommerce",
       "financeiro",
       "flexo",
