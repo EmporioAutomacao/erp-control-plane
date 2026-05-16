@@ -1,0 +1,21 @@
+{% load i18n unfold %}
+
+<nav id="nav-sidebar-inner" class="bg-base-50 flex flex-col min-h-screen dark:text-font-default-dark dark:bg-base-950/20 {% element_classes 'navigation_inner' %}">
+    {% include "unfold/helpers/navigation_header.html" %}
+
+    {% include "unfold/helpers/search.html" %}
+
+    {% if sidebar_navigation|length > 0 %}
+        {% include "unfold/helpers/app_list.html" with app_list=available_apps %}
+    {% else %}
+        {% include "admin/app_list.html" with app_list=available_apps show_changelinks=False %}
+    {% endif %}
+
+    {% if app_version %}
+    <div class="border-t border-base-200 px-6 py-2 text-[11px] leading-none text-base-400 dark:border-base-800 dark:text-base-500" aria-label="Versao da aplicacao">
+        CP v{{ app_version }}
+    </div>
+    {% endif %}
+
+    {% include "unfold/helpers/navigation_user.html" %}
+</nav>
