@@ -39,6 +39,10 @@ services:
         source: /var/run/docker.sock
         target: /var/run/docker.sock
       - type: bind
+        source: /root/.docker
+        target: /root/.docker
+        read_only: true
+      - type: bind
         source: /opt/clientes
         target: /opt/clientes
       - type: bind
@@ -84,6 +88,10 @@ services:
       - type: bind
         source: /var/run/docker.sock
         target: /var/run/docker.sock
+      - type: bind
+        source: /root/.docker
+        target: /root/.docker
+        read_only: true
       - type: bind
         source: /opt/clientes
         target: /opt/clientes

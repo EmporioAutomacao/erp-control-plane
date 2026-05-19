@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>Bem-vindo ao AraraSuite</title>
+</head>
+<body style="margin:0;padding:0;background-color:#0f172a;font-family:'Inter',Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+
+<!-- Preheader oculto -->
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">
+  Sua instância do AraraSuite está sendo preparada. Confira seus dados de acesso.
+</div>
+
+<!-- Wrapper -->
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0f172a;min-height:100vh;">
+  <tr>
+    <td align="center" style="padding:40px 16px;">
+
+      <!-- Container -->
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
+
+        <!-- ═══ HEADER ═══ -->
+        <tr>
+          <td style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:20px 20px 0 0;padding:36px 40px;text-align:center;">
+            <!-- Logo mark -->
+            <div style="display:inline-block;width:52px;height:52px;background:rgba(255,255,255,.15);border-radius:14px;margin-bottom:16px;line-height:52px;text-align:center;">
+              <span style="font-size:26px;line-height:52px;">⚡</span>
+            </div>
+            <div>
+              <span style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;">Arara</span><span style="font-size:22px;font-weight:800;color:rgba(255,255,255,.65);letter-spacing:-0.5px;">Suite</span>
+            </div>
+            <p style="margin:6px 0 0;font-size:13px;color:rgba(255,255,255,.6);letter-spacing:.5px;text-transform:uppercase;">Painel de Gestão Empresarial</p>
+          </td>
+        </tr>
+
+        <!-- ═══ HERO ═══ -->
+        <tr>
+          <td style="background-color:#1e293b;padding:44px 40px 32px;text-align:center;">
+            <h1 style="margin:0 0 12px;font-size:30px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;line-height:1.2;">
+              Bem-vindo, <span style="background:linear-gradient(135deg,#818cf8,#c084fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">{{ cliente.nome }}</span>!
+            </h1>
+            <p style="margin:0;font-size:16px;color:#94a3b8;line-height:1.6;max-width:460px;display:inline-block;">
+              Seu ambiente exclusivo no AraraSuite está sendo configurado agora. Em breve tudo estará pronto para você começar.
+            </p>
+          </td>
+        </tr>
+
+        <!-- ═══ CARD DADOS DE ACESSO ═══ -->
+        <tr>
+          <td style="background-color:#1e293b;padding:0 40px 32px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0f172a;border:1px solid #334155;border-radius:16px;overflow:hidden;">
+              <tr>
+                <td style="padding:20px 24px 14px;">
+                  <p style="margin:0;font-size:11px;font-weight:700;color:#6366f1;letter-spacing:1.5px;text-transform:uppercase;">Dados de acesso</p>
+                </td>
+              </tr>
+
+              <!-- Linha: URL -->
+              <tr>
+                <td style="padding:10px 24px;border-top:1px solid #1e293b;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="font-size:13px;color:#64748b;width:130px;">Endereço</td>
+                      <td style="font-size:13px;font-weight:600;">
+                        <a href="{{ cliente.url }}" style="color:#818cf8;text-decoration:none;">{{ cliente.url }}</a>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <!-- Linha: Usuário -->
+              <tr>
+                <td style="padding:10px 24px;border-top:1px solid #1e293b;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="font-size:13px;color:#64748b;width:130px;">Usuário</td>
+                      <td style="font-size:13px;font-weight:600;color:#e2e8f0;font-family:'Courier New',monospace;">admin</td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              {% if senha %}
+              <!-- Linha: Senha -->
+              <tr>
+                <td style="padding:10px 24px;border-top:1px solid #1e293b;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="font-size:13px;color:#64748b;width:130px;">Senha inicial</td>
+                      <td>
+                        <span style="display:inline-block;font-size:13px;font-weight:700;color:#f1f5f9;font-family:'Courier New',monospace;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:3px 10px;">{{ senha }}</span>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              {% endif %}
+
+              <!-- Linha: Empresa -->
+              <tr>
+                <td style="padding:10px 24px;border-top:1px solid #1e293b;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="font-size:13px;color:#64748b;width:130px;">Empresa</td>
+                      <td style="font-size:13px;color:#e2e8f0;">{{ cliente.nome }}</td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <!-- Linha: Plano -->
+              <tr>
+                <td style="padding:10px 24px 20px;border-top:1px solid #1e293b;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="font-size:13px;color:#64748b;width:130px;">Plano</td>
+                      <td>
+                        <span style="display:inline-block;font-size:12px;font-weight:700;color:#818cf8;background:rgba(99,102,241,.15);border-radius:20px;padding:2px 10px;">{{ cliente.plano.nome }}</span>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+
+        <!-- ═══ CTA ═══ -->
+        <tr>
+          <td style="background-color:#1e293b;padding:0 40px 36px;text-align:center;">
+            <a href="{{ cliente.url }}" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 36px;border-radius:14px;letter-spacing:-.1px;">
+              Acessar meu sistema →
+            </a>
+            <p style="margin:16px 0 0;font-size:12px;color:#475569;">
+              Ou acesse diretamente: <a href="{{ cliente.url }}" style="color:#818cf8;">{{ cliente.url }}</a>
+            </p>
+          </td>
+        </tr>
+
+        <!-- ═══ PRÓXIMOS PASSOS ═══ -->
+        <tr>
+          <td style="background-color:#0f172a;border:1px solid #1e293b;border-radius:0;padding:32px 40px;">
+            <p style="margin:0 0 20px;font-size:11px;font-weight:700;color:#64748b;letter-spacing:1.5px;text-transform:uppercase;">O que acontece agora?</p>
+
+            <!-- Passo 1 -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:16px;">
+              <tr>
+                <td width="32" valign="top">
+                  <div style="width:26px;height:26px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:50%;text-align:center;line-height:26px;font-size:12px;font-weight:700;color:#ffffff;">1</div>
+                </td>
+                <td style="padding-left:12px;font-size:14px;color:#94a3b8;line-height:1.6;">
+                  Sua instância exclusiva está sendo criada na nossa infraestrutura.
+                </td>
+              </tr>
+            </table>
+
+            <!-- Passo 2 -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:16px;">
+              <tr>
+                <td width="32" valign="top">
+                  <div style="width:26px;height:26px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:50%;text-align:center;line-height:26px;font-size:12px;font-weight:700;color:#ffffff;">2</div>
+                </td>
+                <td style="padding-left:12px;font-size:14px;color:#94a3b8;line-height:1.6;">
+                  O banco de dados e os módulos do plano <strong style="color:#e2e8f0;">{{ cliente.plano.nome }}</strong> serão configurados automaticamente.
+                </td>
+              </tr>
+            </table>
+
+            <!-- Passo 3 -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:16px;">
+              <tr>
+                <td width="32" valign="top">
+                  <div style="width:26px;height:26px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:50%;text-align:center;line-height:26px;font-size:12px;font-weight:700;color:#ffffff;">3</div>
+                </td>
+                <td style="padding-left:12px;font-size:14px;color:#94a3b8;line-height:1.6;">
+                  Acesse <strong style="color:#818cf8;">{{ cliente.url }}</strong> com as credenciais acima e comece a usar seu sistema.
+                </td>
+              </tr>
+            </table>
+
+            <!-- Passo 4 -->
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td width="32" valign="top">
+                  <div style="width:26px;height:26px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:50%;text-align:center;line-height:26px;font-size:12px;font-weight:700;color:#ffffff;">4</div>
+                </td>
+                <td style="padding-left:12px;font-size:14px;color:#94a3b8;line-height:1.6;">
+                  Qualquer dúvida, entre em contato com nosso suporte — estamos aqui para ajudar.
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- ═══ FOOTER ═══ -->
+        <tr>
+          <td style="background-color:#020617;border-radius:0 0 20px 20px;padding:28px 40px;text-align:center;">
+            <p style="margin:0 0 8px;font-size:14px;font-weight:700;color:#475569;">
+              <span style="color:#6366f1;">Arara</span><span style="color:#475569;">Suite</span>
+            </p>
+            <p style="margin:0 0 12px;font-size:12px;color:#334155;line-height:1.6;">
+              Sistema de gestão empresarial para pequenas e médias empresas.<br>
+              contato@ararasuite.com.br
+            </p>
+            <p style="margin:0;font-size:11px;color:#1e293b;">
+              © 2026 AraraSuite. Todos os direitos reservados.
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
+
+</body>
+</html>

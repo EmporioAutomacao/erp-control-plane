@@ -118,6 +118,21 @@ def task_backup_clientes():
 
 
 @shared_task
+def task_enviar_email_boas_vindas(cliente_id):
+    from .models import Cliente
+    from .email import enviar_email_boas_vindas
+
+    try:
+        cliente = Cliente.objects.get(pk=cliente_id)
+    except Cliente.DoesNotExist:
+        return
+    try:
+        enviar_email_boas_vindas(cliente)
+    except Exception as exc:
+        logger.error('Falha ao enviar e-mail de boas-vindas para %s: %s', cliente_id, exc)
+
+
+@shared_task
 def task_verificar_saude_cliente(cliente_id):
     from .models import Cliente, VerificacaoSaude
     import urllib.request

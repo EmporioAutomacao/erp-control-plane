@@ -23,7 +23,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - tenants:/opt/clientes
     ports:
-      - "8000:8000"
+      - "8001:8000"
     env_file: .env
     environment:
       POSTGRES_HOST: db

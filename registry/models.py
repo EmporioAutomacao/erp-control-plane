@@ -182,6 +182,32 @@ class AtualizacaoVersao(models.Model):
         return f'{self.cliente.slug}: {self.versao_anterior} → {self.versao_nova}'
 
 
+class ConfiguracaoEmail(models.Model):
+    email_host = models.CharField(max_length=200, verbose_name='Servidor SMTP')
+    email_port = models.PositiveIntegerField(default=587, verbose_name='Porta')
+    email_use_tls = models.BooleanField(default=True, verbose_name='Usar TLS')
+    email_verificar_ssl = models.BooleanField(default=True, verbose_name='Verificar SSL', help_text='Desative se o certificado do servidor não corresponder ao hostname.')
+    email_host_user = models.CharField(max_length=200, verbose_name='Usuário SMTP')
+    email_host_password = models.CharField(max_length=200, verbose_name='Senha SMTP')
+    default_from_email = models.EmailField(verbose_name='E-mail remetente padrão')
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Configuração de E-mail'
+        verbose_name_plural = 'Configuração de E-mail'
+
+    def __str__(self):
+        return f'{self.email_host_user} via {self.email_host}:{self.email_port}'
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def obter(cls):
+        return cls.objects.filter(pk=1).first()
+
+
 class VerificacaoSaude(models.Model):
     cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='verificacoes_saude')
     verificado_em = models.DateTimeField(auto_now_add=True)

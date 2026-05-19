@@ -1,0 +1,39 @@
+/* Inputs visíveis no dark mode */
+.dark input[type="text"],
+.dark input[type="email"],
+.dark input[type="number"],
+.dark input[type="password"],
+.dark input[type="url"],
+.dark input[type="tel"],
+.dark input[type="date"],
+.dark input[type="datetime-local"],
+.dark select,
+.dark textarea {
+    border: 1px solid oklch(45% .02 264) !important;
+    background-color: oklch(22% .025 264) !important;
+    color: oklch(90% .005 264) !important;
+    border-radius: 6px;
+}
+
+.dark input[type="text"]:focus,
+.dark input[type="email"]:focus,
+.dark input[type="number"]:focus,
+.dark input[type="password"]:focus,
+.dark input[type="url"]:focus,
+.dark input[type="tel"]:focus,
+.dark input[type="date"]:focus,
+.dark input[type="datetime-local"]:focus,
+.dark select:focus,
+.dark textarea:focus {
+    border-color: oklch(62% .265 303) !important;
+    outline: none !important;
+    box-shadow: 0 0 0 2px oklch(62% .265 303 / 25%) !important;
+}
+
+/* Readonly / disabled */
+.dark input[readonly],
+.dark input[disabled] {
+    background-color: oklch(18% .02 264) !important;
+    color: oklch(55% .015 264) !important;
+    border-color: oklch(35% .02 264) !important;
+}

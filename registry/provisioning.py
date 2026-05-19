@@ -42,15 +42,24 @@ class MotorProvisionamento:
         self._log('escolher_host', 'concluido', f'Região: {regiao}')
 
         self._log('gerar_stack', 'executando')
-        db_password = secrets.token_hex(24)
-        secret_key = secrets.token_hex(50)
-        master_key = secrets.token_hex(32)
-        senha_temp = secrets.token_urlsafe(12)
         versao = self.cliente.versao_erp or 'latest'
         subdominio = self.cliente.subdominio
         modulos = ','.join(m.slug for m in self.cliente.modulos_ativos.all()) or 'financeiro,tarefas'
 
-        # .env salvo no manager como referência — não é lido pelo container
+        # Reusar credenciais existentes para não conflitar com o volume pgdata
+        env_file = cliente_dir / '.env'
+        env_existente = {}
+        if env_file.exists():
+            for linha in env_file.read_text().splitlines():
+                if '=' in linha:
+                    k, v = linha.split('=', 1)
+                    env_existente[k.strip()] = v.strip()
+
+        db_password = env_existente.get('POSTGRES_PASSWORD') or secrets.token_hex(24)
+        secret_key = env_existente.get('DJANGO_SECRET_KEY') or secrets.token_hex(50)
+        master_key = env_existente.get('EMPRESAS_CREDENCIAL_MASTER_KEY') or secrets.token_hex(32)
+        senha_temp = env_existente.get('DJANGO_SUPERUSER_PASSWORD') or secrets.token_urlsafe(12)
+
         env_vars = {
             'SLUG': slug,
             'POSTGRES_DB': f'erp_{slug}',
@@ -70,7 +79,6 @@ class MotorProvisionamento:
             'DJANGO_SUPERUSER_EMAIL': self.cliente.email_contato,
             'DJANGO_SUPERUSER_PASSWORD': senha_temp,
         }
-        env_file = cliente_dir / '.env'
         env_file.write_text('\n'.join(f'{k}={v}' for k, v in env_vars.items()))
         env_file.chmod(0o600)
 
@@ -117,6 +125,18 @@ class MotorProvisionamento:
             self._aguardar_http(f'https://{subdominio}/health/', timeout=120)
         from .models import Cliente
         Cliente.objects.filter(pk=self.cliente.pk).update(versao_erp=versao_nova)
+
+    def destruir(self):
+        import shutil
+        slug = self.cliente.slug
+        subprocess.run(['docker', 'stack', 'rm', slug], capture_output=True)
+        time.sleep(15)
+        for vol in [f'{slug}_pgdata', f'{slug}_media', f'{slug}_backups']:
+            subprocess.run(['docker', 'volume', 'rm', vol], capture_output=True)
+        cliente_dir = CLIENTES_BASE / slug
+        if cliente_dir.exists():
+            shutil.rmtree(cliente_dir)
+        self.cliente.delete()
 
     def suspender(self):
         subprocess.run(['docker', 'service', 'scale', f'{self.cliente.slug}_web=0'], check=True)

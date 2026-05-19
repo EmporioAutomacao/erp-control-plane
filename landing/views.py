@@ -56,6 +56,8 @@ def cadastro(request):
                 status='aguardando_provisao',
             )
             cliente.modulos_ativos.set(plano.modulos_inclusos.all())
+            from registry.tasks import task_enviar_email_boas_vindas
+            task_enviar_email_boas_vindas.delay(str(cliente.pk))
             return redirect('landing:sucesso', slug=slug)
     else:
         initial = {}

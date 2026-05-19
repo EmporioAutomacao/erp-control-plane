@@ -14,8 +14,8 @@ Este repositório é o **painel de controle SaaS** da plataforma AraraSuite — 
 # 1. Subir banco e Redis (necessário antes do runserver)
 docker compose -f docker-compose.dev.yml up -d db redis
 
-# 2. Servidor de desenvolvimento
-.\venv\Scripts\python.exe manage.py runserver
+# 2. Servidor de desenvolvimento (porta padrão 8000 ou escolha outra)
+.\venv\Scripts\python.exe manage.py runserver 8001
 
 # 3. Migrations
 .\venv\Scripts\python.exe manage.py migrate
@@ -25,6 +25,13 @@ docker compose -f docker-compose.dev.yml up -d db redis
 
 # 5. Shell Django
 .\venv\Scripts\python.exe manage.py shell
+
+# 6. Worker Celery (em terminal separado, para dev local sem Docker)
+.\venv\Scripts\python.exe -m celery -A core worker --loglevel=info
+
+# 7. Rebuild da imagem dev do Celery (após mudanças em requirements.txt)
+docker compose -f docker-compose.dev.yml build celery
+docker compose -f docker-compose.dev.yml up -d celery
 ```
 
 O banco PostgreSQL sobe na porta `5433` (mapeada de `5432` no container) e o Redis na `6380`. Configure no `.env` conforme `.env.example`.
@@ -37,36 +44,40 @@ O banco PostgreSQL sobe na porta `5433` (mapeada de `5432` no container) e o Red
 
 - **`registry`** — núcleo do sistema. Modelos de negócio, lógica de provisionamento, tasks Celery, admin.
 - **`landing`** — site público com formulário de cadastro que dispara o provisionamento.
-- **`core`** — settings, URLs raiz, configuração do Celery (`core/celery.py`).
+- **`core`** — settings, URLs raiz (`core/urls.py`).
 
-### Fluxo principal: cadastro → provisionamento
+### Fluxo principal: cadastro → provisionamento → e-mail
 
 ```
 POST /comecar/  →  view cadastro()
     └── Cliente.objects.create(status='aguardando_provisao')
-            └── signal post_save  (registry/signals.py)
-                    └── task_provisionar_cliente.delay(cliente.pk)  [Celery]
-                            └── MotorProvisionamento.executar()
-                                    ├── gera .env e stack.yml em CLIENTES_BASE_PATH/{slug}/
-                                    ├── docker stack deploy ... {slug}
-                                    ├── aguarda {slug}_web ficar Running (180s)
-                                    ├── aguarda GET /health/ → 200 (se CHECK_HTTP=true)
-                                    └── Cliente.status → 'ativo'
+            ├── signal post_save  (registry/signals.py)
+            │       └── task_provisionar_cliente.delay(cliente.pk)  [Celery]
+            │               └── MotorProvisionamento.executar()
+            │                       ├── gera .env e stack.yml em CLIENTES_BASE_PATH/{slug}/
+            │                       ├── docker stack deploy ... {slug}
+            │                       ├── aguarda {slug}_web ficar Running (180s)
+            │                       ├── aguarda GET /health/ → 200 (se CHECK_HTTP=true)
+            │                       └── Cliente.status → 'ativo'
+            └── task_enviar_email_boas_vindas.delay(cliente.pk)  [Celery]
+                    └── enviar_email_boas_vindas()  (registry/email.py)
+                            └── renderiza registry/email_boas_vindas.html → envia HTML
 ```
 
-Cada etapa é registrada em `ProvisionamentoLog` via `MotorProvisionamento._log()`. Em falha, Celery retenta até 3x (delay 60s) e o status vai para `erro_provisao`.
+Cada etapa de provisionamento é registrada em `ProvisionamentoLog` via `MotorProvisionamento._log()`. Em falha, Celery retenta até 3x (delay 60s) e o status vai para `erro_provisao`.
 
 ### Modelos principais (`registry/models.py`)
 
 | Modelo | Tabela | Descrição |
 |---|---|---|
-| `Cliente` | `registry_cliente` | Representa um cliente da plataforma (ex-`Tenant`) |
+| `Cliente` | `registry_cliente` | Representa um cliente da plataforma |
 | `Plano` | `registry_plano` | Planos comerciais com limites de recursos |
 | `Modulo` | `registry_modulo` | Módulos ativáveis no ERP |
 | `HostInfraestrutura` | `registry_hostinfraestrutura` | Nós do Swarm por região |
 | `ProvisionamentoLog` | `registry_provisionamentolog` | Log por etapa do provisionamento |
 | `AtualizacaoVersao` | `registry_atualizacaoversao` | Histórico de upgrades de versão |
 | `VerificacaoSaude` | `registry_verificacao_saude` | Snapshots de health check |
+| `ConfiguracaoEmail` | `registry_configuracaoemail` | Singleton com credenciais SMTP (pk=1 sempre) |
 
 ### Tasks Celery (`registry/tasks.py`)
 
@@ -78,14 +89,70 @@ Cada etapa é registrada em `ProvisionamentoLog` via `MotorProvisionamento._log(
 | `task_reativar_cliente` | Escala `{slug}_web` para 1 réplica |
 | `task_verificar_saude_todas` | Dispara health check em todos os clientes ativos/trial |
 | `task_verificar_saude_cliente` | Faz GET `/health/` e grava `VerificacaoSaude` |
+| `task_enviar_email_boas_vindas` | Renderiza e envia o e-mail HTML de boas-vindas |
+| `task_backup_clientes` | Gera `.tar.gz` do `CLIENTES_BASE_PATH` e mantém N versões |
 
 ### Infraestrutura por cliente
 
 O `MotorProvisionamento` (`registry/provisioning.py`) gera um Docker Swarm stack com três serviços: `{slug}_web` (ERP Django), `{slug}_db` (PostgreSQL+pgvector), `{slug}_redis`. O placement usa `node.labels.region == {regiao}` do `HostInfraestrutura` associado. Os arquivos ficam em `CLIENTES_BASE_PATH/{slug}/`.
 
+**Método `destruir()`:** remove o stack, aguarda 15s, remove volumes (`pgdata`, `media`, `backups`), apaga o diretório e deleta o registro do banco.
+
+**Reuso de credenciais no re-provisionamento:** ao re-provisionar, o motor lê o `.env` existente e reaproveita `POSTGRES_PASSWORD` e `DJANGO_SUPERUSER_PASSWORD` para não conflitar com volumes pgdata já existentes.
+
 ### Admin do django-celery-beat
 
 O admin do `django_celery_beat` é **completamente sobrescrito** em `registry/celery_beat_pt.py` e importado no final de `registry/admin.py`. Os verbose_names dos modelos são monkey-patched (ex: `PeriodicTask` → "Tarefa Periódica"). Não edite o admin do celery beat fora desse arquivo.
+
+## Sistema de e-mail (`registry/email.py`)
+
+**Regra crítica:** a configuração de e-mail vem **exclusivamente do banco** (`ConfiguracaoEmail`). Não há fallback para `.env` ou `settings.py`. Se não houver registro no banco, as funções lançam `RuntimeError`.
+
+### Funções
+
+| Função | Descrição |
+|---|---|
+| `obter_conexao_email()` | Retorna uma conexão SMTP configurada via DB |
+| `enviar_email(assunto, corpo, destinatarios, *, html=False)` | Envia e-mail simples ou HTML |
+| `enviar_email_boas_vindas(cliente)` | Renderiza `email_boas_vindas.html` e envia |
+
+### Backend sem verificação SSL
+
+`_SmtpSemVerificacaoSSL` — subclasse de `EmailBackend` que sobrescreve `ssl_context` com `check_hostname=False` e `CERT_NONE`. Usado quando `ConfiguracaoEmail.email_verificar_ssl=False`. Necessário para servidores com certificado self-signed ou hostname mismatch.
+
+### Template do e-mail (`registry/templates/registry/email_boas_vindas.html`)
+
+HTML puro com estilos inline (compatível com clientes de e-mail). Visual dark mode inspirado na landing page: fundo `#0f172a`, gradiente índigo→violeta, card de dados de acesso (URL, usuário `admin`, senha do `ProvisionamentoLog`), passos numerados e botão CTA.
+
+## Admin (`registry/admin.py`)
+
+### ClienteAdmin
+
+- **`status_badge`** — pill colorida por status usando `_STATUS_CORES`
+- **`painel_acesso`** — tabela com URL, usuário `admin` e senha inicial extraída do `ProvisionamentoLog` etapa `criar_superuser`
+- **`badge_isencao`** — badge visual de situação de cobrança
+- **`acoes_provisionamento`** — três botões: Re-provisionar, Destruir (com confirm), ✉ Reenviar Boas-vindas
+- **Ações em lote:** `acao_reprovisionar`, `acao_destruir`
+- **URLs customizadas:** `/<pk>/reprovisionar/`, `/<pk>/destruir/`, `/<pk>/reenviar-boas-vindas/`
+
+### ConfiguracaoEmailAdmin
+
+- Singleton — botão "Add" oculto se já existe registro; Delete desativado
+- Campo senha usa `PasswordInput(render_value=True)`
+- Botão **"Enviar e-mail de teste para mim"** chama `/_view_testar_email/` de forma síncrona
+- URL customizada: `/testar-email/`
+
+## Sidebar (UNFOLD)
+
+Definida em `core/settings.py` via `UNFOLD["SIDEBAR"]["navigation"]`. Grupos:
+
+| Grupo | Itens |
+|---|---|
+| Clientes | Clientes, Planos, Módulos, Hosts de Infraestrutura, Verificações de Saúde |
+| Agendamentos | Tarefas Periódicas, Intervalos, Crontabs |
+| Configurações | E-Mail, Ajuda |
+
+CSS customizado em `registry/static/registry/admin_custom.css` — melhora visibilidade de inputs no dark mode (bordas e fundo distintos do background).
 
 ## Padrões importantes
 
@@ -103,6 +170,8 @@ with open('registry/fixtures/initial_data.json', 'w', encoding='utf-8', newline=
     f.write(buf.getvalue())
 ```
 
+Pelo mesmo motivo, evite `print()` com caracteres especiais (`→`, `✓`, etc.) em shells Windows — use strings ASCII no console.
+
 ### Updates no Celery
 
 Dentro de tasks Celery, nunca use `instance.save(update_fields=[...])` — use sempre `Modelo.objects.filter(pk=id).update(...)`. O objeto em memória fica obsoleto entre retentativas e `save(update_fields=)` levanta `NotUpdated` se nenhuma linha for afetada.
@@ -111,11 +180,13 @@ Dentro de tasks Celery, nunca use `instance.save(update_fields=[...])` — use s
 
 O deploy é idempotente mas retorna erro se algum serviço já existe. O `MotorProvisionamento` trata isso ignorando erros que contenham `'AlreadyExists'` no stderr.
 
-### FKs e related_names
+### Worker Celery e dependências
 
-- `ProvisionamentoLog.cliente` → `related_name='logs'`
-- `AtualizacaoVersao.cliente` → `related_name='atualizacoes'`
-- `VerificacaoSaude.cliente` → `related_name='verificacoes_saude'`
+O worker inicializa `django.setup()` completo, o que importa todos os `INSTALLED_APPS` inclusive `unfold`. Se a imagem Docker do worker for antiga (antes de `unfold` ser adicionado), ela vai falhar na inicialização. Solução: `docker compose -f docker-compose.dev.yml build celery`.
+
+### Auth do registry privado no Swarm
+
+O `stack-prod.yml` monta `/root/.docker` do host manager nos containers `web` e `celery` com `read_only: true`. Isso permite que `docker stack deploy --with-registry-auth` embuta as credenciais do DockerHub e os workers Swarm consigam puxar a imagem privada.
 
 ## Variáveis de ambiente relevantes
 
@@ -126,3 +197,5 @@ O deploy é idempotente mas retorna erro se algum serviço já existe. O `MotorP
 | `ERP_DOMAIN` | `ararasuite.com.br` | Domínio base dos subdominios |
 | `SAAS_DOMAIN` | `ararasuite.com.br` | Usado na landing para preview de subdomínio |
 | `ERP_LATEST_VERSION` | `0.0.22` | Versão do ERP para novos clientes |
+| `CP_BACKUP_DIR` | `/opt/backups/cp` | Destino dos backups do CLIENTES_BASE_PATH |
+| `CP_BACKUP_MANTER` | `7` | Quantos backups retener |

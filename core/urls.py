@@ -17,7 +17,10 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 
+from registry.views import admin_ajuda
+
 urlpatterns = [
     path('', include('landing.urls')),
     path('admin/', admin.site.urls),
+    path('admin/ajuda/', admin.site.admin_view(admin_ajuda), name='admin_ajuda'),
 ]
