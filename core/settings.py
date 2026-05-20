@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / '.env')
 
-VERSION = '0.0.12'
+VERSION = '0.0.13'
 
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-change-me')
 DEBUG = os.getenv('DEBUG', 'true').lower() in ('1', 'true', 'yes')
@@ -72,7 +72,7 @@ UNFOLD = {
 }
 
 SAAS_DOMAIN = os.getenv('SAAS_DOMAIN', 'ararasuite.com.br')
-ERP_LATEST_VERSION = os.getenv('ERP_LATEST_VERSION', '0.0.24')
+ERP_LATEST_VERSION = os.getenv('ERP_LATEST_VERSION', '0.0.26')
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',

@@ -45,6 +45,7 @@ class MotorProvisionamento:
         versao = self.cliente.versao_erp or 'latest'
         subdominio = self.cliente.subdominio
         modulos = ','.join(m.slug for m in self.cliente.modulos_ativos.all()) or 'financeiro,tarefas'
+        tema = self.cliente.tema_site or 'padrao'
 
         # Reusar credenciais existentes para não conflitar com o volume pgdata
         env_file = cliente_dir / '.env'
@@ -73,6 +74,7 @@ class MotorProvisionamento:
             'CSRF_TRUSTED_ORIGINS': f'https://{subdominio}',
             'DEBUG': 'false',
             'MODULOS_ATIVOS': modulos,
+            'TEMA_SITE': tema,
             'EMPRESAS_CREDENCIAL_MASTER_KEY': master_key,
             'BACKUP_DIR': '/app/backups',
             'DJANGO_SUPERUSER_USERNAME': 'admin',

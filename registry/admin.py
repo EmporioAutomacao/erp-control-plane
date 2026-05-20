@@ -104,7 +104,7 @@ class ClienteAdmin(ModelAdmin):
         ('Identificação', {'fields': ['id', 'slug', 'nome', 'cnpj', 'email_contato', 'telefone']}),
         ('Acesso', {'fields': ['painel_acesso']}),
         ('Infraestrutura', {'fields': ['host', 'versao_erp', 'stack_path', 'subdominio', 'dominio_custom']}),
-        ('Plano', {'fields': ['plano', 'modulos_ativos']}),
+        ('Plano', {'fields': ['plano', 'modulos_ativos', 'tema_site']}),
         ('Faturamento', {'fields': ['asaas_customer_id', 'asaas_subscription_id', 'badge_isencao', 'isento_cobranca', 'motivo_isencao']}),
         ('Status', {'fields': ['status_badge', 'status', 'trial_ate', 'data_ativacao', 'data_suspensao', 'data_cancelamento']}),
         ('Ações', {'fields': ['acoes_provisionamento']}),
@@ -154,37 +154,46 @@ class ClienteAdmin(ModelAdmin):
 
         cliente = get_object_or_404(Cliente, pk=pk)
         modulos = ','.join(m.slug for m in cliente.modulos_ativos.all()) or 'financeiro,tarefas'
+        tema = cliente.tema_site or 'padrao'
 
         base_path = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes'))
         env_file = base_path / cliente.slug / '.env'
         if env_file.exists():
             linhas = env_file.read_text().splitlines()
             novas = []
-            encontrou = False
+            achou_modulos = achou_tema = False
             for linha in linhas:
                 if linha.startswith('MODULOS_ATIVOS='):
                     novas.append(f'MODULOS_ATIVOS={modulos}')
-                    encontrou = True
+                    achou_modulos = True
+                elif linha.startswith('TEMA_SITE='):
+                    novas.append(f'TEMA_SITE={tema}')
+                    achou_tema = True
                 else:
                     novas.append(linha)
-            if not encontrou:
+            if not achou_modulos:
                 novas.append(f'MODULOS_ATIVOS={modulos}')
+            if not achou_tema:
+                novas.append(f'TEMA_SITE={tema}')
             env_file.write_text('\n'.join(novas))
 
         service_name = f'{cliente.slug}_web'
         try:
             result = subprocess.run(
-                ['docker', 'service', 'update', '--detach', '--env-add', f'MODULOS_ATIVOS={modulos}', service_name],
+                ['docker', 'service', 'update', '--detach',
+                 '--env-add', f'MODULOS_ATIVOS={modulos}',
+                 '--env-add', f'TEMA_SITE={tema}',
+                 service_name],
                 capture_output=True, text=True, timeout=30,
             )
             if result.returncode == 0:
                 messages.success(
                     request,
-                    f'Módulos enviados para "{cliente.slug}": {modulos}. '
+                    f'Configurações aplicadas para "{cliente.slug}": módulos={modulos}, tema={tema}. '
                     f'O serviço está reiniciando — aguarde ~30s e recarregue o ERP.',
                 )
             elif 'not found' in result.stderr:
-                messages.info(request, 'Módulos salvos no .env. O cliente ainda não está provisionado — serão aplicados no próximo provisionamento.')
+                messages.info(request, 'Configurações salvas no .env. O cliente ainda não está provisionado — serão aplicadas no próximo provisionamento.')
             else:
                 messages.warning(request, f'.env atualizado, mas falha ao atualizar serviço Docker: {result.stderr.strip()}')
         except Exception as exc:
@@ -253,10 +262,10 @@ class ClienteAdmin(ModelAdmin):
         url_modulos = reverse('admin:registry_cliente_aplicar_modulos', args=[obj.pk])
         return format_html(
             '<p style="margin:0 0 10px;padding:8px 12px;background:#fff8e1;border-left:4px solid #f9a825;font-size:12px;color:#5d4037;">'
-            '⚠️ <strong>Salve o formulário antes</strong> de aplicar — o botão lê os módulos já gravados no banco.'
+            '⚠️ <strong>Salve o formulário antes</strong> de aplicar — o botão lê os módulos e o tema já gravados no banco.'
             '</p>'
             '<a href="{}" style="display:inline-block;padding:6px 14px;background:#2e7d32;color:#fff;border-radius:4px;text-decoration:none;font-size:13px;" '
-            'onclick="return confirm(\'O serviço web do cliente será reiniciado para aplicar os módulos selecionados (leva ~30s). Continuar?\')">⚙ Aplicar Módulos</a>'
+            'onclick="return confirm(\'O serviço web do cliente será reiniciado para aplicar os módulos e o tema selecionados (leva ~30s). Continuar?\')">⚙ Aplicar Configurações</a>'
             '&nbsp;&nbsp;'
             '<a href="{}" style="display:inline-block;padding:6px 14px;background:#417690;color:#fff;border-radius:4px;text-decoration:none;font-size:13px;" '
             'onclick="return confirm(\'ATENÇÃO: Faça backup do banco do cliente ANTES de re-provisionar. Dados podem ser perdidos se houver conflito de volume.\\n\\nConfirma que o backup foi realizado e deseja continuar?\')">Re-provisionar</a>'

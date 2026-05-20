@@ -90,8 +90,21 @@ class Cliente(models.Model):
     subdominio = models.CharField(max_length=100, unique=True)
     dominio_custom = models.CharField(max_length=200, blank=True)
 
+    TEMA_CHOICES = [
+        ('padrao', 'Padrão (e-commerce)'),
+        ('dedetizadora', 'Dedetizadora (verde)'),
+        ('dedetizadora2', 'Dedetizadora 2 (azul + animações)'),
+    ]
+
     plano = models.ForeignKey(Plano, on_delete=models.PROTECT)
     modulos_ativos = models.ManyToManyField(Modulo, blank=True)
+    tema_site = models.CharField(
+        max_length=50,
+        choices=TEMA_CHOICES,
+        default='padrao',
+        verbose_name='Tema do site',
+        help_text='Template visual da landing page pública do cliente.',
+    )
 
     asaas_customer_id = models.CharField(max_length=100, blank=True)
     asaas_subscription_id = models.CharField(max_length=100, blank=True)
