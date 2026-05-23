@@ -6,7 +6,7 @@ from django.urls import path
 from django.shortcuts import get_object_or_404, redirect
 from django.utils.html import format_html, mark_safe
 from unfold.admin import ModelAdmin
-from .models import Modulo, Plano, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail
+from .models import Modulo, Plano, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare
 
 
 @admin.register(Modulo)
@@ -278,9 +278,11 @@ class ClienteAdmin(ModelAdmin):
         import os
         import requests as _requests
 
-        token = os.getenv('CF_API_TOKEN', '').strip()
+        cfg = ConfiguracaoCloudflare.obter()
+        token = (cfg.cf_api_token if cfg else None) or os.getenv('CF_API_TOKEN', '')
+        token = token.strip()
         if not token:
-            return {'ok': False, 'erro': 'CF_API_TOKEN não configurado no .env do CP.'}
+            return {'ok': False, 'erro': 'Token Cloudflare não configurado. Acesse Configurações → Cloudflare no admin do CP.'}
 
         def _cf_raise(r):
             if not r.ok:
@@ -496,6 +498,81 @@ class ConfiguracaoEmailAdmin(ModelAdmin):
 
     def has_add_permission(self, request):
         return not ConfiguracaoEmail.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class _ConfiguracaoCloudflareForm(forms.ModelForm):
+    cf_api_token = forms.CharField(
+        label='API Token',
+        widget=forms.PasswordInput(render_value=True),
+        help_text='Token com permissões Zone:Read + DNS:Edit em All Zones. Criado em Cloudflare → My Profile → API Tokens.',
+    )
+
+    class Meta:
+        model = ConfiguracaoCloudflare
+        fields = '__all__'
+
+
+@admin.register(ConfiguracaoCloudflare)
+class ConfiguracaoCloudflareAdmin(ModelAdmin):
+    form = _ConfiguracaoCloudflareForm
+
+    fieldsets = [
+        ('Autenticação', {'fields': ['cf_api_token']}),
+        ('Servidor', {'fields': ['server_ip']}),
+        ('Verificar token', {'fields': ['botao_verificar_token']}),
+    ]
+    readonly_fields = ['atualizado_em', 'botao_verificar_token']
+
+    def get_urls(self):
+        urls = super().get_urls()
+        return [
+            path('verificar-token/', self.admin_site.admin_view(self._view_verificar_token), name='registry_configuracaocloudflare_verificar'),
+        ] + urls
+
+    def _view_verificar_token(self, request):
+        from django.contrib import messages
+        import requests as _requests
+        cfg = ConfiguracaoCloudflare.obter()
+        token = (cfg.cf_api_token if cfg else '').strip() or os.getenv('CF_API_TOKEN', '').strip()
+        if not token:
+            messages.error(request, 'Token não configurado.')
+            return redirect('admin:registry_configuracaocloudflare_changelist')
+        try:
+            r = _requests.get(
+                'https://api.cloudflare.com/client/v4/user/tokens/verify',
+                headers={'Authorization': f'Bearer {token}'},
+                timeout=10,
+            )
+            if r.ok:
+                status = r.json().get('result', {}).get('status', 'ativo')
+                messages.success(request, f'Token válido — status Cloudflare: {status}.')
+            else:
+                try:
+                    msg = r.json()['errors'][0]['message']
+                except Exception:
+                    msg = r.text
+                messages.error(request, f'Token inválido ({r.status_code}): {msg}')
+        except Exception as exc:
+            messages.error(request, f'Erro ao verificar token: {exc}')
+        return redirect('admin:registry_configuracaocloudflare_changelist')
+
+    def botao_verificar_token(self, obj):
+        if not obj.pk:
+            return '—'
+        from django.urls import reverse
+        url = reverse('admin:registry_configuracaocloudflare_verificar')
+        return format_html(
+            '<a href="{}" style="display:inline-block;padding:6px 14px;background:#0369a1;color:#fff;'
+            'border-radius:4px;text-decoration:none;font-size:13px;">☁ Verificar token no Cloudflare</a>',
+            url,
+        )
+    botao_verificar_token.short_description = 'Verificar token'
+
+    def has_add_permission(self, request):
+        return not ConfiguracaoCloudflare.objects.exists()
 
     def has_delete_permission(self, request, obj=None):
         return False

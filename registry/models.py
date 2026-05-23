@@ -222,6 +222,27 @@ class ConfiguracaoEmail(models.Model):
         return cls.objects.filter(pk=1).first()
 
 
+class ConfiguracaoCloudflare(models.Model):
+    cf_api_token = models.CharField(max_length=500, verbose_name='API Token', help_text='Token com permissões Zone:Read + DNS:Edit em All Zones.')
+    server_ip = models.GenericIPAddressField(verbose_name='IP do Servidor', help_text='IP público do Swarm manager — usado no registro A dos domínios custom.')
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Configuração Cloudflare'
+        verbose_name_plural = 'Configuração Cloudflare'
+
+    def __str__(self):
+        return f'Cloudflare — {self.server_ip}'
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def obter(cls):
+        return cls.objects.filter(pk=1).first()
+
+
 class VerificacaoSaude(models.Model):
     cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='verificacoes_saude')
     verificado_em = models.DateTimeField(auto_now_add=True)

@@ -64,6 +64,7 @@ UNFOLD = {
                 "title": "Configurações",
                 "items": [
                     {"title": "E-Mail", "icon": "mail", "link": reverse_lazy("admin:registry_configuracaoemail_changelist")},
+                    {"title": "Cloudflare", "icon": "cloud", "link": reverse_lazy("admin:registry_configuracaocloudflare_changelist")},
                     {"title": "Ajuda", "icon": "help", "link": reverse_lazy("admin_ajuda")},
                 ],
             },
