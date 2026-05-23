@@ -200,11 +200,9 @@ class ClienteAdmin(ModelAdmin):
             '--env-add', f'CSRF_TRUSTED_ORIGINS={csrf_origins}',
         ]
         if dominio_custom:
-            # Router custom usa websecure (443) — porta 80 bloqueada no firewall, 443 aberta para Cloudflare
             cmd += [
                 '--label-add', f'traefik.http.routers.{slug}-erp-custom.rule=Host(`{dominio_custom}`)',
-                '--label-add', f'traefik.http.routers.{slug}-erp-custom.entrypoints=websecure',
-                '--label-add', f'traefik.http.routers.{slug}-erp-custom.tls=true',
+                '--label-add', f'traefik.http.routers.{slug}-erp-custom.entrypoints=web',
                 '--label-add', f'traefik.http.routers.{slug}-erp-custom.service={slug}-erp',
             ]
         cmd.append(service_name)
@@ -235,6 +233,8 @@ class ClienteAdmin(ModelAdmin):
                                     )
                                 else:
                                     messages.success(request, f'Registro A de "{dominio_custom}" {cf["record"]} no Cloudflare com proxy ativo.')
+                                if cf.get('ssl_aviso'):
+                                    messages.warning(request, cf['ssl_aviso'])
                             else:
                                 messages.warning(request, f'Cloudflare: {cf["erro"]}')
                         except Exception as exc:
@@ -269,6 +269,8 @@ class ClienteAdmin(ModelAdmin):
                     messages.info(request, f'Informe ao cliente para trocar os nameservers no registrador para: {ns}')
                 else:
                     messages.success(request, f'Registro A de "{cliente.dominio_custom}" {cf["record"]} no Cloudflare com proxy ativo.')
+                if cf.get('ssl_aviso'):
+                    messages.warning(request, cf['ssl_aviso'])
             else:
                 messages.error(request, f'Cloudflare: {cf["erro"]}')
         except Exception as exc:
@@ -327,13 +329,18 @@ class ClienteAdmin(ModelAdmin):
             nameservers = data.get('name_servers', [])
             zona_criada = True
 
-        # SSL=Full — Cloudflare conecta ao Traefik via HTTPS (porta 443).
-        # Porta 80 bloqueada no firewall; porta 443 aberta apenas para IPs do Cloudflare.
-        # Full (não Full Strict) aceita o cert do Traefik sem validar o hostname.
-        _requests.patch(
+        # Garante SSL=Flexible — Cloudflare encaminha HTTP (porta 80) ao Traefik.
+        # Requer permissão Zone.Settings.Edit no token. Se falhar, retorna aviso.
+        r_ssl = _requests.patch(
             f'{base}/zones/{zone_id}/settings/ssl',
-            json={'value': 'full'},
+            json={'value': 'flexible'},
             headers=json_headers, timeout=15,
+        )
+        ssl_ok = r_ssl.ok and r_ssl.json().get('success')
+        ssl_aviso = '' if ssl_ok else (
+            ' ATENÇÃO: não foi possível definir SSL=Flexible via API '
+            '(token precisa de Zone.Settings.Edit). Defina manualmente em '
+            'Cloudflare → SSL/TLS → Overview → Flexible.'
         )
 
         r = _cf_raise(_requests.get(
@@ -360,7 +367,7 @@ class ClienteAdmin(ModelAdmin):
             ))
             record_acao = 'criado'
 
-        return {'ok': True, 'zona_criada': zona_criada, 'nameservers': nameservers, 'record': record_acao}
+        return {'ok': True, 'zona_criada': zona_criada, 'nameservers': nameservers, 'record': record_acao, 'ssl_aviso': ssl_aviso}
 
     def status_badge(self, obj):
         cor = _STATUS_CORES.get(obj.status, '#757575')
