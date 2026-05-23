@@ -220,8 +220,8 @@ class ClienteAdmin(ModelAdmin):
                     f'O serviço está reiniciando — aguarde ~30s e recarregue o ERP.',
                 )
                 if dominio_custom:
-                    ip = cliente.host.ip if cliente.host else os.getenv('SERVER_IP', '')
-                    if ip:
+                    ip = (cliente.host.ip if cliente.host else None) or os.getenv('SERVER_IP', '').strip()
+                    if ip and ip not in ('0.0.0.0', '127.0.0.1'):
                         try:
                             cf = self._configurar_dominio_cloudflare(dominio_custom, ip)
                             if cf['ok']:
@@ -255,9 +255,9 @@ class ClienteAdmin(ModelAdmin):
         if not cliente.dominio_custom:
             messages.warning(request, 'Nenhum domínio custom configurado para este cliente.')
             return redirect('admin:registry_cliente_change', pk)
-        ip = cliente.host.ip if cliente.host else os.getenv('SERVER_IP', '')
-        if not ip:
-            messages.warning(request, 'IP do servidor não encontrado — associe um host ao cliente ou configure SERVER_IP no .env do CP.')
+        ip = (cliente.host.ip if cliente.host else None) or os.getenv('SERVER_IP', '').strip()
+        if not ip or ip in ('0.0.0.0', '127.0.0.1'):
+            messages.warning(request, f'IP inválido ("{ip or "vazio"}") — associe um HostInfraestrutura ao cliente ou configure SERVER_IP no .env do CP com o IP público do servidor.')
             return redirect('admin:registry_cliente_change', pk)
         try:
             cf = self._configurar_dominio_cloudflare(cliente.dominio_custom, ip)
