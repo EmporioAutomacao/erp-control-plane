@@ -200,10 +200,11 @@ class ClienteAdmin(ModelAdmin):
             '--env-add', f'CSRF_TRUSTED_ORIGINS={csrf_origins}',
         ]
         if dominio_custom:
-            # Adiciona router Traefik para o domínio custom (coexiste com o subdomínio padrão)
+            # Router custom usa websecure (443) — porta 80 bloqueada no firewall, 443 aberta para Cloudflare
             cmd += [
                 '--label-add', f'traefik.http.routers.{slug}-erp-custom.rule=Host(`{dominio_custom}`)',
-                '--label-add', f'traefik.http.routers.{slug}-erp-custom.entrypoints=web',
+                '--label-add', f'traefik.http.routers.{slug}-erp-custom.entrypoints=websecure',
+                '--label-add', f'traefik.http.routers.{slug}-erp-custom.tls=true',
                 '--label-add', f'traefik.http.routers.{slug}-erp-custom.service={slug}-erp',
             ]
         cmd.append(service_name)
@@ -326,11 +327,12 @@ class ClienteAdmin(ModelAdmin):
             nameservers = data.get('name_servers', [])
             zona_criada = True
 
-        # Garante SSL=Flexible — Cloudflare encaminha HTTP (porta 80) ao Traefik.
-        # Modo Full/Full-Strict tentaria HTTPS (443) e causaria erro 521.
+        # SSL=Full — Cloudflare conecta ao Traefik via HTTPS (porta 443).
+        # Porta 80 bloqueada no firewall; porta 443 aberta apenas para IPs do Cloudflare.
+        # Full (não Full Strict) aceita o cert do Traefik sem validar o hostname.
         _requests.patch(
             f'{base}/zones/{zone_id}/settings/ssl',
-            json={'value': 'flexible'},
+            json={'value': 'full'},
             headers=json_headers, timeout=15,
         )
 

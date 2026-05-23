@@ -204,7 +204,8 @@ class MotorProvisionamento:
         if dominio_custom:
             labels_custom = (
                 f'\n        - "traefik.http.routers.{slug}-erp-custom.rule=Host(`{dominio_custom}`)"'
-                f'\n        - "traefik.http.routers.{slug}-erp-custom.entrypoints=web"'
+                f'\n        - "traefik.http.routers.{slug}-erp-custom.entrypoints=websecure"'
+                f'\n        - "traefik.http.routers.{slug}-erp-custom.tls=true"'
                 f'\n        - "traefik.http.routers.{slug}-erp-custom.service={slug}-erp"'
             )
         return f"""version: "3.8"
