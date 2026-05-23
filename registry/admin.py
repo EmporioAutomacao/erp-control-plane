@@ -204,6 +204,7 @@ class ClienteAdmin(ModelAdmin):
                 '--label-add', f'traefik.http.routers.{slug}-erp-custom.rule=Host(`{dominio_custom}`)',
                 '--label-add', f'traefik.http.routers.{slug}-erp-custom.entrypoints=web',
                 '--label-add', f'traefik.http.routers.{slug}-erp-custom.service={slug}-erp',
+                '--label-rm', f'traefik.http.routers.{slug}-erp-custom.tls',
             ]
         cmd.append(service_name)
 
