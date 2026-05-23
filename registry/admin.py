@@ -278,15 +278,26 @@ class ClienteAdmin(ModelAdmin):
         import os
         import requests as _requests
 
-        token = os.getenv('CF_API_TOKEN', '')
+        token = os.getenv('CF_API_TOKEN', '').strip()
         if not token:
             return {'ok': False, 'erro': 'CF_API_TOKEN não configurado no .env do CP.'}
 
-        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+        def _cf_raise(r):
+            if not r.ok:
+                try:
+                    erros = r.json().get('errors', [])
+                    msg = erros[0].get('message', r.text) if erros else r.text
+                except Exception:
+                    msg = r.text
+                raise Exception(f'Cloudflare {r.status_code}: {msg}')
+            return r
+
+        # GET requests não devem enviar Content-Type — Cloudflare retorna 400 se enviado sem body
+        auth_headers = {'Authorization': f'Bearer {token}'}
+        json_headers = {**auth_headers, 'Content-Type': 'application/json'}
         base = 'https://api.cloudflare.com/client/v4'
 
-        r = _requests.get(f'{base}/zones', params={'name': dominio}, headers=headers, timeout=15)
-        r.raise_for_status()
+        r = _cf_raise(_requests.get(f'{base}/zones', params={'name': dominio}, headers=auth_headers, timeout=15))
         zonas = r.json()['result']
 
         nameservers = []
@@ -295,36 +306,34 @@ class ClienteAdmin(ModelAdmin):
         if zonas:
             zone_id = zonas[0]['id']
         else:
-            r = _requests.post(f'{base}/zones', json={'name': dominio, 'jump_start': False}, headers=headers, timeout=15)
-            r.raise_for_status()
+            r = _cf_raise(_requests.post(f'{base}/zones', json={'name': dominio, 'jump_start': False}, headers=json_headers, timeout=15))
             data = r.json()['result']
             zone_id = data['id']
             nameservers = data.get('name_servers', [])
             zona_criada = True
 
-        r = _requests.get(
+        r = _cf_raise(_requests.get(
             f'{base}/zones/{zone_id}/dns_records',
             params={'type': 'A', 'name': dominio},
-            headers=headers, timeout=15,
-        )
-        r.raise_for_status()
+            headers=auth_headers, timeout=15,
+        ))
         records = r.json()['result']
 
         if records:
             record_id = records[0]['id']
             if records[0]['content'] != ip or not records[0].get('proxied'):
-                _requests.put(
+                _cf_raise(_requests.put(
                     f'{base}/zones/{zone_id}/dns_records/{record_id}',
                     json={'type': 'A', 'name': '@', 'content': ip, 'proxied': True, 'ttl': 1},
-                    headers=headers, timeout=15,
-                ).raise_for_status()
+                    headers=json_headers, timeout=15,
+                ))
             record_acao = 'atualizado'
         else:
-            _requests.post(
+            _cf_raise(_requests.post(
                 f'{base}/zones/{zone_id}/dns_records',
                 json={'type': 'A', 'name': '@', 'content': ip, 'proxied': True, 'ttl': 1},
-                headers=headers, timeout=15,
-            ).raise_for_status()
+                headers=json_headers, timeout=15,
+            ))
             record_acao = 'criado'
 
         return {'ok': True, 'zona_criada': zona_criada, 'nameservers': nameservers, 'record': record_acao}
