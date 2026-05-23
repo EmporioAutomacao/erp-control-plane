@@ -297,6 +297,18 @@ class ClienteAdmin(ModelAdmin):
         json_headers = {**auth_headers, 'Content-Type': 'application/json'}
         base = 'https://api.cloudflare.com/client/v4'
 
+        # Verifica o token antes de prosseguir — dá erro claro se for Global API Key ou inválido
+        r_verify = _requests.get(f'{base}/user/tokens/verify', headers=auth_headers, timeout=10)
+        if not r_verify.ok:
+            return {
+                'ok': False,
+                'erro': (
+                    'CF_API_TOKEN inválido. Verifique: (1) o token é um API Token, não a Global API Key; '
+                    '(2) tem permissões Zone:Read + DNS:Edit em All Zones. '
+                    f'Cloudflare retornou {r_verify.status_code}.'
+                ),
+            }
+
         r = _cf_raise(_requests.get(f'{base}/zones', params={'name': dominio}, headers=auth_headers, timeout=15))
         zonas = r.json()['result']
 
