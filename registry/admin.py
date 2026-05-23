@@ -118,6 +118,7 @@ class ClienteAdmin(ModelAdmin):
             path('<pk>/destruir/', self.admin_site.admin_view(self._view_destruir), name='registry_cliente_destruir'),
             path('<pk>/reenviar-boas-vindas/', self.admin_site.admin_view(self._view_reenviar_boas_vindas), name='registry_cliente_reenviar_boas_vindas'),
             path('<pk>/aplicar-modulos/', self.admin_site.admin_view(self._view_aplicar_modulos), name='registry_cliente_aplicar_modulos'),
+            path('<pk>/configurar-cloudflare/', self.admin_site.admin_view(self._view_configurar_cloudflare), name='registry_cliente_configurar_cloudflare'),
         ] + urls
 
     def _view_reprovisionar(self, request, pk):
@@ -149,49 +150,96 @@ class ClienteAdmin(ModelAdmin):
     def _view_aplicar_modulos(self, request, pk):
         import subprocess
         from pathlib import Path
-        from django.conf import settings
         from django.contrib import messages
 
         cliente = get_object_or_404(Cliente, pk=pk)
+        slug = cliente.slug
         modulos = ','.join(m.slug for m in cliente.modulos_ativos.all()) or 'financeiro,tarefas'
         tema = cliente.tema_site or 'padrao'
+        dominio_custom = cliente.dominio_custom or ''
+        subdominio = cliente.subdominio
+
+        allowed_hosts = f'{subdominio},{dominio_custom}' if dominio_custom else subdominio
+        csrf_origins = (
+            f'https://{subdominio},https://{dominio_custom}' if dominio_custom
+            else f'https://{subdominio}'
+        )
 
         base_path = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes'))
-        env_file = base_path / cliente.slug / '.env'
+        env_file = base_path / slug / '.env'
         if env_file.exists():
+            campos = {
+                'MODULOS_ATIVOS': modulos,
+                'TEMA_SITE': tema,
+                'ALLOWED_HOSTS': allowed_hosts,
+                'CSRF_TRUSTED_ORIGINS': csrf_origins,
+            }
             linhas = env_file.read_text().splitlines()
             novas = []
-            achou_modulos = achou_tema = False
+            encontrados = set()
             for linha in linhas:
-                if linha.startswith('MODULOS_ATIVOS='):
-                    novas.append(f'MODULOS_ATIVOS={modulos}')
-                    achou_modulos = True
-                elif linha.startswith('TEMA_SITE='):
-                    novas.append(f'TEMA_SITE={tema}')
-                    achou_tema = True
+                chave = linha.split('=', 1)[0] if '=' in linha else ''
+                if chave in campos:
+                    novas.append(f'{chave}={campos[chave]}')
+                    encontrados.add(chave)
                 else:
                     novas.append(linha)
-            if not achou_modulos:
-                novas.append(f'MODULOS_ATIVOS={modulos}')
-            if not achou_tema:
-                novas.append(f'TEMA_SITE={tema}')
+            for chave, valor in campos.items():
+                if chave not in encontrados:
+                    novas.append(f'{chave}={valor}')
             env_file.write_text('\n'.join(novas))
 
-        service_name = f'{cliente.slug}_web'
+        service_name = f'{slug}_web'
+
+        # Monta o comando docker service update
+        cmd = [
+            'docker', 'service', 'update', '--detach',
+            '--env-add', f'MODULOS_ATIVOS={modulos}',
+            '--env-add', f'TEMA_SITE={tema}',
+            '--env-add', f'ALLOWED_HOSTS={allowed_hosts}',
+            '--env-add', f'CSRF_TRUSTED_ORIGINS={csrf_origins}',
+        ]
+        if dominio_custom:
+            # Adiciona router Traefik para o domínio custom (coexiste com o subdomínio padrão)
+            cmd += [
+                '--label-add', f'traefik.http.routers.{slug}-erp-custom.rule=Host(`{dominio_custom}`)',
+                '--label-add', f'traefik.http.routers.{slug}-erp-custom.entrypoints=web',
+                '--label-add', f'traefik.http.routers.{slug}-erp-custom.service={slug}-erp',
+            ]
+        cmd.append(service_name)
+
         try:
-            result = subprocess.run(
-                ['docker', 'service', 'update', '--detach',
-                 '--env-add', f'MODULOS_ATIVOS={modulos}',
-                 '--env-add', f'TEMA_SITE={tema}',
-                 service_name],
-                capture_output=True, text=True, timeout=30,
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.returncode == 0:
+                desc = f'módulos={modulos}, tema={tema}'
+                if dominio_custom:
+                    desc += f', domínio={dominio_custom} (+ {subdominio})'
                 messages.success(
                     request,
-                    f'Configurações aplicadas para "{cliente.slug}": módulos={modulos}, tema={tema}. '
+                    f'Configurações aplicadas para "{slug}": {desc}. '
                     f'O serviço está reiniciando — aguarde ~30s e recarregue o ERP.',
                 )
+                if dominio_custom:
+                    ip = cliente.host.ip if cliente.host else os.getenv('SERVER_IP', '')
+                    if ip:
+                        try:
+                            cf = self._configurar_dominio_cloudflare(dominio_custom, ip)
+                            if cf['ok']:
+                                if cf['zona_criada']:
+                                    ns = ', '.join(cf['nameservers'])
+                                    messages.info(
+                                        request,
+                                        f'Zona "{dominio_custom}" criada no Cloudflare. '
+                                        f'Informe ao cliente para trocar os nameservers no registrador para: {ns}',
+                                    )
+                                else:
+                                    messages.success(request, f'Registro A de "{dominio_custom}" {cf["record"]} no Cloudflare com proxy ativo.')
+                            else:
+                                messages.warning(request, f'Cloudflare: {cf["erro"]}')
+                        except Exception as exc:
+                            messages.warning(request, f'Falha ao configurar Cloudflare: {exc}')
+                    else:
+                        messages.warning(request, 'IP do servidor não encontrado — associe um host ao cliente ou configure SERVER_IP no .env do CP.')
             elif 'not found' in result.stderr:
                 messages.info(request, 'Configurações salvas no .env. O cliente ainda não está provisionado — serão aplicadas no próximo provisionamento.')
             else:
@@ -200,6 +248,86 @@ class ClienteAdmin(ModelAdmin):
             messages.warning(request, f'.env atualizado, mas falha ao atualizar serviço Docker: {exc}')
 
         return redirect('admin:registry_cliente_change', pk)
+
+    def _view_configurar_cloudflare(self, request, pk):
+        from django.contrib import messages
+        cliente = get_object_or_404(Cliente, pk=pk)
+        if not cliente.dominio_custom:
+            messages.warning(request, 'Nenhum domínio custom configurado para este cliente.')
+            return redirect('admin:registry_cliente_change', pk)
+        ip = cliente.host.ip if cliente.host else os.getenv('SERVER_IP', '')
+        if not ip:
+            messages.warning(request, 'IP do servidor não encontrado — associe um host ao cliente ou configure SERVER_IP no .env do CP.')
+            return redirect('admin:registry_cliente_change', pk)
+        try:
+            cf = self._configurar_dominio_cloudflare(cliente.dominio_custom, ip)
+            if cf['ok']:
+                if cf['zona_criada']:
+                    ns = ', '.join(cf['nameservers'])
+                    messages.success(request, f'Zona "{cliente.dominio_custom}" criada no Cloudflare.')
+                    messages.info(request, f'Informe ao cliente para trocar os nameservers no registrador para: {ns}')
+                else:
+                    messages.success(request, f'Registro A de "{cliente.dominio_custom}" {cf["record"]} no Cloudflare com proxy ativo.')
+            else:
+                messages.error(request, f'Cloudflare: {cf["erro"]}')
+        except Exception as exc:
+            messages.error(request, f'Falha ao configurar Cloudflare: {exc}')
+        return redirect('admin:registry_cliente_change', pk)
+
+    def _configurar_dominio_cloudflare(self, dominio, ip):
+        import os
+        import requests as _requests
+
+        token = os.getenv('CF_API_TOKEN', '')
+        if not token:
+            return {'ok': False, 'erro': 'CF_API_TOKEN não configurado no .env do CP.'}
+
+        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+        base = 'https://api.cloudflare.com/client/v4'
+
+        r = _requests.get(f'{base}/zones', params={'name': dominio}, headers=headers, timeout=15)
+        r.raise_for_status()
+        zonas = r.json()['result']
+
+        nameservers = []
+        zona_criada = False
+
+        if zonas:
+            zone_id = zonas[0]['id']
+        else:
+            r = _requests.post(f'{base}/zones', json={'name': dominio, 'jump_start': False}, headers=headers, timeout=15)
+            r.raise_for_status()
+            data = r.json()['result']
+            zone_id = data['id']
+            nameservers = data.get('name_servers', [])
+            zona_criada = True
+
+        r = _requests.get(
+            f'{base}/zones/{zone_id}/dns_records',
+            params={'type': 'A', 'name': dominio},
+            headers=headers, timeout=15,
+        )
+        r.raise_for_status()
+        records = r.json()['result']
+
+        if records:
+            record_id = records[0]['id']
+            if records[0]['content'] != ip or not records[0].get('proxied'):
+                _requests.put(
+                    f'{base}/zones/{zone_id}/dns_records/{record_id}',
+                    json={'type': 'A', 'name': '@', 'content': ip, 'proxied': True, 'ttl': 1},
+                    headers=headers, timeout=15,
+                ).raise_for_status()
+            record_acao = 'atualizado'
+        else:
+            _requests.post(
+                f'{base}/zones/{zone_id}/dns_records',
+                json={'type': 'A', 'name': '@', 'content': ip, 'proxied': True, 'ttl': 1},
+                headers=headers, timeout=15,
+            ).raise_for_status()
+            record_acao = 'criado'
+
+        return {'ok': True, 'zona_criada': zona_criada, 'nameservers': nameservers, 'record': record_acao}
 
     def status_badge(self, obj):
         cor = _STATUS_CORES.get(obj.status, '#757575')
@@ -260,12 +388,16 @@ class ClienteAdmin(ModelAdmin):
         url_destruir = reverse('admin:registry_cliente_destruir', args=[obj.pk])
         url_boas_vindas = reverse('admin:registry_cliente_reenviar_boas_vindas', args=[obj.pk])
         url_modulos = reverse('admin:registry_cliente_aplicar_modulos', args=[obj.pk])
+        url_cloudflare = reverse('admin:registry_cliente_configurar_cloudflare', args=[obj.pk])
         return format_html(
             '<p style="margin:0 0 10px;padding:8px 12px;background:#fff8e1;border-left:4px solid #f9a825;font-size:12px;color:#5d4037;">'
-            '⚠️ <strong>Salve o formulário antes</strong> de aplicar — o botão lê os módulos e o tema já gravados no banco.'
+            '⚠️ <strong>Salve o formulário antes</strong> de aplicar — o botão lê os módulos, tema e domínio custom já gravados no banco.'
             '</p>'
             '<a href="{}" style="display:inline-block;padding:6px 14px;background:#2e7d32;color:#fff;border-radius:4px;text-decoration:none;font-size:13px;" '
-            'onclick="return confirm(\'O serviço web do cliente será reiniciado para aplicar os módulos e o tema selecionados (leva ~30s). Continuar?\')">⚙ Aplicar Configurações</a>'
+            'onclick="return confirm(\'O serviço web do cliente será reiniciado para aplicar as configurações (módulos, tema, domínio custom) — leva ~30s. Continuar?\')">⚙ Aplicar Configurações</a>'
+            '&nbsp;&nbsp;'
+            '<a href="{}" style="display:inline-block;padding:6px 14px;background:#0369a1;color:#fff;border-radius:4px;text-decoration:none;font-size:13px;" '
+            'onclick="return confirm(\'Criar/atualizar zona e registro A no Cloudflare para o domínio custom configurado. Continuar?\')">☁ Configurar Cloudflare</a>'
             '&nbsp;&nbsp;'
             '<a href="{}" style="display:inline-block;padding:6px 14px;background:#417690;color:#fff;border-radius:4px;text-decoration:none;font-size:13px;" '
             'onclick="return confirm(\'ATENÇÃO: Faça backup do banco do cliente ANTES de re-provisionar. Dados podem ser perdidos se houver conflito de volume.\\n\\nConfirma que o backup foi realizado e deseja continuar?\')">Re-provisionar</a>'
@@ -274,7 +406,7 @@ class ClienteAdmin(ModelAdmin):
             'onclick="return confirm(\'Tem certeza? Isso vai apagar o stack, volumes e todos os dados do cliente.\')">Destruir</a>'
             '&nbsp;&nbsp;'
             '<a href="{}" style="display:inline-block;padding:6px 14px;background:#1565c0;color:#fff;border-radius:4px;text-decoration:none;font-size:13px;">✉ Reenviar Boas-vindas</a>',
-            url_modulos, url_reprov, url_destruir, url_boas_vindas,
+            url_modulos, url_cloudflare, url_reprov, url_destruir, url_boas_vindas,
         )
     acoes_provisionamento.short_description = 'Provisionamento'
 

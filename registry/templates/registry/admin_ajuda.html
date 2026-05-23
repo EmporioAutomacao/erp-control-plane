@@ -17,7 +17,13 @@
 
   .ajuda-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 20px;
+    margin-bottom: 32px;
+  }
+  .ajuda-grid-wide {
+    display: grid;
+    grid-template-columns: 1fr;
     gap: 20px;
     margin-bottom: 32px;
   }
@@ -32,7 +38,7 @@
     background: oklch(20% .025 264);
   }
   .ajuda-card h3 {
-    margin: 0 0 12px;
+    margin: 0 0 14px;
     font-size: 15px;
     font-weight: 700;
     display: flex;
@@ -47,6 +53,7 @@
   }
   .dark .ajuda-card p, .dark .ajuda-card li { color: oklch(65% .015 264); }
   .ajuda-card ul { margin: 8px 0 0; padding-left: 18px; }
+  .ajuda-card li + li { margin-top: 8px; }
 
   .ajuda-status-grid {
     display: flex;
@@ -114,21 +121,68 @@
     border-radius: 10px;
     padding: 14px 18px;
     font-size: 13px;
-    margin-top: 20px;
+    margin-bottom: 20px;
     line-height: 1.6;
     color: var(--color-base-700, #334155);
   }
   .dark .ajuda-alert { color: oklch(75% .01 264); }
+
+  .ajuda-alert-warn {
+    background: rgba(234,179,8,.08);
+    border: 1px solid rgba(234,179,8,.35);
+    border-radius: 10px;
+    padding: 14px 18px;
+    font-size: 13px;
+    margin-bottom: 20px;
+    line-height: 1.6;
+    color: var(--color-base-700, #334155);
+  }
+
+  .ajuda-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    margin-top: 12px;
+  }
+  .ajuda-table th {
+    text-align: left;
+    font-weight: 700;
+    padding: 6px 10px;
+    background: rgba(99,102,241,.08);
+    color: #6366f1;
+  }
+  .ajuda-table td {
+    padding: 7px 10px;
+    border-top: 1px solid var(--color-base-200, #e2e8f0);
+    color: var(--color-base-600, #475569);
+    vertical-align: top;
+  }
+  .dark .ajuda-table td { border-color: oklch(30% .02 264); color: oklch(65% .015 264); }
+  .ajuda-table code { background: rgba(99,102,241,.1); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+
+  .btn-demo {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    text-decoration: none;
+    cursor: default;
+  }
+  .tag-ok   { background:#2e7d32; color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; }
+  .tag-no   { background:#b71c1c; color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; }
+  .tag-warn { background:#e65100; color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; }
 </style>
 
 <div class="ajuda-hero">
   <h1>⚡ Central de Ajuda — AraraSuite CP</h1>
-  <p>Guia rápido para gerenciar clientes, provisionamento, e-mail e infraestrutura.</p>
+  <p>Guia completo para gerenciar clientes, provisionamento, domínios, Cloudflare, e-mail e infraestrutura.</p>
 </div>
 
 <!-- ═══ FLUXO PRINCIPAL ═══ -->
 <p class="ajuda-section-title">Fluxo de um novo cliente</p>
-<div style="border:1px solid var(--color-base-200,#e2e8f0);border-radius:14px;padding:28px 32px;margin-bottom:32px;background:var(--color-base-50,#f8fafc);" class="dark:bg-[oklch(20%_.025_264)]">
+<div style="border:1px solid var(--color-base-200,#e2e8f0);border-radius:14px;padding:28px 32px;margin-bottom:32px;background:var(--color-base-50,#f8fafc);">
   <div class="ajuda-step">
     <div class="ajuda-step-num">1</div>
     <div class="ajuda-step-text">
@@ -145,6 +199,7 @@
     <div class="ajuda-step-num">3</div>
     <div class="ajuda-step-text">
       O motor gera <code>.env</code> e <code>stack.yml</code> em <code>CLIENTES_BASE_PATH/{slug}/</code> e executa <strong>docker stack deploy</strong>.
+      Se o cliente tiver <strong>domínio custom</strong> configurado, ele já entra no stack com as labels Traefik corretas e no <code>ALLOWED_HOSTS</code>.
     </div>
   </div>
   <div class="ajuda-step">
@@ -161,7 +216,8 @@
   </div>
 </div>
 
-<!-- ═══ CARDS ═══ -->
+<!-- ═══ CARDS GERAIS ═══ -->
+<p class="ajuda-section-title">Gerenciamento de clientes</p>
 <div class="ajuda-grid">
 
   <!-- Status -->
@@ -180,65 +236,57 @@
     <p style="margin-top:12px;">Em caso de <strong>erro_provisao</strong>, o Celery retenta até 3× com 60s de delay. Se persistir, use o botão <strong>Re-provisionar</strong> na página do cliente.</p>
   </div>
 
-  <!-- Ações de provisionamento -->
-  <div class="ajuda-card">
-    <h3>⚙️ Ações de provisionamento</h3>
-    <ul>
-      <li>
-        <strong>⚙ Aplicar Módulos</strong> — Atualiza a variável <code>MODULOS_ATIVOS</code> no <code>.env</code> do cliente e reinicia o serviço web via <code>docker service update</code>.
-        <strong style="color:#2e7d32;">Não toca no banco de dados.</strong>
-        Use sempre que adicionar ou remover módulos na aba Plano.
-      </li>
-      <li style="margin-top:10px;">
-        <strong>Re-provisionar</strong> — Executa o <code>docker stack deploy</code> novamente.
-        <strong>Não apaga o banco:</strong> o volume <code>pgdata</code> é preservado e a senha existente é reutilizada.
-        <span style="color:#e65100;">⚠️ Risco apenas se o <code>.env</code> for apagado manualmente — nesse caso a senha gerada não coincide com a do volume e o Postgres recusa conexão. Faça backup antes se houver dúvida.</span>
-      </li>
-      <li style="margin-top:10px;">
-        <strong>Destruir</strong> — Remove o stack <strong>e apaga os volumes</strong> (<code>pgdata</code>, <code>media</code>, <code>backups</code>), os arquivos e o registro do banco. <strong style="color:#b71c1c;">Ação irreversível — todos os dados do cliente são perdidos.</strong>
-      </li>
-      <li style="margin-top:10px;"><strong>✉ Reenviar Boas-vindas</strong> — Reenfileira o e-mail HTML de boas-vindas com os dados de acesso atuais.</li>
-    </ul>
-  </div>
-
-  <!-- Módulos -->
-  <div class="ajuda-card">
-    <h3>🧩 Ativar e desativar módulos</h3>
-    <p>Cada cliente pode ter módulos diferentes habilitados. O fluxo é:</p>
-    <ul>
-      <li>Na página do cliente, aba <strong>Plano</strong>, selecione os módulos em <strong>"Módulos ativos"</strong> e salve.</li>
-      <li>Clique em <strong>⚙ Aplicar Módulos</strong> — o serviço reinicia em segundos com os novos módulos.</li>
-    </ul>
-    <p style="margin-top:10px;">O que cada cenário faz:</p>
-    <ul>
-      <li><strong>Serviço rodando</strong> — <code>docker service update --env-add MODULOS_ATIVOS=...</code> faz rolling restart sem perda de dados.</li>
-      <li><strong>Serviço não provisionado</strong> — os módulos ficam salvos no <code>.env</code> e serão aplicados no próximo provisionamento.</li>
-    </ul>
-    <p style="margin-top:10px;"><strong>No ERP:</strong> módulos desativados somem do menu lateral e ficam sem acesso. Módulos ativos são lidos da variável de ambiente <code>MODULOS_ATIVOS</code> na inicialização do servidor.</p>
-  </div>
-
   <!-- Acesso ao ERP -->
   <div class="ajuda-card">
     <h3>🔑 Acesso ao ERP do cliente</h3>
     <p>Na página do cliente, o painel <strong>"Acesso ao ERP"</strong> exibe:</p>
     <ul>
-      <li><strong>URL</strong> — subdomínio ou domínio customizado</li>
+      <li><strong>URL</strong> — domínio custom (se configurado) ou subdomínio padrão</li>
       <li><strong>Usuário</strong> — sempre <code>admin</code></li>
-      <li><strong>Senha inicial</strong> — extraída do log de provisionamento etapa <code>criar_superuser</code></li>
+      <li><strong>Senha inicial</strong> — extraída do log etapa <code>criar_superuser</code></li>
     </ul>
-    <p style="margin-top:8px;">A senha só aparece se o provisionamento foi concluído com sucesso.</p>
+    <p style="margin-top:8px;">A senha só aparece se o provisionamento foi concluído com sucesso. Se o cliente redefiniu a senha no ERP, a exibida aqui é a original — use <strong>Re-provisionar</strong> para ver a atual só se necessário.</p>
   </div>
 
-  <!-- E-mail -->
+  <!-- Módulos e Tema -->
   <div class="ajuda-card">
-    <h3>✉️ Configuração de e-mail</h3>
-    <p>Acesse <strong>Configurações → E-Mail</strong> para configurar o servidor SMTP.</p>
+    <h3>🧩 Módulos e tema do site</h3>
+    <p>Cada cliente pode ter módulos e tema diferentes. O fluxo é:</p>
     <ul>
-      <li>Usar TLS — padrão para porta 587</li>
-      <li><strong>Verificar SSL</strong> — desmarque se o certificado não corresponder ao hostname (ex: servidores de hospedagem compartilhada)</li>
-      <li>Botão <strong>"Enviar e-mail de teste"</strong> — envia imediatamente (síncrono) para o e-mail remetente configurado</li>
+      <li>Na aba <strong>Plano</strong>, selecione os módulos e o <strong>Tema do site</strong> e <strong>salve</strong>.</li>
+      <li>Clique em <strong>⚙ Aplicar Configurações</strong> — o serviço reinicia em ~30s.</li>
     </ul>
-    <p style="margin-top:8px;color:#b71c1c;font-weight:600;">⚠️ A configuração do .env NÃO é usada. Apenas o registro do banco vale.</p>
+    <p style="margin-top:10px;"><strong>Temas disponíveis:</strong></p>
+    <table class="ajuda-table">
+      <tr><th>Valor</th><th>Visual</th></tr>
+      <tr><td><code>padrao</code></td><td>E-commerce (escuro, índigo)</td></tr>
+      <tr><td><code>dedetizadora</code></td><td>Dedetizadora verde</td></tr>
+      <tr><td><code>dedetizadora2</code></td><td>Dedetizadora azul + animações</td></tr>
+      <tr><td><code>loja</code></td><td>Loja (claro premium, índigo)</td></tr>
+    </table>
+  </div>
+
+  <!-- Logs -->
+  <div class="ajuda-card">
+    <h3>📋 Logs de provisionamento</h3>
+    <p>Na página de cada cliente há o inline <strong>"Logs de Provisionamento"</strong> com todas as etapas:</p>
+    <table class="ajuda-table">
+      <tr><th>Etapa</th><th>O que faz</th></tr>
+      <tr><td><code>escolher_host</code></td><td>Determina a região do Swarm</td></tr>
+      <tr><td><code>gerar_stack</code></td><td>Gera <code>.env</code> e <code>stack.yml</code></td></tr>
+      <tr><td><code>subir_stack</code></td><td>Executa <code>docker stack deploy</code></td></tr>
+      <tr><td><code>criar_superuser</code></td><td>Senha inicial registrada aqui</td></tr>
+    </table>
+  </div>
+
+  <!-- Infraestrutura -->
+  <div class="ajuda-card">
+    <h3>🖥️ Hosts de infraestrutura</h3>
+    <p>Cada cliente é alocado em um <strong>HostInfraestrutura</strong>. O campo <strong>IP</strong> é usado pelo botão <strong>☁ Configurar Cloudflare</strong> para criar o registro DNS automaticamente.</p>
+    <p style="margin-top:8px;">O placement do Docker Swarm usa:</p>
+    <div class="ajuda-code">node.labels.region == {regiao}</div>
+    <p style="margin-top:8px;">Para ver os labels do nó:</p>
+    <div class="ajuda-code">docker node inspect {id} --format '{{.Spec.Labels}}'</div>
   </div>
 
   <!-- Celery -->
@@ -247,17 +295,226 @@
     <p>Em produção o container <code>celery</code> processa as tasks automaticamente.</p>
     <p style="margin-top:8px;">Em desenvolvimento local, suba o worker manualmente:</p>
     <div class="ajuda-code">.\venv\Scripts\python.exe -m celery -A core worker --loglevel=info</div>
-    <p style="margin-top:8px;">Tarefas periódicas ficam em <strong>Agendamentos → Tarefas Periódicas</strong>. O worker também precisa do beat para executá-las: adicione <code>-B</code> ou suba um container <code>celery-beat</code> separado.</p>
+    <p style="margin-top:8px;">Tarefas periódicas ficam em <strong>Agendamentos → Tarefas Periódicas</strong>. Para executá-las em dev, adicione <code>-B</code> ao comando acima.</p>
   </div>
 
-  <!-- Infraestrutura -->
+</div>
+
+<!-- ═══ AÇÕES ═══ -->
+<p class="ajuda-section-title">Ações de provisionamento</p>
+<div class="ajuda-grid-wide">
   <div class="ajuda-card">
-    <h3>🖥️ Hosts de infraestrutura</h3>
-    <p>Cada cliente é alocado em um <strong>HostInfraestrutura</strong>. O placement do Docker Swarm usa:</p>
-    <div class="ajuda-code">node.labels.region == {regiao}</div>
-    <p style="margin-top:8px;">Certifique-se de que o nó Swarm tem o label correto. Para ver os labels:</p>
-    <div class="ajuda-code">docker node inspect {id} --format '{{.Spec.Labels}}'</div>
+    <h3>⚙️ Botões disponíveis na página do cliente</h3>
+    <div class="ajuda-alert-warn" style="margin-top:0;margin-bottom:18px;">
+      ⚠️ <strong>Salve sempre o formulário antes de clicar em qualquer botão de ação.</strong> Os botões leem os dados já gravados no banco — alterações não salvas são ignoradas.
+    </div>
+    <table class="ajuda-table">
+      <tr>
+        <th>Botão</th>
+        <th>O que faz</th>
+        <th>Toca no banco?</th>
+      </tr>
+      <tr>
+        <td><span class="btn-demo" style="background:#2e7d32;">⚙ Aplicar Configurações</span></td>
+        <td>
+          Atualiza no serviço Docker em execução:<br>
+          • <code>MODULOS_ATIVOS</code>, <code>TEMA_SITE</code><br>
+          • <code>ALLOWED_HOSTS</code>, <code>CSRF_TRUSTED_ORIGINS</code> (inclui domínio custom se configurado)<br>
+          • Labels Traefik para o domínio custom (router adicional coexistindo com o subdomínio padrão)<br>
+          Atualiza também o <code>.env</code> do cliente em disco.<br>
+          <em>Se o serviço não estiver provisionado, salva no .env para o próximo deploy.</em>
+        </td>
+        <td><span class="tag-ok">Não</span></td>
+      </tr>
+      <tr>
+        <td><span class="btn-demo" style="background:#0369a1;">☁ Configurar Cloudflare</span></td>
+        <td>
+          Chama a API da Cloudflare para:<br>
+          1. Verificar se a zona do domínio custom já existe na conta<br>
+          2. Se não existir, <strong>cria a zona</strong> e exibe os nameservers para o cliente trocar no registrador<br>
+          3. Cria ou atualiza o <strong>registro A</strong>: domínio → IP do host do cliente, com <strong>proxy ativo</strong> (HTTPS automático pela Cloudflare)<br>
+          Funciona de forma independente do Docker — pode ser usado a qualquer momento.
+        </td>
+        <td><span class="tag-ok">Não</span></td>
+      </tr>
+      <tr>
+        <td><span class="btn-demo" style="background:#417690;">Re-provisionar</span></td>
+        <td>
+          Executa o <code>docker stack deploy</code> novamente. Regenera <code>.env</code> e <code>stack.yml</code> com os dados atuais do banco (incluindo domínio custom se configurado). <strong>Preserva o volume pgdata e reutiliza a senha existente.</strong><br>
+          <em style="color:#e65100;">Risco: se o .env foi apagado manualmente e o volume pgdata existe, a nova senha não coincide com a do volume — o Postgres recusa conexão. Faça backup antes se houver dúvida.</em>
+        </td>
+        <td><span class="tag-ok">Preserva</span></td>
+      </tr>
+      <tr>
+        <td><span class="btn-demo" style="background:#ba2121;">Destruir</span></td>
+        <td>
+          Remove o stack, aguarda 15s, <strong>apaga os volumes</strong> (<code>pgdata</code>, <code>media</code>, <code>backups</code>), apaga os arquivos em disco e deleta o registro do banco. <strong style="color:#b71c1c;">Ação irreversível — todos os dados do cliente são perdidos.</strong>
+        </td>
+        <td><span class="tag-no">Apaga tudo</span></td>
+      </tr>
+      <tr>
+        <td><span class="btn-demo" style="background:#1565c0;">✉ Reenviar Boas-vindas</span></td>
+        <td>Reenfileira no Celery o e-mail HTML com URL, usuário <code>admin</code> e senha inicial (extraída do log de provisionamento).</td>
+        <td><span class="tag-ok">Não</span></td>
+      </tr>
+    </table>
   </div>
+</div>
+
+<!-- ═══ DOMÍNIO CUSTOM ═══ -->
+<p class="ajuda-section-title">Domínio custom</p>
+<div class="ajuda-grid-wide">
+  <div class="ajuda-card">
+    <h3>🌐 Como funciona o domínio custom</h3>
+    <p>
+      Todo cliente recebe por padrão um subdomínio no formato <code>{slug}.ararasuite.com.br</code>.
+      O campo <strong>Domínio custom</strong> (seção Infraestrutura) permite que o cliente use também o próprio domínio
+      — por exemplo <code>neodistribuidora.com.br</code> — de forma simultânea ao subdomínio padrão.
+    </p>
+    <p style="margin-top:12px;"><strong>Ambos funcionam em paralelo:</strong></p>
+    <ul>
+      <li><code>neodistribuidora.ararasuite.com.br</code> → ERP (rota padrão, sempre ativa)</li>
+      <li><code>neodistribuidora.com.br</code> → mesmo ERP (rota custom adicionada)</li>
+    </ul>
+    <p style="margin-top:14px;"><strong>O que o sistema configura automaticamente ao aplicar:</strong></p>
+    <table class="ajuda-table">
+      <tr><th>Componente</th><th>O que é configurado</th></tr>
+      <tr>
+        <td>Django</td>
+        <td><code>ALLOWED_HOSTS</code> e <code>CSRF_TRUSTED_ORIGINS</code> incluem o domínio custom</td>
+      </tr>
+      <tr>
+        <td>Traefik</td>
+        <td>Router adicional <code>{slug}-erp-custom</code> com regra <code>Host(`dominio`)</code> apontando para o mesmo serviço</td>
+      </tr>
+      <tr>
+        <td>Cloudflare</td>
+        <td>Zona criada (se necessário) + registro A com proxy ativo via botão <strong>☁ Configurar Cloudflare</strong></td>
+      </tr>
+    </table>
+    <p style="margin-top:14px;"><strong>O que requer ação manual do cliente (uma única vez):</strong></p>
+    <div class="ajuda-alert-warn" style="margin-top:8px;">
+      O cliente precisa trocar os <strong>nameservers</strong> do domínio para os da Cloudflare no painel do registrador (Registro.br, GoDaddy, etc.).
+      Essa etapa é obrigatória e não pode ser automatizada pois cada registrador tem painel próprio sem API padronizada.
+      Propaga em 1–24h.
+    </div>
+  </div>
+</div>
+
+<!-- ═══ CLOUDFLARE ═══ -->
+<p class="ajuda-section-title">Cloudflare — configuração e automação</p>
+<div class="ajuda-grid">
+
+  <div class="ajuda-card">
+    <h3>☁ Pré-requisitos do Cloudflare</h3>
+    <p>Para o botão <strong>☁ Configurar Cloudflare</strong> funcionar, o CP precisa de:</p>
+    <table class="ajuda-table">
+      <tr><th>Variável no .env do CP</th><th>Descrição</th></tr>
+      <tr>
+        <td><code>CF_API_TOKEN</code></td>
+        <td>
+          Token da Cloudflare com permissões:<br>
+          • <strong>Zone:Zone:Read</strong> — All zones<br>
+          • <strong>Zone:DNS:Edit</strong> — All zones<br>
+          Criar em: Cloudflare → My Profile → API Tokens → Create Token
+        </td>
+      </tr>
+      <tr>
+        <td><code>SERVER_IP</code></td>
+        <td>
+          IP público do servidor Swarm manager (ex: <code>104.248.189.43</code>).
+          Usado como fallback quando o cliente não tem um <strong>Host</strong> associado.
+          Se o cliente tiver host, o IP vem de <code>HostInfraestrutura.ip</code>.
+        </td>
+      </tr>
+    </table>
+    <p style="margin-top:10px;color:#e65100;font-weight:600;">⚠️ O escopo do token deve ser "All zones" — um token restrito a <code>ararasuite.com.br</code> não consegue gerenciar domínios de clientes.</p>
+  </div>
+
+  <div class="ajuda-card">
+    <h3>☁ O que o botão faz (passo a passo)</h3>
+    <div class="ajuda-step" style="margin-top:4px;">
+      <div class="ajuda-step-num">1</div>
+      <div class="ajuda-step-text">Chama <code>GET /zones?name={dominio}</code> na API da Cloudflare para verificar se a zona já existe na conta.</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">2</div>
+      <div class="ajuda-step-text">
+        <strong>Se a zona não existe:</strong> cria via <code>POST /zones</code> e retorna os nameservers.
+        O admin deve informar ao cliente para trocar no registrador. Propaga em 1–24h.
+      </div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">3</div>
+      <div class="ajuda-step-text">Verifica se já existe um registro A para o domínio apex (<code>@</code>).</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">4</div>
+      <div class="ajuda-step-text">
+        <strong>Se não existe:</strong> cria <code>A @ → IP do servidor</code>, proxy ativo (laranja).<br>
+        <strong>Se existe mas IP ou proxy estão errados:</strong> atualiza via <code>PUT</code>.<br>
+        <strong>Se está correto:</strong> nenhuma alteração — operação idempotente.
+      </div>
+    </div>
+    <p style="margin-top:4px;font-size:12px;color:#6366f1;">Proxy ativo = Cloudflare cuida do HTTPS automaticamente. O servidor recebe tráfego HTTP na porta 80.</p>
+  </div>
+
+  <div class="ajuda-card">
+    <h3>☁ Fluxo completo de ativação</h3>
+    <div class="ajuda-step" style="margin-top:4px;">
+      <div class="ajuda-step-num">1</div>
+      <div class="ajuda-step-text">Preencha o campo <strong>Domínio custom</strong> (ex: <code>neodistribuidora.com.br</code>) e <strong>salve</strong>.</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">2</div>
+      <div class="ajuda-step-text">Clique em <strong>⚙ Aplicar Configurações</strong> — Django e Traefik passam a aceitar o domínio.</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">3</div>
+      <div class="ajuda-step-text">Clique em <strong>☁ Configurar Cloudflare</strong> — zona e registro A criados automaticamente.</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">4</div>
+      <div class="ajuda-step-text">Se a zona foi criada agora, informe ao cliente para trocar os nameservers no registrador para os exibidos na mensagem.</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">5</div>
+      <div class="ajuda-step-text">Após a propagação do DNS (1–24h), o ERP responde em <code>https://neodistribuidora.com.br</code> com HTTPS automático.</div>
+    </div>
+  </div>
+
+  <div class="ajuda-card">
+    <h3>☁ Casos especiais</h3>
+    <table class="ajuda-table">
+      <tr><th>Situação</th><th>Comportamento</th></tr>
+      <tr>
+        <td>Zona já existe e A já aponta para o IP correto</td>
+        <td>Nenhuma alteração. Mensagem: "registro atualizado" (idempotente)</td>
+      </tr>
+      <tr>
+        <td>Zona existe mas em conta diferente</td>
+        <td>Cloudflare retorna erro "already exists" → mensagem de aviso. O domínio precisa ser transferido para esta conta Cloudflare.</td>
+      </tr>
+      <tr>
+        <td><code>CF_API_TOKEN</code> ausente</td>
+        <td>Mensagem de erro. Traefik e Django já foram aplicados normalmente pelo "Aplicar Configurações".</td>
+      </tr>
+      <tr>
+        <td>Cliente sem host associado e sem <code>SERVER_IP</code></td>
+        <td>Aviso: "IP do servidor não encontrado". Associe um host ao cliente ou configure <code>SERVER_IP</code> no .env do CP.</td>
+      </tr>
+      <tr>
+        <td>Domínio custom removido (campo limpo)</td>
+        <td>"Aplicar Configurações" retira o domínio do <code>ALLOWED_HOSTS</code> e não adiciona as labels Traefik. O registro DNS na Cloudflare <strong>não é removido automaticamente</strong> — faça isso manualmente se necessário.</td>
+      </tr>
+    </table>
+  </div>
+
+</div>
+
+<!-- ═══ INFRA E E-MAIL ═══ -->
+<p class="ajuda-section-title">Infraestrutura e configurações</p>
+<div class="ajuda-grid">
 
   <!-- Destruir e recriar -->
   <div class="ajuda-card">
@@ -267,34 +524,42 @@
       <li>Crie um novo cliente com o mesmo slug (ou diferente).</li>
       <li>O provisionamento dispara automaticamente.</li>
     </ul>
-    <p style="margin-top:8px;color:#e65100;font-weight:600;">Se quiser manter o banco (pgdata), use <strong>Re-provisionar</strong> — nunca Destruir.</p>
-    <p style="margin-top:8px;">Resumo da diferença:</p>
+    <p style="margin-top:8px;color:#e65100;font-weight:600;">Se quiser manter o banco, use <strong>Re-provisionar</strong> — nunca Destruir.</p>
+    <p style="margin-top:10px;"><strong>Resumo:</strong></p>
     <ul>
-      <li><strong>Re-provisionar</strong> → preserva banco ✔</li>
-      <li><strong>Destruir</strong> → apaga banco ✘</li>
-      <li><strong>Aplicar Módulos</strong> → não toca no banco ✔</li>
+      <li><strong>Aplicar Configurações</strong> → não toca no banco <span class="tag-ok">seguro</span></li>
+      <li><strong>Re-provisionar</strong> → preserva banco <span class="tag-ok">seguro c/ backup</span></li>
+      <li><strong>Destruir</strong> → apaga banco <span class="tag-no">irreversível</span></li>
     </ul>
   </div>
 
-  <!-- Logs -->
+  <!-- E-mail -->
   <div class="ajuda-card">
-    <h3>📋 Logs de provisionamento</h3>
-    <p>Na página de cada cliente há o inline <strong>"Logs de Provisionamento"</strong> com todas as etapas:</p>
+    <h3>✉️ Configuração de e-mail</h3>
+    <p>Acesse <strong>Configurações → E-Mail</strong> para configurar o servidor SMTP.</p>
     <ul>
-      <li><code>gerar_arquivos</code> — gerou .env e stack.yml</li>
-      <li><code>deploy_stack</code> — executou docker stack deploy</li>
-      <li><code>aguardar_servico</code> — aguardando container Running</li>
-      <li><code>aguardar_http</code> — aguardando /health/ 200</li>
-      <li><code>criar_superuser</code> — senha inicial gerada aqui</li>
+      <li>Usar TLS — padrão para porta 587</li>
+      <li><strong>Verificar SSL</strong> — desmarque se o certificado não corresponder ao hostname (ex: hospedagem compartilhada)</li>
+      <li>Botão <strong>"Enviar e-mail de teste"</strong> — envia imediatamente (síncrono) para o e-mail remetente</li>
     </ul>
+    <p style="margin-top:8px;color:#b71c1c;font-weight:600;">⚠️ Configuração do .env NÃO é usada. Apenas o registro do banco vale.</p>
+  </div>
+
+  <!-- Celery em detalhe -->
+  <div class="ajuda-card">
+    <h3>⏱️ Worker Celery</h3>
+    <p>Em produção o container <code>celery</code> processa as tasks automaticamente.</p>
+    <p style="margin-top:8px;">Em desenvolvimento local:</p>
+    <div class="ajuda-code">.\venv\Scripts\python.exe -m celery -A core worker --loglevel=info</div>
+    <p style="margin-top:8px;">Após mudanças no código, reinicie o worker:</p>
+    <div class="ajuda-code">docker compose -f docker-compose.dev.yml restart celery</div>
+    <p style="margin-top:8px;">Em produção, atualize o stack com <code>docker stack deploy</code> apontando para a nova imagem.</p>
   </div>
 
 </div>
 
 <div class="ajuda-alert">
-  💡 <strong>Dica:</strong> Sempre que fizer alterações no código e precisar que o worker Celery use o código novo, reinicie o container:
-  <div class="ajuda-code" style="margin-top:8px;">docker compose -f docker-compose.dev.yml restart celery</div>
-  Em produção, atualize o stack com <code>docker stack deploy</code> apontando para a nova imagem.
+  💡 <strong>Dica:</strong> O subdomínio padrão (<code>{slug}.ararasuite.com.br</code>) <strong>sempre continua funcionando</strong> mesmo após ativar o domínio custom. Use-o como acesso de emergência caso o DNS do domínio custom tenha algum problema.
 </div>
 
 {% endblock %}

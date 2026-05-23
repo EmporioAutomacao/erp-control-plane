@@ -94,6 +94,7 @@ class Cliente(models.Model):
         ('padrao', 'Padrão (e-commerce)'),
         ('dedetizadora', 'Dedetizadora (verde)'),
         ('dedetizadora2', 'Dedetizadora 2 (azul + animações)'),
+        ('loja', 'Loja (claro premium)'),
     ]
 
     plano = models.ForeignKey(Plano, on_delete=models.PROTECT)

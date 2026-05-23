@@ -46,6 +46,13 @@ class MotorProvisionamento:
         subdominio = self.cliente.subdominio
         modulos = ','.join(m.slug for m in self.cliente.modulos_ativos.all()) or 'financeiro,tarefas'
         tema = self.cliente.tema_site or 'padrao'
+        dominio_custom = self.cliente.dominio_custom or ''
+
+        allowed_hosts = f'{subdominio},{dominio_custom}' if dominio_custom else subdominio
+        csrf_origins = (
+            f'https://{subdominio},https://{dominio_custom}' if dominio_custom
+            else f'https://{subdominio}'
+        )
 
         # Reusar credenciais existentes para não conflitar com o volume pgdata
         env_file = cliente_dir / '.env'
@@ -70,8 +77,8 @@ class MotorProvisionamento:
             'POSTGRES_PORT': '5432',
             'REDIS_URL': 'redis://redis:6379/0',
             'DJANGO_SECRET_KEY': secret_key,
-            'ALLOWED_HOSTS': subdominio,
-            'CSRF_TRUSTED_ORIGINS': f'https://{subdominio}',
+            'ALLOWED_HOSTS': allowed_hosts,
+            'CSRF_TRUSTED_ORIGINS': csrf_origins,
             'DEBUG': 'false',
             'MODULOS_ATIVOS': modulos,
             'TEMA_SITE': tema,
@@ -87,7 +94,7 @@ class MotorProvisionamento:
         # senha_temp logged before deploy so it's preserved even if deploy fails
         self._log('criar_superuser', 'pendente', f'senha_temp:{senha_temp}')
 
-        stack_content = self._gerar_stack_yaml(slug, subdominio, versao, regiao, env_vars)
+        stack_content = self._gerar_stack_yaml(slug, subdominio, versao, regiao, env_vars, dominio_custom)
         stack_file = cliente_dir / 'stack.yml'
         stack_file.write_text(stack_content)
         self._log('gerar_stack', 'concluido')
@@ -191,8 +198,15 @@ class MotorProvisionamento:
             check=True, env=env,
         )
 
-    def _gerar_stack_yaml(self, slug, subdominio, versao, regiao, env_vars):
+    def _gerar_stack_yaml(self, slug, subdominio, versao, regiao, env_vars, dominio_custom=''):
         env_block = '\n'.join(f'      {k}: "{v}"' for k, v in env_vars.items() if k != 'SLUG')
+        labels_custom = ''
+        if dominio_custom:
+            labels_custom = (
+                f'\n        - "traefik.http.routers.{slug}-erp-custom.rule=Host(`{dominio_custom}`)"'
+                f'\n        - "traefik.http.routers.{slug}-erp-custom.entrypoints=web"'
+                f'\n        - "traefik.http.routers.{slug}-erp-custom.service={slug}-erp"'
+            )
         return f"""version: "3.8"
 services:
   web:
@@ -218,7 +232,7 @@ services:
         - "traefik.enable=true"
         - "traefik.http.routers.{slug}-erp.rule=Host(`{subdominio}`)"
         - "traefik.http.routers.{slug}-erp.entrypoints=web"
-        - "traefik.http.services.{slug}-erp.loadbalancer.server.port=8000"
+        - "traefik.http.services.{slug}-erp.loadbalancer.server.port=8000"{labels_custom}
 
   db:
     image: pgvector/pgvector:0.8.0-pg17
