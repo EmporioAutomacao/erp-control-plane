@@ -326,6 +326,14 @@ class ClienteAdmin(ModelAdmin):
             nameservers = data.get('name_servers', [])
             zona_criada = True
 
+        # Garante SSL=Flexible — Cloudflare encaminha HTTP (porta 80) ao Traefik.
+        # Modo Full/Full-Strict tentaria HTTPS (443) e causaria erro 521.
+        _requests.patch(
+            f'{base}/zones/{zone_id}/settings/ssl',
+            json={'value': 'flexible'},
+            headers=json_headers, timeout=15,
+        )
+
         r = _cf_raise(_requests.get(
             f'{base}/zones/{zone_id}/dns_records',
             params={'type': 'A', 'name': dominio},
