@@ -1,4 +1,20 @@
+# docker-compose.dev.yml — ambiente de desenvolvimento local do Control Plane
+#
+# Sobe apenas os serviços de infraestrutura (db, redis) e o próprio CP (web, celery).
+# NÃO inclui Traefik — em dev o acesso é direto pela porta mapeada.
+#
+# Uso:
+#   docker compose -f docker-compose.dev.yml up -d db redis   # somente infra
+#   docker compose -f docker-compose.dev.yml up -d            # tudo
+#
+# Variáveis de ambiente: arquivo .env na raiz (copiar de .env.example).
+# IMPORTANTE: defina PROVISIONING_CHECK_HTTP=false no .env para dev local,
+# pois os subdomínios *.ararasuite.com.br não resolvem na máquina de desenvolvimento.
+
 services:
+
+  # Banco de dados PostgreSQL do Control Plane
+  # Porta 5433 no host para não conflitar com instâncias locais na 5432
   db:
     image: postgres:17-alpine
     environment:
@@ -6,24 +22,29 @@ services:
       POSTGRES_USER: erp_cp
       POSTGRES_PASSWORD: erp_cp_dev
     ports:
-      - "5433:5432"
+      - "5433:5432"    # host:container
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  # Redis — broker do Celery e backend de resultados
+  # Porta 6380 no host para não conflitar com instâncias locais na 6379
   redis:
     image: redis:7-alpine
     ports:
-      - "6380:6379"
+      - "6380:6379"    # host:container
 
+  # Servidor de desenvolvimento Django (runserver)
+  # Acesso em http://localhost:8001/
+  # O socket Docker é montado para que o CP consiga gerenciar stacks dos clientes
   web:
     build: .
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
-      - .:/app
-      - /var/run/docker.sock:/var/run/docker.sock
-      - tenants:/opt/clientes
+      - .:/app                                      # hot-reload do código
+      - /var/run/docker.sock:/var/run/docker.sock   # acesso ao Docker Engine
+      - tenants:/opt/clientes                       # stacks e .env dos clientes
     ports:
-      - "8001:8000"
+      - "8001:8000"    # host:container
     env_file: .env
     environment:
       POSTGRES_HOST: db
@@ -34,6 +55,8 @@ services:
       - db
       - redis
 
+  # Worker Celery — processa tasks assíncronas (provisionamento, e-mails, saúde)
+  # Compartilha volume Docker e tenants com o web para poder executar stacks
   celery:
     build: .
     command: celery -A core worker --loglevel=info
@@ -52,5 +75,5 @@ services:
       - redis
 
 volumes:
-  pgdata:
-  tenants:
+  pgdata:     # dados persistentes do PostgreSQL do CP
+  tenants:    # diretório compartilhado com os stacks provisionados dos clientes
