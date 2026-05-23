@@ -34,6 +34,8 @@ services:
       DJANGO_SUPERUSER_USERNAME: "${DJANGO_SUPERUSER_USERNAME}"
       DJANGO_SUPERUSER_EMAIL: "${DJANGO_SUPERUSER_EMAIL}"
       DJANGO_SUPERUSER_PASSWORD: "${DJANGO_SUPERUSER_PASSWORD}"
+      CF_API_TOKEN: "${CF_API_TOKEN}"
+      SERVER_IP: "${SERVER_IP}"
     volumes:
       - type: bind
         source: /var/run/docker.sock
