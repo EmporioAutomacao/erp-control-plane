@@ -223,8 +223,9 @@ class ConfiguracaoEmail(models.Model):
 
 
 class ConfiguracaoCloudflare(models.Model):
-    cf_api_token = models.CharField(max_length=500, verbose_name='API Token', help_text='Token com permissões Zone:Read + DNS:Edit em All Zones.')
-    server_ip = models.GenericIPAddressField(verbose_name='IP do Servidor', help_text='IP público do Swarm manager — usado no registro A dos domínios custom.')
+    cf_api_token = models.CharField(max_length=500, verbose_name='API Token', help_text='Token com permissões Zone:Read + DNS:Edit + Account:Cloudflare Tunnel:Edit em All Accounts.')
+    tunnel_name = models.CharField(max_length=200, blank=True, verbose_name='Nome do Tunnel', help_text='Nome do Cloudflare Tunnel (deixe vazio para usar o primeiro tunnel ativo encontrado).')
+    server_ip = models.GenericIPAddressField(null=True, blank=True, verbose_name='IP do Servidor (legado)', help_text='Não utilizado — mantido apenas para referência.')
     atualizado_em = models.DateTimeField(auto_now=True)
 
     class Meta:
