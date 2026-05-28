@@ -201,10 +201,18 @@ class ClienteAdmin(ModelAdmin):
         ]
         if dominio_custom:
             cmd += [
+                # Router apex
                 '--label-add', f'traefik.http.routers.{slug}-erp-custom.rule=Host(`{dominio_custom}`)',
                 '--label-add', f'traefik.http.routers.{slug}-erp-custom.entrypoints=web',
                 '--label-add', f'traefik.http.routers.{slug}-erp-custom.service={slug}-erp',
                 '--label-rm', f'traefik.http.routers.{slug}-erp-custom.tls',
+                # Router www → redirect 301 para o apex
+                '--label-add', f'traefik.http.routers.{slug}-erp-custom-www.rule=Host(`www.{dominio_custom}`)',
+                '--label-add', f'traefik.http.routers.{slug}-erp-custom-www.entrypoints=web',
+                '--label-add', f'traefik.http.routers.{slug}-erp-custom-www.middlewares={slug}-www-redirect',
+                '--label-add', f'traefik.http.middlewares.{slug}-www-redirect.redirectregex.regex=^https?://www\\.(.+)',
+                '--label-add', f'traefik.http.middlewares.{slug}-www-redirect.redirectregex.replacement=https://${{1}}',
+                '--label-add', f'traefik.http.middlewares.{slug}-www-redirect.redirectregex.permanent=true',
             ]
         cmd.append(service_name)
 
@@ -220,28 +228,22 @@ class ClienteAdmin(ModelAdmin):
                     f'O serviço está reiniciando — aguarde ~30s e recarregue o ERP.',
                 )
                 if dominio_custom:
-                    ip = (cliente.host.ip if cliente.host else None) or os.getenv('SERVER_IP', '').strip()
-                    if ip and ip not in ('0.0.0.0', '127.0.0.1'):
-                        try:
-                            cf = self._configurar_dominio_cloudflare(dominio_custom, ip)
-                            if cf['ok']:
-                                if cf['zona_criada']:
-                                    ns = ', '.join(cf['nameservers'])
-                                    messages.info(
-                                        request,
-                                        f'Zona "{dominio_custom}" criada no Cloudflare. '
-                                        f'Informe ao cliente para trocar os nameservers no registrador para: {ns}',
-                                    )
-                                else:
-                                    messages.success(request, f'Registro A de "{dominio_custom}" {cf["record"]} no Cloudflare com proxy ativo.')
-                                if cf.get('ssl_aviso'):
-                                    messages.warning(request, cf['ssl_aviso'])
+                    try:
+                        cf = self._configurar_dominio_cloudflare(dominio_custom)
+                        if cf['ok']:
+                            if cf['zona_criada']:
+                                ns = ', '.join(cf['nameservers'])
+                                messages.info(
+                                    request,
+                                    f'Zona "{dominio_custom}" criada no Cloudflare. '
+                                    f'Informe ao cliente para trocar os nameservers no registrador para: {ns}',
+                                )
                             else:
-                                messages.warning(request, f'Cloudflare: {cf["erro"]}')
-                        except Exception as exc:
-                            messages.warning(request, f'Falha ao configurar Cloudflare: {exc}')
-                    else:
-                        messages.warning(request, 'IP do servidor não encontrado — associe um host ao cliente ou configure SERVER_IP no .env do CP.')
+                                messages.success(request, f'CNAME de "{dominio_custom}" {cf["record"]} no Cloudflare → tunnel "{cf["tunnel_name"]}".')
+                        else:
+                            messages.warning(request, f'Cloudflare: {cf["erro"]}')
+                    except Exception as exc:
+                        messages.warning(request, f'Falha ao configurar Cloudflare: {exc}')
             elif 'not found' in result.stderr:
                 messages.info(request, 'Configurações salvas no .env. O cliente ainda não está provisionado — serão aplicadas no próximo provisionamento.')
             else:
@@ -257,29 +259,22 @@ class ClienteAdmin(ModelAdmin):
         if not cliente.dominio_custom:
             messages.warning(request, 'Nenhum domínio custom configurado para este cliente.')
             return redirect('admin:registry_cliente_change', pk)
-        ip = (cliente.host.ip if cliente.host else None) or os.getenv('SERVER_IP', '').strip()
-        if not ip or ip in ('0.0.0.0', '127.0.0.1'):
-            messages.warning(request, f'IP inválido ("{ip or "vazio"}") — associe um HostInfraestrutura ao cliente ou configure SERVER_IP no .env do CP com o IP público do servidor.')
-            return redirect('admin:registry_cliente_change', pk)
         try:
-            cf = self._configurar_dominio_cloudflare(cliente.dominio_custom, ip)
+            cf = self._configurar_dominio_cloudflare(cliente.dominio_custom)
             if cf['ok']:
                 if cf['zona_criada']:
                     ns = ', '.join(cf['nameservers'])
                     messages.success(request, f'Zona "{cliente.dominio_custom}" criada no Cloudflare.')
                     messages.info(request, f'Informe ao cliente para trocar os nameservers no registrador para: {ns}')
                 else:
-                    messages.success(request, f'Registro A de "{cliente.dominio_custom}" {cf["record"]} no Cloudflare com proxy ativo.')
-                if cf.get('ssl_aviso'):
-                    messages.warning(request, cf['ssl_aviso'])
+                    messages.success(request, f'CNAME de "{cliente.dominio_custom}" {cf["record"]} no Cloudflare → tunnel "{cf["tunnel_name"]}".')
             else:
                 messages.error(request, f'Cloudflare: {cf["erro"]}')
         except Exception as exc:
             messages.error(request, f'Falha ao configurar Cloudflare: {exc}')
         return redirect('admin:registry_cliente_change', pk)
 
-    def _configurar_dominio_cloudflare(self, dominio, ip):
-        import os
+    def _configurar_dominio_cloudflare(self, dominio):
         import requests as _requests
 
         cfg = ConfiguracaoCloudflare.obter()
@@ -287,6 +282,8 @@ class ClienteAdmin(ModelAdmin):
         token = token.strip()
         if not token:
             return {'ok': False, 'erro': 'Token Cloudflare não configurado. Acesse Configurações → Cloudflare no admin do CP.'}
+
+        tunnel_name_cfg = (cfg.tunnel_name if cfg else None) or os.getenv('CF_TUNNEL_NAME', '')
 
         def _cf_raise(r):
             if not r.ok:
@@ -298,26 +295,70 @@ class ClienteAdmin(ModelAdmin):
                 raise Exception(f'Cloudflare {r.status_code}: {msg}')
             return r
 
-        # GET requests não devem enviar Content-Type — Cloudflare retorna 400 se enviado sem body
         auth_headers = {'Authorization': f'Bearer {token}'}
         json_headers = {**auth_headers, 'Content-Type': 'application/json'}
         base = 'https://api.cloudflare.com/client/v4'
 
-        # Verifica o token antes de prosseguir — dá erro claro se for Global API Key ou inválido
         r_verify = _requests.get(f'{base}/user/tokens/verify', headers=auth_headers, timeout=10)
         if not r_verify.ok:
             return {
                 'ok': False,
                 'erro': (
-                    'CF_API_TOKEN inválido. Verifique: (1) o token é um API Token, não a Global API Key; '
-                    '(2) tem permissões Zone:Read + DNS:Edit em All Zones. '
+                    'CF_API_TOKEN inválido. Verifique: (1) é um API Token, não a Global API Key; '
+                    '(2) tem permissões Zone:Read + DNS:Edit + Account:Cloudflare Tunnel:Edit. '
                     f'Cloudflare retornou {r_verify.status_code}.'
                 ),
             }
 
+        # Obtém account ID a partir de uma zona existente (não requer Account:Read)
+        saas_domain = os.getenv('SAAS_DOMAIN', 'ararasuite.com.br')
+        r_zone = _requests.get(f'{base}/zones', params={'name': saas_domain}, headers=auth_headers, timeout=15)
+        if r_zone.ok and r_zone.json().get('result'):
+            account_id = r_zone.json()['result'][0]['account']['id']
+        else:
+            r = _cf_raise(_requests.get(f'{base}/accounts', headers=auth_headers, timeout=15))
+            accounts = r.json()['result']
+            if not accounts:
+                return {'ok': False, 'erro': f'Não foi possível obter o Account ID. Adicione "Account Settings:Read" ao token ou certifique que SAAS_DOMAIN ({saas_domain}) está na conta Cloudflare.'}
+            account_id = accounts[0]['id']
+
+        # Encontra o tunnel ativo
+        params = {'is_deleted': 'false'}
+        if tunnel_name_cfg:
+            params['name'] = tunnel_name_cfg
+        r = _cf_raise(_requests.get(f'{base}/accounts/{account_id}/cfd_tunnel', params=params, headers=auth_headers, timeout=15))
+        tunnels = r.json()['result']
+        if not tunnels:
+            return {'ok': False, 'erro': 'Nenhum Cloudflare Tunnel encontrado. Configure o nome do tunnel em Configurações → Cloudflare.'}
+        tunnel = tunnels[0]
+        tunnel_id = tunnel['id']
+        tunnel_name = tunnel['name']
+
+        # Atualiza ingress do tunnel para incluir o domínio custom
+        r = _cf_raise(_requests.get(f'{base}/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations', headers=auth_headers, timeout=15))
+        config_data = r.json()['result'].get('config', {})
+        ingress = config_data.get('ingress', [])
+
+        www_dominio = f'www.{dominio}'
+        ingress_others = [
+            rule for rule in ingress
+            if rule.get('hostname') and rule['hostname'] not in {dominio, www_dominio}
+        ]
+        catch_all = next((rule for rule in ingress if not rule.get('hostname')), {'service': 'http_status:404'})
+        new_ingress = [
+            {'hostname': dominio,     'service': 'http://traefik_traefik:80'},
+            {'hostname': www_dominio, 'service': 'http://traefik_traefik:80'},
+        ] + ingress_others + [catch_all]
+
+        _cf_raise(_requests.put(
+            f'{base}/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations',
+            json={'config': {**config_data, 'ingress': new_ingress}},
+            headers=json_headers, timeout=15,
+        ))
+
+        # Cria/encontra zona e cria CNAME apontando para o tunnel
         r = _cf_raise(_requests.get(f'{base}/zones', params={'name': dominio}, headers=auth_headers, timeout=15))
         zonas = r.json()['result']
-
         nameservers = []
         zona_criada = False
 
@@ -330,45 +371,70 @@ class ClienteAdmin(ModelAdmin):
             nameservers = data.get('name_servers', [])
             zona_criada = True
 
-        # Garante SSL=Flexible — Cloudflare encaminha HTTP (porta 80) ao Traefik.
-        # Requer permissão Zone.Settings.Edit no token. Se falhar, retorna aviso.
-        r_ssl = _requests.patch(
-            f'{base}/zones/{zone_id}/settings/ssl',
-            json={'value': 'flexible'},
-            headers=json_headers, timeout=15,
-        )
-        ssl_ok = r_ssl.ok and r_ssl.json().get('success')
-        ssl_aviso = '' if ssl_ok else (
-            ' ATENÇÃO: não foi possível definir SSL=Flexible via API '
-            '(token precisa de Zone.Settings.Edit). Defina manualmente em '
-            'Cloudflare → SSL/TLS → Overview → Flexible.'
-        )
+        tunnel_cname = f'{tunnel_id}.cfargotunnel.com'
 
-        r = _cf_raise(_requests.get(
-            f'{base}/zones/{zone_id}/dns_records',
-            params={'type': 'A', 'name': dominio},
-            headers=auth_headers, timeout=15,
-        ))
+        # Remove registro A conflitante, se existir
+        r_a = _requests.get(f'{base}/zones/{zone_id}/dns_records', params={'type': 'A', 'name': dominio}, headers=auth_headers, timeout=15)
+        if r_a.ok:
+            for rec in r_a.json().get('result', []):
+                _requests.delete(f'{base}/zones/{zone_id}/dns_records/{rec["id"]}', headers=auth_headers, timeout=15)
+
+        # Cria ou atualiza CNAME → tunnel
+        r = _cf_raise(_requests.get(f'{base}/zones/{zone_id}/dns_records', params={'type': 'CNAME', 'name': dominio}, headers=auth_headers, timeout=15))
         records = r.json()['result']
 
         if records:
             record_id = records[0]['id']
-            if records[0]['content'] != ip or not records[0].get('proxied'):
+            if records[0]['content'] != tunnel_cname or not records[0].get('proxied'):
                 _cf_raise(_requests.put(
                     f'{base}/zones/{zone_id}/dns_records/{record_id}',
-                    json={'type': 'A', 'name': '@', 'content': ip, 'proxied': True, 'ttl': 1},
+                    json={'type': 'CNAME', 'name': '@', 'content': tunnel_cname, 'proxied': True, 'ttl': 1},
                     headers=json_headers, timeout=15,
                 ))
             record_acao = 'atualizado'
         else:
             _cf_raise(_requests.post(
                 f'{base}/zones/{zone_id}/dns_records',
-                json={'type': 'A', 'name': '@', 'content': ip, 'proxied': True, 'ttl': 1},
+                json={'type': 'CNAME', 'name': '@', 'content': tunnel_cname, 'proxied': True, 'ttl': 1},
                 headers=json_headers, timeout=15,
             ))
             record_acao = 'criado'
 
-        return {'ok': True, 'zona_criada': zona_criada, 'nameservers': nameservers, 'record': record_acao, 'ssl_aviso': ssl_aviso}
+        # Remove A record de www conflitante, se existir
+        r_a_www = _requests.get(
+            f'{base}/zones/{zone_id}/dns_records',
+            params={'type': 'A', 'name': f'www.{dominio}'},
+            headers=auth_headers, timeout=15,
+        )
+        if r_a_www.ok:
+            for rec in r_a_www.json().get('result', []):
+                _requests.delete(
+                    f'{base}/zones/{zone_id}/dns_records/{rec["id"]}',
+                    headers=auth_headers, timeout=15,
+                )
+
+        # Cria ou atualiza CNAME www → tunnel
+        r_www = _cf_raise(_requests.get(
+            f'{base}/zones/{zone_id}/dns_records',
+            params={'type': 'CNAME', 'name': 'www'},
+            headers=auth_headers, timeout=15,
+        ))
+        records_www = r_www.json()['result']
+        if records_www:
+            if records_www[0]['content'] != tunnel_cname or not records_www[0].get('proxied'):
+                _cf_raise(_requests.put(
+                    f'{base}/zones/{zone_id}/dns_records/{records_www[0]["id"]}',
+                    json={'type': 'CNAME', 'name': 'www', 'content': tunnel_cname, 'proxied': True, 'ttl': 1},
+                    headers=json_headers, timeout=15,
+                ))
+        else:
+            _cf_raise(_requests.post(
+                f'{base}/zones/{zone_id}/dns_records',
+                json={'type': 'CNAME', 'name': 'www', 'content': tunnel_cname, 'proxied': True, 'ttl': 1},
+                headers=json_headers, timeout=15,
+            ))
+
+        return {'ok': True, 'zona_criada': zona_criada, 'nameservers': nameservers, 'record': record_acao, 'tunnel_name': tunnel_name}
 
     def status_badge(self, obj):
         cor = _STATUS_CORES.get(obj.status, '#757575')
@@ -438,7 +504,7 @@ class ClienteAdmin(ModelAdmin):
             'onclick="return confirm(\'O serviço web do cliente será reiniciado para aplicar as configurações (módulos, tema, domínio custom) — leva ~30s. Continuar?\')">⚙ Aplicar Configurações</a>'
             '&nbsp;&nbsp;'
             '<a href="{}" style="display:inline-block;padding:6px 14px;background:#0369a1;color:#fff;border-radius:4px;text-decoration:none;font-size:13px;" '
-            'onclick="return confirm(\'Criar/atualizar zona e registro A no Cloudflare para o domínio custom configurado. Continuar?\')">☁ Configurar Cloudflare</a>'
+            'onclick="return confirm(\'Adicionar domínio custom ao Cloudflare Tunnel e criar CNAME no DNS. Continuar?\')">☁ Configurar Cloudflare</a>'
             '&nbsp;&nbsp;'
             '<a href="{}" style="display:inline-block;padding:6px 14px;background:#417690;color:#fff;border-radius:4px;text-decoration:none;font-size:13px;" '
             'onclick="return confirm(\'ATENÇÃO: Faça backup do banco do cliente ANTES de re-provisionar. Dados podem ser perdidos se houver conflito de volume.\\n\\nConfirma que o backup foi realizado e deseja continuar?\')">Re-provisionar</a>'
@@ -525,12 +591,12 @@ class _ConfiguracaoCloudflareForm(forms.ModelForm):
     cf_api_token = forms.CharField(
         label='API Token',
         widget=forms.PasswordInput(render_value=True),
-        help_text='Token com permissões Zone:Read + DNS:Edit em All Zones. Criado em Cloudflare → My Profile → API Tokens.',
+        help_text='Token com permissões Zone:Read + DNS:Edit + Account:Cloudflare Tunnel:Edit em All Accounts. Criado em Cloudflare → My Profile → API Tokens.',
     )
 
     class Meta:
         model = ConfiguracaoCloudflare
-        fields = '__all__'
+        fields = ['cf_api_token', 'tunnel_name']
 
 
 @admin.register(ConfiguracaoCloudflare)
@@ -539,7 +605,7 @@ class ConfiguracaoCloudflareAdmin(ModelAdmin):
 
     fieldsets = [
         ('Autenticação', {'fields': ['cf_api_token']}),
-        ('Servidor', {'fields': ['server_ip']}),
+        ('Tunnel', {'fields': ['tunnel_name']}),
         ('Verificar token', {'fields': ['botao_verificar_token']}),
     ]
     readonly_fields = ['atualizado_em', 'botao_verificar_token']

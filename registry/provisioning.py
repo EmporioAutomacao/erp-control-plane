@@ -203,9 +203,17 @@ class MotorProvisionamento:
         labels_custom = ''
         if dominio_custom:
             labels_custom = (
+                # Router apex
                 f'\n        - "traefik.http.routers.{slug}-erp-custom.rule=Host(`{dominio_custom}`)"'
                 f'\n        - "traefik.http.routers.{slug}-erp-custom.entrypoints=web"'
                 f'\n        - "traefik.http.routers.{slug}-erp-custom.service={slug}-erp"'
+                # Router www → redireciona 301 para o apex
+                f'\n        - "traefik.http.routers.{slug}-erp-custom-www.rule=Host(`www.{dominio_custom}`)"'
+                f'\n        - "traefik.http.routers.{slug}-erp-custom-www.entrypoints=web"'
+                f'\n        - "traefik.http.routers.{slug}-erp-custom-www.middlewares={slug}-www-redirect"'
+                f'\n        - "traefik.http.middlewares.{slug}-www-redirect.redirectregex.regex=^https?://www\\\\.(.+)"'
+                f'\n        - "traefik.http.middlewares.{slug}-www-redirect.redirectregex.replacement=https://$${{1}}"'
+                f'\n        - "traefik.http.middlewares.{slug}-www-redirect.redirectregex.permanent=true"'
             )
         return f"""version: "3.8"
 services:
