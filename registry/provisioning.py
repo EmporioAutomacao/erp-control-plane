@@ -233,9 +233,9 @@ services:
         constraints:
           - node.labels.region == {regiao}
       restart_policy:
-        condition: on-failure
-        delay: 10s
-        max_attempts: 3
+        condition: any
+        delay: 60s
+        window: 120s
       labels:
         - "traefik.enable=true"
         - "traefik.http.routers.{slug}-erp.rule=Host(`{subdominio}`)"

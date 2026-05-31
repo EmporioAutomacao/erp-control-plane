@@ -6,7 +6,8 @@
       "Bash(Get-ChildItem -Path \"d:\\\\GitHub\\\\erp-control-plane\" -Recurse -Filter \"*.py\")",
       "Bash(Select-Object -ExpandProperty FullName)",
       "PowerShell(head -50)",
-      "Bash(xargs grep -l \"periodic\\\\|beat\\\\|schedule\")"
+      "Bash(xargs grep -l \"periodic\\\\|beat\\\\|schedule\")",
+      "Bash(docker service *)"
     ]
   }
 }
