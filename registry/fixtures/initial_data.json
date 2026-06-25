@@ -21,6 +21,16 @@
 },
 {
   "model": "registry.modulo",
+  "pk": "compras",
+  "fields": {
+    "nome": "Compras",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
   "pk": "contratos",
   "fields": {
     "nome": "Contratos",
@@ -156,6 +166,7 @@
     "modulos_inclusos": [
       "assistente_comercial",
       "cobranca",
+      "compras",
       "contratos",
       "dedetizacao",
       "ecommerce",

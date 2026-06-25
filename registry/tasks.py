@@ -132,6 +132,174 @@ def task_enviar_email_boas_vindas(cliente_id):
         logger.error('Falha ao enviar e-mail de boas-vindas para %s: %s', cliente_id, exc)
 
 
+@shared_task(bind=True, max_retries=0)
+def task_backup_cliente(self, cliente_id, backup_id):
+    import io
+    import shutil
+    import subprocess
+    from .models import Cliente, BackupCliente
+
+    def _prog(pct):
+        BackupCliente.objects.filter(pk=backup_id).update(progresso=pct)
+
+    cliente = Cliente.objects.get(pk=cliente_id)
+    slug = cliente.slug
+    backup_base = Path(os.getenv('CP_BACKUP_DIR', '/opt/backups/cp')) / 'clientes' / slug
+    backup_base.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    arquivo = backup_base / f'backup_{slug}_{timestamp}.tar.gz'
+
+    try:
+        _prog(5)
+        with tarfile.open(arquivo, 'w:gz') as tar:
+            # 1. DB dump via container do banco
+            _prog(10)
+            r = subprocess.run(
+                ['docker', 'ps', '-q', '-f', f'name={slug}_db'],
+                capture_output=True, text=True,
+            )
+            db_ctr = r.stdout.strip().splitlines()[0] if r.stdout.strip() else None
+            if db_ctr:
+                dump = subprocess.run(
+                    ['docker', 'exec', db_ctr,
+                     'pg_dump', '--clean', '--if-exists', '-U', f'erp_{slug}', f'erp_{slug}'],
+                    capture_output=True, timeout=300,
+                )
+                if dump.returncode == 0:
+                    info = tarfile.TarInfo(name='db.sql')
+                    data = dump.stdout
+                    info.size = len(data)
+                    tar.addfile(info, io.BytesIO(data))
+            _prog(55)
+
+            # 2. Arquivos de mídia via docker cp do container web
+            r2 = subprocess.run(
+                ['docker', 'ps', '-q', '-f', f'name={slug}_web'],
+                capture_output=True, text=True,
+            )
+            web_ctr = r2.stdout.strip().splitlines()[0] if r2.stdout.strip() else None
+            if web_ctr:
+                media_tmp = backup_base / f'_media_tmp_{timestamp}'
+                media_tmp.mkdir(parents=True, exist_ok=True)
+                try:
+                    subprocess.run(
+                        ['docker', 'cp', f'{web_ctr}:/app/media/.', str(media_tmp)],
+                        capture_output=True, timeout=120,
+                    )
+                    tar.add(str(media_tmp), arcname='media')
+                finally:
+                    shutil.rmtree(media_tmp, ignore_errors=True)
+            _prog(80)
+
+            # 3. Arquivos de configuração do cliente
+            clientes_base = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes'))
+            cliente_dir = clientes_base / slug
+            if cliente_dir.exists():
+                tar.add(str(cliente_dir), arcname='config')
+            _prog(95)
+
+        tamanho = arquivo.stat().st_size
+        BackupCliente.objects.filter(pk=backup_id).update(
+            status='concluido',
+            progresso=100,
+            arquivo_path=str(arquivo),
+            tamanho_bytes=tamanho,
+        )
+        logger.info('Backup concluido: %s (%.1f MB)', arquivo, tamanho / 1024 / 1024)
+
+        # Manter apenas os 3 mais recentes (arquivos e registros)
+        todos_arquivos = sorted(backup_base.glob(f'backup_{slug}_*.tar.gz'), key=lambda p: p.stat().st_mtime)
+        for antigo in todos_arquivos[:-3]:
+            antigo.unlink()
+        ids_manter = list(
+            BackupCliente.objects.filter(cliente=cliente, status='concluido')
+            .order_by('-criado_em').values_list('pk', flat=True)[:3]
+        )
+        BackupCliente.objects.filter(cliente=cliente, status='concluido').exclude(pk__in=ids_manter).delete()
+
+    except Exception as exc:
+        if arquivo.exists():
+            arquivo.unlink()
+        BackupCliente.objects.filter(pk=backup_id).update(status='erro', mensagem=str(exc))
+        logger.error('Erro no backup de %s: %s', slug, exc)
+        raise
+
+
+@shared_task(bind=True, max_retries=0)
+def task_restaurar_cliente(self, cliente_id, backup_id):
+    import shutil
+    import subprocess
+    import time
+    from .models import Cliente, BackupCliente
+
+    def _prog(pct):
+        BackupCliente.objects.filter(pk=backup_id).update(progresso=pct)
+
+    cliente = Cliente.objects.get(pk=cliente_id)
+    backup = BackupCliente.objects.get(pk=backup_id)
+    slug = cliente.slug
+    arquivo = Path(backup.arquivo_path)
+
+    if not arquivo.exists():
+        raise FileNotFoundError(f'Arquivo de backup não encontrado: {arquivo}')
+
+    BackupCliente.objects.filter(pk=backup_id).update(restaurando=True, progresso=0)
+
+    restore_dir = Path(os.getenv('CP_BACKUP_DIR', '/opt/backups/cp')) / f'_restore_{slug}'
+    restore_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # 1. Para o serviço web do cliente
+        _prog(10)
+        subprocess.run(['docker', 'service', 'scale', f'{slug}_web=0'], capture_output=True, timeout=60)
+        time.sleep(10)
+
+        # 2. Extrai o backup
+        _prog(25)
+        with tarfile.open(arquivo, 'r:gz') as tar:
+            tar.extractall(restore_dir)
+
+        # 3. Restaura o banco de dados
+        _prog(40)
+        db_sql = restore_dir / 'db.sql'
+        r = subprocess.run(
+            ['docker', 'ps', '-q', '-f', f'name={slug}_db'],
+            capture_output=True, text=True,
+        )
+        db_ctr = r.stdout.strip().splitlines()[0] if r.stdout.strip() else None
+        if db_sql.exists() and db_ctr:
+            subprocess.run(
+                ['docker', 'exec', '-i', db_ctr,
+                 'psql', '-U', f'erp_{slug}', '-d', f'erp_{slug}'],
+                input=db_sql.read_bytes(),
+                capture_output=True, timeout=300,
+            )
+        _prog(75)
+
+        # 4. Restaura a mídia via container alpine temporário com acesso ao volume
+        media_dir = restore_dir / 'media'
+        if media_dir.exists():
+            subprocess.run(
+                [
+                    'docker', 'run', '--rm',
+                    '-v', f'{slug}_media:/app/media',
+                    '-v', f'{str(media_dir)}:/restore/media:ro',
+                    'alpine', 'sh', '-c',
+                    'rm -rf /app/media/* && cp -rp /restore/media/. /app/media/',
+                ],
+                capture_output=True, timeout=120,
+            )
+        _prog(90)
+
+    finally:
+        shutil.rmtree(restore_dir, ignore_errors=True)
+        subprocess.run(['docker', 'service', 'scale', f'{slug}_web=1'], capture_output=True, timeout=60)
+        BackupCliente.objects.filter(pk=backup_id).update(restaurando=False, progresso=100)
+
+    logger.info('Restauração concluída para %s a partir de %s', slug, arquivo.name)
+
+
 @shared_task
 def task_verificar_saude_cliente(cliente_id):
     from .models import Cliente, VerificacaoSaude

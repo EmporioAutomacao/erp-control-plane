@@ -1,12 +1,12 @@
 import os
 from django import forms
 from django.contrib import admin
-from django.http import JsonResponse
+from django.http import FileResponse, Http404, JsonResponse
 from django.urls import path
 from django.shortcuts import get_object_or_404, redirect
 from django.utils.html import format_html, mark_safe
 from unfold.admin import ModelAdmin
-from .models import Modulo, Plano, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare
+from .models import Modulo, Plano, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare, BackupCliente
 
 
 @admin.register(Modulo)
@@ -96,7 +96,7 @@ class ClienteAdmin(ModelAdmin):
     list_display = ['slug', 'nome', 'subdominio', 'plano', 'status_badge', 'isento_cobranca', 'versao_erp', 'criado_em']
     list_filter = ['status', 'plano', 'host', 'isento_cobranca']
     search_fields = ['slug', 'nome', 'cnpj', 'email_contato']
-    readonly_fields = ['id', 'criado_em', 'atualizado_em', 'status_badge', 'painel_acesso', 'acoes_provisionamento', 'badge_isencao']
+    readonly_fields = ['id', 'criado_em', 'atualizado_em', 'status_badge', 'painel_acesso', 'acoes_provisionamento', 'badge_isencao', 'lista_backups']
     filter_horizontal = ['modulos_ativos']
     actions = [acao_reprovisionar, acao_destruir]
     inlines = [ProvisionamentoLogInline, AtualizacaoVersaoInline]
@@ -108,6 +108,7 @@ class ClienteAdmin(ModelAdmin):
         ('Faturamento', {'fields': ['asaas_customer_id', 'asaas_subscription_id', 'badge_isencao', 'isento_cobranca', 'motivo_isencao']}),
         ('Status', {'fields': ['status_badge', 'status', 'trial_ate', 'data_ativacao', 'data_suspensao', 'data_cancelamento']}),
         ('Ações', {'fields': ['acoes_provisionamento']}),
+        ('Backups', {'fields': ['lista_backups']}),
         ('Observações', {'fields': ['observacoes', 'criado_em', 'atualizado_em']}),
     ]
 
@@ -119,6 +120,10 @@ class ClienteAdmin(ModelAdmin):
             path('<pk>/reenviar-boas-vindas/', self.admin_site.admin_view(self._view_reenviar_boas_vindas), name='registry_cliente_reenviar_boas_vindas'),
             path('<pk>/aplicar-modulos/', self.admin_site.admin_view(self._view_aplicar_modulos), name='registry_cliente_aplicar_modulos'),
             path('<pk>/configurar-cloudflare/', self.admin_site.admin_view(self._view_configurar_cloudflare), name='registry_cliente_configurar_cloudflare'),
+            path('<pk>/backup/', self.admin_site.admin_view(self._view_backup), name='registry_cliente_backup'),
+            path('<pk>/backups/<int:backup_id>/download/', self.admin_site.admin_view(self._view_download_backup), name='registry_cliente_backup_download'),
+            path('<pk>/backups/<int:backup_id>/restaurar/', self.admin_site.admin_view(self._view_restaurar), name='registry_cliente_restaurar'),
+            path('<pk>/backups/<int:backup_id>/status/', self.admin_site.admin_view(self._view_status_backup), name='registry_cliente_backup_status'),
         ] + urls
 
     def _view_reprovisionar(self, request, pk):
@@ -198,6 +203,8 @@ class ClienteAdmin(ModelAdmin):
             '--env-add', f'TEMA_SITE={tema}',
             '--env-add', f'ALLOWED_HOSTS={allowed_hosts}',
             '--env-add', f'CSRF_TRUSTED_ORIGINS={csrf_origins}',
+            # Atualiza a label do router principal (subdomínio padrão) no Traefik
+            '--label-add', f'traefik.http.routers.{slug}-erp.rule=Host(`{subdominio}`)',
         ]
         if dominio_custom:
             cmd += [
@@ -436,6 +443,52 @@ class ClienteAdmin(ModelAdmin):
 
         return {'ok': True, 'zona_criada': zona_criada, 'nameservers': nameservers, 'record': record_acao, 'tunnel_name': tunnel_name}
 
+    def _view_backup(self, request, pk):
+        from django.contrib import messages
+        from .tasks import task_backup_cliente
+        cliente = get_object_or_404(Cliente, pk=pk)
+        backup = BackupCliente.objects.create(cliente=cliente)
+        task_backup_cliente.delay(str(cliente.pk), backup.pk)
+        messages.success(request, f'Backup iniciado para "{cliente.slug}". Recarregue a página para ver o status.')
+        return redirect('admin:registry_cliente_change', pk)
+
+    def _view_download_backup(self, request, pk, backup_id):
+        from pathlib import Path
+        backup = get_object_or_404(BackupCliente, pk=backup_id, cliente__pk=pk)
+        if backup.status != 'concluido' or not backup.arquivo_path:
+            raise Http404
+        arquivo = Path(backup.arquivo_path)
+        if not arquivo.exists():
+            raise Http404
+        return FileResponse(open(arquivo, 'rb'), as_attachment=True, filename=arquivo.name)
+
+    def _view_restaurar(self, request, pk, backup_id):
+        from django.contrib import messages
+        from .tasks import task_restaurar_cliente
+        cliente = get_object_or_404(Cliente, pk=pk)
+        backup = get_object_or_404(BackupCliente, pk=backup_id, cliente=cliente)
+        if backup.status != 'concluido':
+            messages.error(request, 'Apenas backups concluídos podem ser restaurados.')
+            return redirect('admin:registry_cliente_change', pk)
+        task_restaurar_cliente.delay(str(cliente.pk), backup.pk)
+        messages.warning(
+            request,
+            f'Restauração iniciada para "{cliente.slug}". O ERP ficará indisponível por alguns minutos. '
+            f'Acompanhe o progresso na seção Backups abaixo.',
+        )
+        return redirect('admin:registry_cliente_change', pk)
+
+    def _view_status_backup(self, request, pk, backup_id):
+        backup = get_object_or_404(BackupCliente, pk=backup_id, cliente__pk=pk)
+        ativo = backup.status == 'em_andamento' or backup.restaurando
+        return JsonResponse({
+            'status': backup.status,
+            'progresso': backup.progresso,
+            'restaurando': backup.restaurando,
+            'ativo': ativo,
+            'mensagem': backup.mensagem[:120] if backup.mensagem else '',
+        })
+
     def status_badge(self, obj):
         cor = _STATUS_CORES.get(obj.status, '#757575')
         label = obj.get_status_display()
@@ -516,6 +569,110 @@ class ClienteAdmin(ModelAdmin):
             url_modulos, url_cloudflare, url_reprov, url_destruir, url_boas_vindas,
         )
     acoes_provisionamento.short_description = 'Provisionamento'
+
+    def lista_backups(self, obj):
+        if not obj.pk:
+            return '—'
+        from django.urls import reverse
+        backups = list(obj.backups.all()[:5])
+        url_novo = reverse('admin:registry_cliente_backup', args=[obj.pk])
+
+        botao_novo = (
+            f'<a href="{url_novo}" style="display:inline-block;padding:6px 14px;background:#2e7d32;'
+            f'color:#fff;border-radius:4px;text-decoration:none;font-size:13px;" '
+            f'onclick="return confirm(\'Iniciar backup completo (banco de dados + mídia + configuração) para este cliente? O processo roda em segundo plano.\')">💾 Novo Backup</a>'
+        )
+
+        if not backups:
+            return format_html(
+                '{}<p style="margin-top:12px;color:#999;font-size:13px;">Nenhum backup registrado ainda.</p>',
+                mark_safe(botao_novo),
+            )
+
+        _BACKUP_CORES = {
+            'concluido':   ('#e8f5e9', '#2e7d32', 'Concluído'),
+            'em_andamento': ('#fff8e1', '#f57f17', 'Em andamento'),
+            'erro':        ('#ffebee', '#b71c1c', 'Erro'),
+        }
+
+        _BACKUP_CORES = {
+            'concluido':    ('#e8f5e9', '#2e7d32', 'Concluído'),
+            'em_andamento': ('#fff8e1', '#f57f17', 'Em andamento'),
+            'erro':         ('#ffebee', '#b71c1c', 'Erro'),
+        }
+
+        linhas = []
+        scripts = []
+        for b in backups:
+            ativo = b.status == 'em_andamento' or b.restaurando
+            data = b.criado_em.strftime('%d/%m/%Y %H:%M')
+
+            if b.restaurando:
+                bg, fg, label = '#fff3e0', '#e65100', 'Restaurando...'
+            else:
+                bg, fg, label = _BACKUP_CORES.get(b.status, ('#f5f5f5', '#333', b.status))
+
+            badge = f'<span style="background:{bg};color:{fg};padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">{label}</span>'
+
+            if ativo:
+                pct = b.progresso
+                barra = (
+                    f'<div style="margin-top:6px;background:#e0e0e0;border-radius:6px;height:14px;width:100%;max-width:320px;overflow:hidden;">'
+                    f'  <div id="bpbar-{b.pk}" style="height:14px;width:{pct}%;background:linear-gradient(90deg,#1565c0,#42a5f5);border-radius:6px;transition:width .4s ease;"></div>'
+                    f'</div>'
+                    f'<div style="font-size:11px;color:#555;margin-top:3px;">'
+                    f'  <span id="bppct-{b.pk}">{pct}%</span>'
+                    f'  <span style="margin-left:8px;color:#999;">· recarregando automaticamente…</span>'
+                    f'</div>'
+                )
+                url_status = reverse('admin:registry_cliente_backup_status', args=[obj.pk, b.pk])
+                scripts.append(
+                    f'(function(){{'
+                    f'  var bar=document.getElementById("bpbar-{b.pk}");'
+                    f'  var pct=document.getElementById("bppct-{b.pk}");'
+                    f'  var iv=setInterval(function(){{'
+                    f'    fetch("{url_status}").then(function(r){{return r.json();}}).then(function(d){{'
+                    f'      if(bar){{bar.style.width=d.progresso+"%";}} '
+                    f'      if(pct){{pct.textContent=d.progresso+"%";}} '
+                    f'      if(!d.ativo){{clearInterval(iv);location.reload();}}'
+                    f'    }}).catch(function(){{clearInterval(iv);}});'
+                    f'  }},2000);'
+                    f'}})();'
+                )
+                acoes = barra
+            elif b.status == 'concluido':
+                url_dl = reverse('admin:registry_cliente_backup_download', args=[obj.pk, b.pk])
+                url_rst = reverse('admin:registry_cliente_restaurar', args=[obj.pk, b.pk])
+                acoes = (
+                    f'<span style="color:#666;font-size:12px;margin-right:8px;">{b.tamanho_fmt}</span>'
+                    f'<a href="{url_dl}" style="padding:3px 10px;background:#1565c0;color:#fff;border-radius:4px;font-size:12px;text-decoration:none;margin-right:4px;">⬇ Baixar</a>'
+                    f'<a href="{url_rst}" style="padding:3px 10px;background:#e65100;color:#fff;border-radius:4px;font-size:12px;text-decoration:none;" '
+                    f'onclick="return confirm(\'ATENÇÃO: O ERP ficará indisponível por alguns minutos durante a restauração.\\n\\nO banco de dados e a pasta mídia serão sobrescritos pelo backup de {data}.\\n\\nConfirma?\')">↩ Restaurar</a>'
+                )
+            else:
+                acoes = f'<span style="color:#b71c1c;font-size:12px;">{b.mensagem[:100]}</span>'
+
+            linhas.append(
+                f'<tr>'
+                f'<td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:13px;white-space:nowrap;">{data}</td>'
+                f'<td style="padding:6px 10px;border-bottom:1px solid #eee;">{badge}</td>'
+                f'<td style="padding:6px 10px;border-bottom:1px solid #eee;">{acoes}</td>'
+                f'</tr>'
+            )
+
+        tabela = (
+            '<table style="width:100%;border-collapse:collapse;margin-top:12px;">'
+            '<thead><tr>'
+            '<th style="text-align:left;padding:6px 10px;background:#f5f5f5;font-size:12px;font-weight:600;white-space:nowrap;">Data</th>'
+            '<th style="text-align:left;padding:6px 10px;background:#f5f5f5;font-size:12px;font-weight:600;">Status</th>'
+            '<th style="text-align:left;padding:6px 10px;background:#f5f5f5;font-size:12px;font-weight:600;">Ações</th>'
+            '</tr></thead><tbody>' + ''.join(linhas) + '</tbody></table>'
+        )
+
+        script_tag = f'<script>{" ".join(scripts)}</script>' if scripts else ''
+        return format_html('{}{}{}', mark_safe(botao_novo), mark_safe(tabela), mark_safe(script_tag))
+
+    lista_backups.short_description = 'Backups'
 
 
 @admin.register(VerificacaoSaude)

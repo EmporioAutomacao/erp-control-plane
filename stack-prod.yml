@@ -83,9 +83,9 @@ services:
         constraints:
           - node.role == manager    # deve rodar no manager para acessar o Docker socket
       restart_policy:
-        condition: on-failure
-        delay: 10s
-        max_attempts: 3
+        condition: any
+        delay: 60s
+        window: 120s
       labels:
         - "traefik.enable=true"
         - "traefik.http.routers.ararasuite-cp.rule=Host(`${CP_DOMAIN}`)"

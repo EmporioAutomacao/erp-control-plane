@@ -244,6 +244,36 @@ class ConfiguracaoCloudflare(models.Model):
         return cls.objects.filter(pk=1).first()
 
 
+class BackupCliente(models.Model):
+    STATUS_CHOICES = [
+        ('em_andamento', 'Em andamento'),
+        ('concluido', 'Concluído'),
+        ('erro', 'Erro'),
+    ]
+    cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='backups')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    arquivo_path = models.CharField(max_length=500, blank=True)
+    tamanho_bytes = models.BigIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='em_andamento')
+    progresso = models.PositiveSmallIntegerField(default=0)
+    restaurando = models.BooleanField(default=False)
+    mensagem = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = 'Backup'
+        verbose_name_plural = 'Backups'
+        ordering = ['-criado_em']
+
+    def __str__(self):
+        return f'Backup {self.cliente.slug} {self.criado_em:%d/%m/%Y %H:%M}'
+
+    @property
+    def tamanho_fmt(self):
+        if self.tamanho_bytes < 1024 * 1024:
+            return f'{self.tamanho_bytes / 1024:.1f} KB'
+        return f'{self.tamanho_bytes / 1024 / 1024:.1f} MB'
+
+
 class VerificacaoSaude(models.Model):
     cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='verificacoes_saude')
     verificado_em = models.DateTimeField(auto_now_add=True)
