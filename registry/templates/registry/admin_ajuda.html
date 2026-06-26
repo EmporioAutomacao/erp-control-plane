@@ -402,6 +402,25 @@
         <td>Reenfileira no Celery o e-mail HTML com URL, usuário <code>admin</code> e senha inicial (do log de provisionamento).</td>
         <td><span class="tag-ok">Não</span></td>
       </tr>
+      <tr>
+        <td><span class="btn-demo" style="background:#0f766e;">💾 Novo Backup</span></td>
+        <td>
+          Dispara a task <code>task_backup_cliente</code> no Celery. Cria um <code>.tar.gz</code> em <code>CP_BACKUP_DIR/clientes/{slug}/</code> com três itens:<br>
+          • <code>db.sql</code> — dump completo via <code>pg_dump --clean --if-exists</code><br>
+          • <code>media/</code> — arquivos copiados de <code>/app/media</code> do container web<br>
+          • <code>config/</code> — <code>.env</code> e <code>stack.yml</code> do cliente<br>
+          Uma barra de progresso em tempo real (polling a cada 2s) acompanha o processo. Mantém apenas os 3 backups mais recentes.
+        </td>
+        <td><span class="tag-ok">Não</span></td>
+      </tr>
+      <tr>
+        <td><span class="btn-demo" style="background:#7c3aed;">↩ Restaurar</span></td>
+        <td>
+          Dispara <code>task_restaurar_cliente</code>. Escala <code>{slug}_web=0</code>, restaura banco via <code>psql</code> e mídia via container alpine temporário, depois reinicia <code>{slug}_web=1</code>.<br>
+          <strong>Requer confirmação explícita antes de executar.</strong> O web é sempre reiniciado mesmo em caso de erro parcial.
+        </td>
+        <td><span class="tag-warn">Sobrescreve dados</span></td>
+      </tr>
     </table>
   </div>
 </div>
@@ -586,7 +605,10 @@
     <h3>⏱️ Worker Celery</h3>
     <p>Em produção o container <code>celery</code> processa as tasks automaticamente.</p>
     <p style="margin-top:8px;">Em desenvolvimento local, suba o worker manualmente:</p>
-    <div class="ajuda-code">.\venv\Scripts\python.exe -m celery -A core worker --loglevel=info</div>
+    <div class="ajuda-code">.\venv\Scripts\python.exe -m celery -A core worker --loglevel=info --pool=solo</div>
+    <div class="ajuda-alert-warn" style="margin-top:10px;margin-bottom:0;">
+      ⚠️ No Windows, use sempre <code>--pool=solo</code>. O pool padrão (<code>prefork</code>) usa multiprocessing que falha no Windows com WinError 5/6. Em produção Linux este parâmetro não é necessário.
+    </div>
     <p style="margin-top:8px;">Após mudanças no código, reinicie em produção com novo <code>docker stack deploy</code>. As tarefas periódicas estão em <strong>Agendamentos → Tarefas Periódicas</strong>.</p>
   </div>
 
@@ -598,6 +620,58 @@
     <div class="ajuda-code">docker node inspect {node-id} --format '{{.Spec.Labels}}'</div>
     <p style="margin-top:8px;">Para adicionar um label de região a um nó:</p>
     <div class="ajuda-code">docker node update --label-add region=anapolis {node-id}</div>
+  </div>
+
+</div>
+
+<!-- ═══ BACKUP E RESTAURAÇÃO ═══ -->
+<p class="ajuda-section-title">Backup e restauração</p>
+<div class="ajuda-grid">
+
+  <div class="ajuda-card">
+    <h3>💾 O que é incluído no backup</h3>
+    <table class="ajuda-table">
+      <tr><th>Entrada no arquivo</th><th>Origem</th><th>Conteúdo</th></tr>
+      <tr>
+        <td><code>db.sql</code></td>
+        <td><code>docker exec {slug}_db pg_dump --clean --if-exists</code></td>
+        <td>Dump completo do PostgreSQL (inclui extensão pgvector/RAG)</td>
+      </tr>
+      <tr>
+        <td><code>media/</code></td>
+        <td><code>docker cp {slug}_web:/app/media/.</code></td>
+        <td>Arquivos enviados pelos usuários (uploads, imagens, documentos)</td>
+      </tr>
+      <tr>
+        <td><code>config/</code></td>
+        <td><code>CLIENTES_BASE_PATH/{slug}/</code></td>
+        <td><code>.env</code> e <code>stack.yml</code> do cliente</td>
+      </tr>
+    </table>
+    <p style="margin-top:10px;">O arquivo é salvo em <code>CP_BACKUP_DIR/clientes/{slug}/backup_{slug}_{timestamp}.tar.gz</code>.<br><strong>Retenção:</strong> 3 backups por cliente. O mais antigo é removido automaticamente.</p>
+  </div>
+
+  <div class="ajuda-card">
+    <h3>💾 Como usar o backup</h3>
+    <div class="ajuda-step" style="margin-top:4px;">
+      <div class="ajuda-step-num">1</div>
+      <div class="ajuda-step-text">Na página do cliente, role até a seção <strong>Backups</strong> e clique em <strong>💾 Novo Backup</strong>.</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">2</div>
+      <div class="ajuda-step-text">A barra de progresso é atualizada em tempo real a cada 2s. Ao concluir, a página recarrega automaticamente.</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">3</div>
+      <div class="ajuda-step-text">O backup aparece na tabela com tamanho e data. Clique em <strong>⬇ Baixar</strong> para fazer download do <code>.tar.gz</code>.</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">4</div>
+      <div class="ajuda-step-text">Para restaurar, clique em <strong>↩ Restaurar</strong> e confirme o diálogo. O ERP fica indisponível durante a restauração (~1–2 min).</div>
+    </div>
+    <div class="ajuda-alert-warn" style="margin-top:8px;margin-bottom:0;">
+      ⚠️ Em ambiente dev local (sem containers Docker rodando), as etapas de banco e mídia são silenciosamente ignoradas. O progresso vai diretamente a 100% — comportamento esperado.
+    </div>
   </div>
 
 </div>
