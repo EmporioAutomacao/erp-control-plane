@@ -11,6 +11,16 @@
 },
 {
   "model": "registry.modulo",
+  "pk": "caixa",
+  "fields": {
+    "nome": "Caixa",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
   "pk": "cobranca",
   "fields": {
     "nome": "Cobrança",
@@ -165,6 +175,7 @@
     "ordem": 3,
     "modulos_inclusos": [
       "assistente_comercial",
+      "caixa",
       "cobranca",
       "compras",
       "contratos",
