@@ -73,13 +73,36 @@ Cada etapa de provisionamento é registrada em `ProvisionamentoLog` via `MotorPr
 |---|---|---|
 | `Cliente` | `registry_cliente` | Representa um cliente da plataforma |
 | `Plano` | `registry_plano` | Planos comerciais com limites de recursos |
-| `Modulo` | `registry_modulo` | Módulos ativáveis no ERP |
+| `Modulo` | `registry_modulo` | Módulos ativáveis no ERP (ver tabela abaixo) |
 | `HostInfraestrutura` | `registry_hostinfraestrutura` | Nós do Swarm por região |
 | `ProvisionamentoLog` | `registry_provisionamentolog` | Log por etapa do provisionamento |
 | `AtualizacaoVersao` | `registry_atualizacaoversao` | Histórico de upgrades de versão |
 | `VerificacaoSaude` | `registry_verificacao_saude` | Snapshots de health check |
 | `ConfiguracaoEmail` | `registry_configuracaoemail` | Singleton com credenciais SMTP (pk=1 sempre) |
 | `BackupCliente` | `registry_backupcliente` | Registro de cada backup por cliente (status, progresso, caminho do arquivo) |
+
+### Módulos disponíveis (`registry/fixtures/initial_data.json`)
+
+| `slug` | Nome | Descrição |
+|---|---|---|
+| `assistente_comercial` | Assistente Comercial | IA para suporte e sugestões no processo de vendas |
+| `caixa` | Caixa | Frente de caixa (PDV) para registro de vendas presenciais |
+| `cobranca` | Cobrança | Gestão de cobranças, boletos e inadimplência |
+| `compras` | Compras | Pedidos de compra e controle de fornecedores |
+| `contratos` | Contratos | Emissão e acompanhamento de contratos com clientes |
+| `dedetizacao` | Dedetização | Gestão de ordens de serviço de dedetização/controle de pragas |
+| `ecommerce` | E-Commerce | Loja virtual integrada ao estoque do ERP |
+| `financeiro` | Financeiro | Contas a pagar/receber, fluxo de caixa e conciliação |
+| `flexo` | Flexo | Módulo flexível para fluxos customizados |
+| `marketing` | Marketing | Campanhas, segmentação de clientes e automações |
+| `mercadolivre` | Mercado Livre | Integração com anúncios e pedidos do Mercado Livre |
+| `metas` | Metas Gamificadas | Definição e acompanhamento de metas com ranking |
+| `notificacoes` | Notificações | Alertas internos e disparo de mensagens aos clientes |
+| `radar_empresarial` | Radar Empresarial | Painel de indicadores estratégicos do negócio |
+| `tarefas` | Tarefas | Gestão de tarefas e checklist por equipe |
+| `yampi` | Yampi | Integração com a plataforma de e-commerce Yampi |
+
+Todos os módulos têm `preco_mensal=0.00` — a cobrança é feita pelo plano. Planos definem quais módulos estão inclusos por padrão; o admin pode adicionar/remover módulos individualmente em cada cliente.
 
 ### Tasks Celery (`registry/tasks.py`)
 
