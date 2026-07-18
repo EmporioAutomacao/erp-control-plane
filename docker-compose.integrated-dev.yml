@@ -1,0 +1,128 @@
+name: arara-integrated-dev
+
+services:
+  cp_db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: erp_cp
+      POSTGRES_USER: erp_cp
+      POSTGRES_PASSWORD: ${CP_POSTGRES_PASSWORD:-erp_cp_dev}
+      TZ: America/Sao_Paulo
+    ports:
+      - "5433:5432"
+    volumes:
+      - cp_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp_cp -d erp_cp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  cp_redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  cp_web:
+    build:
+      context: .
+    environment:
+      SECRET_KEY: ${CP_SECRET_KEY:-dev-control-plane-secret-key}
+      DEBUG: "true"
+      ALLOWED_HOSTS: localhost,127.0.0.1,192.168.0.31,cp_web
+      CSRF_TRUSTED_ORIGINS: http://localhost:8001,http://127.0.0.1:8001,http://192.168.0.31:8001
+      SAAS_DOMAIN: localhost
+      POSTGRES_DB: erp_cp
+      POSTGRES_USER: erp_cp
+      POSTGRES_PASSWORD: ${CP_POSTGRES_PASSWORD:-erp_cp_dev}
+      POSTGRES_HOST: cp_db
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://cp_redis:6379/0
+      CLIENTES_BASE_PATH: /opt/clientes
+      ERP_LATEST_VERSION: dev
+      PROVISIONING_CHECK_HTTP: "false"
+      ERP_CLIENTE_DB_HOST: erp_cliente_db
+      ERP_CLIENTE_DB_PORT: "5432"
+      ERP_CLIENTE_DB_NAME: erp_desenvolvimento
+      ERP_CLIENTE_DB_USER: erp_desenvolvimento
+      ERP_CLIENTE_DB_PASSWORD: ${ERP_CLIENTE_POSTGRES_PASSWORD:-erp_desenvolvimento_dev}
+      DJANGO_SUPERUSER_USERNAME: ${CP_DJANGO_SUPERUSER_USERNAME:-admin}
+      DJANGO_SUPERUSER_EMAIL: ${CP_DJANGO_SUPERUSER_EMAIL:-admin@localhost}
+      DJANGO_SUPERUSER_PASSWORD: ${CP_DJANGO_SUPERUSER_PASSWORD:-admin123}
+      GUNICORN_WORKERS: "2"
+    ports:
+      - "8001:8000"
+    volumes:
+      - .:/app
+      - cp_tenants:/opt/clientes
+    depends_on:
+      cp_db:
+        condition: service_healthy
+      cp_redis:
+        condition: service_healthy
+
+  erp_cliente_db:
+    image: pgvector/pgvector:0.8.0-pg17
+    environment:
+      POSTGRES_DB: erp_desenvolvimento
+      POSTGRES_USER: erp_desenvolvimento
+      POSTGRES_PASSWORD: ${ERP_CLIENTE_POSTGRES_PASSWORD:-erp_desenvolvimento_dev}
+      TZ: America/Sao_Paulo
+      PGTZ: America/Sao_Paulo
+    ports:
+      - "5434:5432"
+    volumes:
+      - erp_desenvolvimento_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp_desenvolvimento -d erp_desenvolvimento"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  erp_cliente_redis:
+    image: redis:7-alpine
+    ports:
+      - "6381:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  erp_cliente_web:
+    build:
+      context: ../erp
+    command: daphne -b 0.0.0.0 -p 8000 core.asgi:application
+    environment:
+      DJANGO_SECRET_KEY: ${ERP_CLIENTE_SECRET_KEY:-dev-erp-cliente-secret-key}
+      DEBUG: "true"
+      ALLOWED_HOSTS: localhost,127.0.0.1,192.168.0.31,erp_cliente_web
+      CSRF_TRUSTED_ORIGINS: http://localhost:8002,http://127.0.0.1:8002,http://192.168.0.31:8002
+      SITE_URL: http://192.168.0.31:8002
+      POSTGRES_DB: erp_desenvolvimento
+      POSTGRES_USER: erp_desenvolvimento
+      POSTGRES_PASSWORD: ${ERP_CLIENTE_POSTGRES_PASSWORD:-erp_desenvolvimento_dev}
+      POSTGRES_HOST: erp_cliente_db
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://erp_cliente_redis:6379/0
+      MODULOS_ATIVOS: assistente_comercial,cobranca,compras,contratos,dedetizacao,ecommerce,financeiro,flexo,marketing,mercadolivre,metas,notificacoes,produtos,radar_empresarial,sync_api,tarefas,vendas,yampi
+      DJANGO_SUPERUSER_USERNAME: ${ERP_CLIENTE_SUPERUSER_USERNAME:-admin}
+      DJANGO_SUPERUSER_EMAIL: ${ERP_CLIENTE_SUPERUSER_EMAIL:-admin@localhost}
+      DJANGO_SUPERUSER_PASSWORD: ${ERP_CLIENTE_SUPERUSER_PASSWORD:-admin123}
+    ports:
+      - "8002:8000"
+    depends_on:
+      erp_cliente_db:
+        condition: service_healthy
+      erp_cliente_redis:
+        condition: service_healthy
+
+volumes:
+  cp_pgdata:
+  cp_tenants:
+  erp_desenvolvimento_pgdata:

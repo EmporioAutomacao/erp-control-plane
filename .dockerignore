@@ -1,0 +1,29 @@
+# Local Python/env
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Git/IDE
+.git/
+.gitignore
+.gitattributes
+.claude/
+.codex/
+.vscode/
+.idea/
+
+# Local secrets/config
+.env
+*.env
+
+# Generated/runtime data
+staticfiles/
+media/
+artifacts/
+*.log
+*.tmp
+*.bak
