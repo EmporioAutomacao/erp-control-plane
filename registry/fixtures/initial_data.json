@@ -141,6 +141,16 @@
 },
 {
   "model": "registry.modulo",
+  "pk": "rh",
+  "fields": {
+    "nome": "Recursos Humanos",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
   "pk": "tarefas",
   "fields": {
     "nome": "Tarefas",
@@ -188,6 +198,7 @@
       "metas",
       "notificacoes",
       "radar_empresarial",
+      "rh",
       "tarefas",
       "yampi"
     ]

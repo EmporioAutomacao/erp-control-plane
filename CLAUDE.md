@@ -99,6 +99,7 @@ Cada etapa de provisionamento é registrada em `ProvisionamentoLog` via `MotorPr
 | `metas` | Metas Gamificadas | Definição e acompanhamento de metas com ranking |
 | `notificacoes` | Notificações | Alertas internos e disparo de mensagens aos clientes |
 | `radar_empresarial` | Radar Empresarial | Painel de indicadores estratégicos do negócio |
+| `rh` | Recursos Humanos | Funcionários, folha de pagamento, benefícios e documentos de RH |
 | `tarefas` | Tarefas | Gestão de tarefas e checklist por equipe |
 | `yampi` | Yampi | Integração com a plataforma de e-commerce Yampi |
 
