@@ -125,7 +125,7 @@ Cada instancia recebe um stack isolado com tres servicos:
 
 | Servico | Imagem | Funcao |
 |---|---|---|
-| `{slug}_web` | `emporioautomacao/erp:{versao}` | Django + Daphne, porta 8000 |
+| `{slug}_web` | `emporioautomacao/ararasuite-erp:{versao}` | Django + Daphne, porta 8000 |
 | `{slug}_db` | `pgvector/pgvector:0.8.0-pg17` | PostgreSQL com extensao pgvector |
 | `{slug}_redis` | `redis:7-alpine` | Broker Celery e cache |
 

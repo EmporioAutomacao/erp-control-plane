@@ -9,7 +9,7 @@ import docker
 from django.utils import timezone
 
 CLIENTES_BASE = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes'))
-ERP_IMAGE = 'emporioautomacao/erp'
+ERP_IMAGE = 'emporioautomacao/ararasuite-erp'
 DOMAIN = os.getenv('ERP_DOMAIN', 'ararasuite.com.br')
 CHECK_HTTP_HEALTH = os.getenv('PROVISIONING_CHECK_HTTP', 'true').lower() == 'true'
 
