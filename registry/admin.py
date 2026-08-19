@@ -3,8 +3,8 @@ from django import forms
 from django.contrib import admin
 from django.http import FileResponse, Http404, JsonResponse
 from django.urls import path
-from django.shortcuts import get_object_or_404, redirect
-from django.utils.html import format_html, mark_safe
+from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.html import escape, format_html, mark_safe
 from unfold.admin import ModelAdmin
 from .models import Modulo, Plano, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare, BackupCliente
 
@@ -121,6 +121,7 @@ class ClienteAdmin(ModelAdmin):
             path('<pk>/aplicar-modulos/', self.admin_site.admin_view(self._view_aplicar_modulos), name='registry_cliente_aplicar_modulos'),
             path('<pk>/configurar-cloudflare/', self.admin_site.admin_view(self._view_configurar_cloudflare), name='registry_cliente_configurar_cloudflare'),
             path('<pk>/backup/', self.admin_site.admin_view(self._view_backup), name='registry_cliente_backup'),
+            path('<pk>/backup/upload/', self.admin_site.admin_view(self._view_upload_backup), name='registry_cliente_backup_upload'),
             path('<pk>/backups/<int:backup_id>/download/', self.admin_site.admin_view(self._view_download_backup), name='registry_cliente_backup_download'),
             path('<pk>/backups/<int:backup_id>/restaurar/', self.admin_site.admin_view(self._view_restaurar), name='registry_cliente_restaurar'),
             path('<pk>/backups/<int:backup_id>/status/', self.admin_site.admin_view(self._view_status_backup), name='registry_cliente_backup_status'),
@@ -452,6 +453,61 @@ class ClienteAdmin(ModelAdmin):
         messages.success(request, f'Backup iniciado para "{cliente.slug}". Recarregue a página para ver o status.')
         return redirect('admin:registry_cliente_change', pk)
 
+    def _view_upload_backup(self, request, pk):
+        import tarfile
+        from datetime import datetime
+        from pathlib import Path
+        from django.contrib import messages
+
+        cliente = get_object_or_404(Cliente, pk=pk)
+
+        if request.method == 'POST':
+            arquivo = request.FILES.get('arquivo')
+            if not arquivo or not arquivo.name.lower().endswith(('.tar.gz', '.tgz')):
+                messages.error(request, 'Envie um arquivo .tar.gz ou .tgz válido.')
+                return redirect('admin:registry_cliente_backup_upload', pk)
+
+            backup_base = Path(os.getenv('CP_BACKUP_DIR', '/opt/backups/cp')) / 'clientes' / cliente.slug
+            backup_base.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            destino = backup_base / f'manual_{cliente.slug}_{timestamp}.tar.gz'
+
+            with open(destino, 'wb') as f:
+                for chunk in arquivo.chunks():
+                    f.write(chunk)
+
+            avisos = []
+            try:
+                with tarfile.open(destino, 'r:gz') as tar:
+                    nomes = tar.getnames()
+                if not any(n == 'db.sql' or n.startswith('db.sql') for n in nomes):
+                    avisos.append('Não contém db.sql — a restauração não vai recuperar o banco.')
+                if not any(n.startswith('media') for n in nomes):
+                    avisos.append('Não contém media/ — a restauração não vai recuperar arquivos de mídia.')
+            except tarfile.TarError:
+                destino.unlink()
+                messages.error(request, 'Arquivo inválido: não é um .tar.gz legível.')
+                return redirect('admin:registry_cliente_backup_upload', pk)
+
+            BackupCliente.objects.create(
+                cliente=cliente,
+                status='concluido',
+                progresso=100,
+                arquivo_path=str(destino),
+                tamanho_bytes=destino.stat().st_size,
+                origem='manual',
+                mensagem=' '.join(avisos),
+            )
+            messages.success(request, f'Backup importado para "{cliente.slug}".')
+            return redirect('admin:registry_cliente_change', pk)
+
+        context = {
+            **self.admin_site.each_context(request),
+            'title': 'Importar backup',
+            'cliente': cliente,
+        }
+        return render(request, 'registry/admin_upload_backup.html', context)
+
     def _view_download_backup(self, request, pk, backup_id):
         from pathlib import Path
         backup = get_object_or_404(BackupCliente, pk=backup_id, cliente__pk=pk)
@@ -576,17 +632,23 @@ class ClienteAdmin(ModelAdmin):
         from django.urls import reverse
         backups = list(obj.backups.all()[:5])
         url_novo = reverse('admin:registry_cliente_backup', args=[obj.pk])
+        url_upload = reverse('admin:registry_cliente_backup_upload', args=[obj.pk])
 
         botao_novo = (
             f'<a href="{url_novo}" style="display:inline-block;padding:6px 14px;background:#2e7d32;'
             f'color:#fff;border-radius:4px;text-decoration:none;font-size:13px;" '
             f'onclick="return confirm(\'Iniciar backup completo (banco de dados + mídia + configuração) para este cliente? O processo roda em segundo plano.\')">💾 Novo Backup</a>'
         )
+        botao_upload = (
+            f'<a href="{url_upload}" style="display:inline-block;padding:6px 14px;background:#1565c0;'
+            f'color:#fff;border-radius:4px;text-decoration:none;font-size:13px;margin-left:8px;">⬆ Importar Backup</a>'
+        )
+        botoes = botao_novo + botao_upload
 
         if not backups:
             return format_html(
                 '{}<p style="margin-top:12px;color:#999;font-size:13px;">Nenhum backup registrado ainda.</p>',
-                mark_safe(botao_novo),
+                mark_safe(botoes),
             )
 
         _BACKUP_CORES = {
@@ -613,6 +675,8 @@ class ClienteAdmin(ModelAdmin):
                 bg, fg, label = _BACKUP_CORES.get(b.status, ('#f5f5f5', '#333', b.status))
 
             badge = f'<span style="background:{bg};color:{fg};padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">{label}</span>'
+            if b.origem == 'manual':
+                badge += ' <span style="background:#eceff1;color:#455a64;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">manual</span>'
 
             if ativo:
                 pct = b.progresso
@@ -643,14 +707,24 @@ class ClienteAdmin(ModelAdmin):
             elif b.status == 'concluido':
                 url_dl = reverse('admin:registry_cliente_backup_download', args=[obj.pk, b.pk])
                 url_rst = reverse('admin:registry_cliente_restaurar', args=[obj.pk, b.pk])
+                aviso_html = (
+                    f'<div style="color:#e65100;font-size:11px;margin-top:2px;">⚠ {escape(b.mensagem[:100])}</div>'
+                    if b.mensagem else ''
+                )
+                aviso_restauracao_html = (
+                    f'<div style="color:#b71c1c;font-size:11px;margin-top:2px;">⚠ Última restauração: {escape(b.mensagem_restauracao[:150])}</div>'
+                    if b.mensagem_restauracao else ''
+                )
                 acoes = (
                     f'<span style="color:#666;font-size:12px;margin-right:8px;">{b.tamanho_fmt}</span>'
                     f'<a href="{url_dl}" style="padding:3px 10px;background:#1565c0;color:#fff;border-radius:4px;font-size:12px;text-decoration:none;margin-right:4px;">⬇ Baixar</a>'
                     f'<a href="{url_rst}" style="padding:3px 10px;background:#e65100;color:#fff;border-radius:4px;font-size:12px;text-decoration:none;" '
                     f'onclick="return confirm(\'ATENÇÃO: O ERP ficará indisponível por alguns minutos durante a restauração.\\n\\nO banco de dados e a pasta mídia serão sobrescritos pelo backup de {data}.\\n\\nConfirma?\')">↩ Restaurar</a>'
+                    f'{aviso_html}'
+                    f'{aviso_restauracao_html}'
                 )
             else:
-                acoes = f'<span style="color:#b71c1c;font-size:12px;">{b.mensagem[:100]}</span>'
+                acoes = f'<span style="color:#b71c1c;font-size:12px;">{escape(b.mensagem[:100])}</span>'
 
             linhas.append(
                 f'<tr>'
@@ -670,7 +744,7 @@ class ClienteAdmin(ModelAdmin):
         )
 
         script_tag = f'<script>{" ".join(scripts)}</script>' if scripts else ''
-        return format_html('{}{}{}', mark_safe(botao_novo), mark_safe(tabela), mark_safe(script_tag))
+        return format_html('{}{}{}', mark_safe(botoes), mark_safe(tabela), mark_safe(script_tag))
 
     lista_backups.short_description = 'Backups'
 

@@ -250,6 +250,10 @@ class BackupCliente(models.Model):
         ('concluido', 'Concluído'),
         ('erro', 'Erro'),
     ]
+    ORIGEM_CHOICES = [
+        ('automatico', 'Automático'),
+        ('manual', 'Importado manualmente'),
+    ]
     cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='backups')
     criado_em = models.DateTimeField(auto_now_add=True)
     arquivo_path = models.CharField(max_length=500, blank=True)
@@ -258,6 +262,8 @@ class BackupCliente(models.Model):
     progresso = models.PositiveSmallIntegerField(default=0)
     restaurando = models.BooleanField(default=False)
     mensagem = models.TextField(blank=True)
+    origem = models.CharField(max_length=20, choices=ORIGEM_CHOICES, default='automatico')
+    mensagem_restauracao = models.TextField(blank=True)
 
     class Meta:
         verbose_name = 'Backup'

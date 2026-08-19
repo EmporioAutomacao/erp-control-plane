@@ -233,13 +233,17 @@ O `task_backup_cliente` cria um `.tar.gz` em `CP_BACKUP_DIR/clientes/{slug}/` co
 | `media/` | `docker cp {slug}_web:/app/media/.` | Arquivos enviados pelos usuários |
 | `config/` | `CLIENTES_BASE_PATH/{slug}/` | `.env` e `stack.yml` do cliente |
 
-**Retenção:** 3 backups por cliente (arquivos e registros no banco). O excedente é removido automaticamente.
+**Retenção:** 3 backups por cliente (arquivos e registros no banco), **apenas entre backups `origem='automatico'`**. O excedente é removido automaticamente. Backups `origem='manual'` (ver "Importar backup" abaixo) nunca entram nessa contagem nem são apagados por ela.
 
 **Progresso:** o campo `BackupCliente.progresso` (0–100) é atualizado em cada etapa. O admin faz polling a cada 2s no endpoint `/<pk>/backups/<id>/status/` e recarrega a página ao concluir.
 
-**Restauração:** `task_restaurar_cliente` escala `{slug}_web=0`, restaura o banco via `psql` e a mídia via container alpine temporário com acesso direto ao volume `{slug}_media`, depois reinicia `{slug}_web=1`. O serviço web é sempre reiniciado mesmo em caso de erro parcial.
+**Backups parciais e vazios:** cada etapa (DB, mídia, config) que não encontra seu container/diretório, ou cujo comando (`pg_dump`/`docker cp`) falha, é registrada em uma lista de avisos. Se **nenhuma** etapa capturar conteúdo, o backup **não** é marcado como concluído — vai para `status='erro'` com `mensagem` explicando o motivo (arquivo `.tar.gz` é removido). Se ao menos uma etapa capturou algo, o backup fica `status='concluido'`, mas os avisos das etapas que falharam ficam em `mensagem` e aparecem como um aviso ⚠ na lista de backups do admin. Isso vale tanto para dev local sem containers ativos quanto para falhas reais em produção (ex: `pg_dump` com senha incorreta, container derrubado no meio do `docker cp`). Em dev local sem nenhum container do cliente e sem `CLIENTES_BASE_PATH/{slug}/`, o resultado esperado hoje é `status='erro'` (e não mais um arquivo vazio "concluído").
 
-**Comportamento em dev local:** sem containers Docker ativos, as etapas de DB e mídia são puladas silenciosamente. O backup conclui em < 1s e a barra de progresso vai direto ao 100% — isso é esperado. Em produção com dados reais, o progresso é visível entre os checkpoints.
+**Importar backup existente:** o botão "⬆ Importar Backup" (`_view_upload_backup`, `registry/admin.py`) permite enviar um `.tar.gz`/`.tgz` do PC do usuário. O arquivo é gravado via streaming (`request.FILES['arquivo'].chunks()`, sem storage/`FileField` do Django — o projeto não usa `MEDIA_ROOT`) em `CP_BACKUP_DIR/clientes/{slug}/manual_{slug}_{timestamp}.tar.gz`, e o `BackupCliente` criado com `origem='manual'`. A validação é só estrutural (`tarfile.is_tarfile` + checar se há `db.sql`/`media/` entre os membros) — não garante compatibilidade com a versão do ERP do cliente; ausências viram aviso em `mensagem`, sem bloquear o upload. Em produção, arquivos muito grandes podem esbarrar no timeout do gunicorn (`--timeout 120` em `entrypoint.sh`) — não tratado, é uma limitação conhecida.
+
+**Restauração:** `task_restaurar_cliente` escala `{slug}_web=0`, restaura o banco via `psql -v ON_ERROR_STOP=1` e a mídia via container alpine temporário com acesso direto ao volume `{slug}_media`, depois reinicia `{slug}_web=1`. O serviço web é sempre reiniciado mesmo em caso de erro parcial. Assim como no backup, cada etapa que não encontra o container ou cujo comando falha vira um aviso — gravado em `BackupCliente.mensagem_restauracao` (campo separado de `mensagem`, que é sobre a *criação* do backup) e exibido como um segundo ⚠ na lista do admin. Mensagem vazia = última restauração sem erros.
+
+**Caminhos absolutos nos comandos Docker (Windows):** `backup_base`/`restore_dir` são construídos com `.resolve()` sobre `Path(os.getenv('CP_BACKUP_DIR', '/opt/backups/cp'))`. Sem isso, no Windows, `Path('/opt/backups/cp')` produz um caminho "enraizado mas sem drive letter" (`\opt\backups\cp`, sem `D:`) — o Python consegue ler/escrever nele normalmente (resolve contra o drive do processo), mas `docker run -v <path>:...` rejeita esse formato com "not a valid Windows path". Isso já causou uma restauração de mídia silenciosamente quebrada em dev local (o `docker cp` do backup tolerou o caminho por sorte de CWD; o `docker run -v` da restauração, não).
 
 ### Auth do registry privado no Swarm
 
@@ -254,6 +258,12 @@ O botão **"Aplicar Configurações"** (`_view_aplicar_modulos`) atualiza via `d
 ```
 
 **Por que isso importa:** se o `subdominio` do cliente for alterado no admin (ex.: migração de domínio de `ararasuite.com.br` para `jfnbrasil.com.br`), apenas atualizar o campo no banco não basta — a label do Traefik no serviço Docker ainda aponta para o domínio antigo. O wildcard DNS do domínio antigo continua roteando tráfego para o container, que agora rejeita o host com `DisallowedHost`. Clicar em "Aplicar Configurações" corrige ALLOWED_HOSTS e a label do Traefik de uma vez.
+
+### Página de Ajuda do admin
+
+O item "Ajuda" da sidebar (`registry/views.py::admin_ajuda`) é uma view de função simples, registrada em `core/urls.py` por `path()` direta (não é um `ModelAdmin`) e renderiza `registry/templates/registry/admin_ajuda.html` (HTML estático, sem model/DB por trás). O conteúdo é organizado em seções demarcadas por comentários `<!-- ═══ NOME ═══ -->`, usando classes CSS próprias definidas no topo do template (`.ajuda-card`, `.ajuda-table`, `.ajuda-step`, `.ajuda-alert`/`.ajuda-alert-warn`, `.tag-ok`/`.tag-no`/`.tag-warn`). Para documentar uma funcionalidade nova, edite o template diretamente na seção correspondente (ou crie uma nova seção seguindo o mesmo padrão) — não é necessário criar model nem admin.
+
+**Ordem das URLs importa:** `path('admin/ajuda/', ...)` precisa vir **antes** de `path('admin/', admin.site.urls)` em `core/urls.py`. Se ficar depois, o `catch_all_view` do `django.contrib.admin` intercepta `ajuda/` como um sub-path desconhecido do admin e responde 404 antes que a rota específica seja tentada — mesmo com o usuário logado. Esse é um erro fácil de reintroduzir ao reordenar `urlpatterns`.
 
 ## Variáveis de ambiente relevantes
 

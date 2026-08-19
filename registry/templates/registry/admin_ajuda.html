@@ -688,14 +688,28 @@
     </div>
     <div class="ajuda-step">
       <div class="ajuda-step-num">3</div>
-      <div class="ajuda-step-text">O backup aparece na tabela com tamanho e data. Clique em <strong>⬇ Baixar</strong> para fazer download do <code>.tar.gz</code>.</div>
+      <div class="ajuda-step-text">O backup aparece na tabela com badge de status: <span class="tag-ok">Concluído</span> libera o <strong>⬇ Baixar</strong>; <span class="tag-no">Erro</span> não gera arquivo.</div>
     </div>
     <div class="ajuda-step">
       <div class="ajuda-step-num">4</div>
       <div class="ajuda-step-text">Para restaurar, clique em <strong>↩ Restaurar</strong> e confirme o diálogo. O ERP fica indisponível durante a restauração (~1–2 min).</div>
     </div>
     <div class="ajuda-alert-warn" style="margin-top:8px;margin-bottom:0;">
-      ⚠️ Em ambiente dev local (sem containers Docker rodando), as etapas de banco e mídia são silenciosamente ignoradas. O progresso vai diretamente a 100% — comportamento esperado.
+      ⚠️ O backup nunca fica "Concluído" com um arquivo vazio. Cada etapa (banco, mídia, config) que não encontra o container/diretório, ou cujo comando falha (<code>pg_dump</code>/<code>docker cp</code>), vira um aviso:
+      <ul style="margin:6px 0 0 18px;padding:0;">
+        <li><span class="tag-no">Erro</span> — nenhuma etapa capturou conteúdo; o arquivo é removido. É o que acontece em dev local sem os containers <code>{slug}_db</code>/<code>{slug}_web</code> ativos.</li>
+        <li><span class="tag-warn">Concluído</span> com ⚠ — pelo menos uma etapa funcionou; as que falharam ficam resumidas ao lado do tamanho/downloads na lista de backups.</li>
+      </ul>
+      A <strong>restauração</strong> segue o mesmo princípio: se o banco não puder ser restaurado (container ausente, <code>psql</code> falhou) ou a mídia não puder ser copiada, aparece um segundo aviso <span class="tag-no">⚠ Última restauração: …</span> abaixo do backup na lista — mesmo se o restante tiver funcionado. Sem aviso = restauração completa sem erros.
+    </div>
+  </div>
+
+  <div class="ajuda-card">
+    <h3>⬆ Importar backup manualmente</h3>
+    <p>Clique em <strong>⬆ Importar Backup</strong> (ao lado de "Novo Backup") para enviar um <code>.tar.gz</code>/<code>.tgz</code> já existente do seu PC — útil para backups migrados de outro ambiente ou feitos antes desta funcionalidade existir.</p>
+    <p style="margin-top:8px;">O arquivo é gravado como <code>manual_{slug}_{timestamp}.tar.gz</code> e o backup entra na lista com a tag <span style="background:#eceff1;color:#455a64;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">manual</span> ao lado do badge de status. Backups manuais <strong>não contam</strong> para o limite de retenção de 3 e nunca são apagados automaticamente.</p>
+    <div class="ajuda-alert-warn" style="margin-top:10px;margin-bottom:0;">
+      ⚠️ A validação é só estrutural (existência de <code>db.sql</code>/<code>media/</code> dentro do tar) — não garante compatibilidade com a versão do ERP do cliente. Arquivos muito grandes (vários GB) podem falhar em produção pelo timeout do worker (~120s) durante o envio.
     </div>
   </div>
 

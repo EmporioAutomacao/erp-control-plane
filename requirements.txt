@@ -9,3 +9,4 @@ docker>=7.0
 redis>=5.0
 whitenoise>=6.7
 requests>=2.31
+playwright==1.62.0

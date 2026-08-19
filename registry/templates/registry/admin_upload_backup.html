@@ -1,0 +1,112 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Importar backup — {{ cliente.nome }}{% endblock %}
+
+{% block content %}
+<style>
+  .upload-hero {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    border-radius: 16px;
+    padding: 28px 32px;
+    margin-bottom: 24px;
+    color: #fff;
+  }
+  .upload-hero h1 { margin: 0 0 6px; font-size: 22px; font-weight: 800; }
+  .upload-hero p  { margin: 0; opacity: .85; font-size: 14px; }
+
+  .upload-card {
+    border: 1px solid var(--color-base-200, #e2e8f0);
+    border-radius: 14px;
+    padding: 24px;
+    background: var(--color-base-50, #f8fafc);
+    max-width: 560px;
+  }
+  .dark .upload-card {
+    border-color: oklch(30% .02 264);
+    background: oklch(20% .025 264);
+  }
+
+  .upload-alert-warn {
+    background: rgba(234,179,8,.08);
+    border: 1px solid rgba(234,179,8,.35);
+    border-radius: 10px;
+    padding: 14px 18px;
+    font-size: 13px;
+    margin: 18px 0;
+    line-height: 1.6;
+    color: var(--color-base-700, #334155);
+  }
+
+  .upload-code {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    background: oklch(15% .02 264);
+    color: #818cf8;
+    padding: 10px 14px;
+    border-radius: 8px;
+    margin-top: 8px;
+  }
+
+  .upload-input {
+    display: block;
+    width: 100%;
+    margin: 16px 0;
+    padding: 10px;
+    border: 1px dashed var(--color-base-300, #cbd5e1);
+    border-radius: 8px;
+    background: var(--color-base-100, #f1f5f9);
+    font-size: 13px;
+  }
+  .dark .upload-input { border-color: oklch(35% .02 264); background: oklch(25% .02 264); color: #fff; }
+
+  .upload-submit {
+    display: inline-block;
+    padding: 8px 18px;
+    background: #1565c0;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .upload-cancel {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 8px 18px;
+    color: var(--color-base-600, #475569);
+    text-decoration: none;
+    font-size: 13px;
+  }
+</style>
+
+<div class="upload-hero">
+  <h1>⬆ Importar backup</h1>
+  <p>Cliente: <strong>{{ cliente.nome }}</strong> ({{ cliente.slug }})</p>
+</div>
+
+<div class="upload-card">
+  <p style="font-size:13px;line-height:1.7;color:var(--color-base-600,#475569);margin:0;">
+    Envie um arquivo <code>.tar.gz</code>/<code>.tgz</code> de backup já existente. Ele passa a
+    aparecer na lista de backups deste cliente e pode ser restaurado normalmente pelo botão
+    <strong>↩ Restaurar</strong>.
+  </p>
+
+  <div class="upload-code">db.sql&#10;media/&#10;config/</div>
+
+  <div class="upload-alert-warn">
+    ⚠️ A restauração espera exatamente essa estrutura interna. Se o arquivo não contiver
+    <code>db.sql</code> e/ou <code>media/</code>, o backup ainda é aceito, mas fica registrado
+    um aviso — a restauração não vai recuperar o que estiver faltando. Arquivos muito grandes
+    podem falhar em produção pelo timeout do worker (~120s) durante o envio.
+  </div>
+
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <input class="upload-input" type="file" name="arquivo" accept=".tar.gz,.tgz" required>
+    <button type="submit" class="upload-submit">Enviar backup</button>
+    <a href="{% url 'admin:registry_cliente_change' cliente.pk %}" class="upload-cancel">Cancelar</a>
+  </form>
+</div>
+{% endblock %}

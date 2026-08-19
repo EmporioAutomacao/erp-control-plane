@@ -144,11 +144,15 @@ def task_backup_cliente(self, cliente_id, backup_id):
 
     cliente = Cliente.objects.get(pk=cliente_id)
     slug = cliente.slug
-    backup_base = Path(os.getenv('CP_BACKUP_DIR', '/opt/backups/cp')) / 'clientes' / slug
+    # .resolve() garante um caminho absoluto com drive letter no Windows -
+    # necessario para os argumentos '-v'/paths passados a comandos docker.
+    backup_base = (Path(os.getenv('CP_BACKUP_DIR', '/opt/backups/cp')) / 'clientes' / slug).resolve()
     backup_base.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     arquivo = backup_base / f'backup_{slug}_{timestamp}.tar.gz'
+
+    avisos = []
 
     try:
         _prog(5)
@@ -171,6 +175,12 @@ def task_backup_cliente(self, cliente_id, backup_id):
                     data = dump.stdout
                     info.size = len(data)
                     tar.addfile(info, io.BytesIO(data))
+                else:
+                    stderr = dump.stderr.decode(errors='replace').strip()
+                    logger.error('pg_dump falhou para %s (codigo %s): %s', slug, dump.returncode, stderr)
+                    avisos.append(f'pg_dump falhou (codigo {dump.returncode}): {stderr[:300]}')
+            else:
+                avisos.append(f'Container {slug}_db nao encontrado - dump do banco nao incluido.')
             _prog(55)
 
             # 2. Arquivos de mídia via docker cp do container web
@@ -183,13 +193,20 @@ def task_backup_cliente(self, cliente_id, backup_id):
                 media_tmp = backup_base / f'_media_tmp_{timestamp}'
                 media_tmp.mkdir(parents=True, exist_ok=True)
                 try:
-                    subprocess.run(
+                    cp = subprocess.run(
                         ['docker', 'cp', f'{web_ctr}:/app/media/.', str(media_tmp)],
                         capture_output=True, timeout=120,
                     )
-                    tar.add(str(media_tmp), arcname='media')
+                    if cp.returncode == 0:
+                        tar.add(str(media_tmp), arcname='media')
+                    else:
+                        stderr = cp.stderr.decode(errors='replace').strip()
+                        logger.error('docker cp da midia falhou para %s: %s', slug, stderr)
+                        avisos.append(f'docker cp da midia falhou: {stderr[:300]}')
                 finally:
                     shutil.rmtree(media_tmp, ignore_errors=True)
+            else:
+                avisos.append(f'Container {slug}_web nao encontrado - midia nao incluida.')
             _prog(80)
 
             # 3. Arquivos de configuração do cliente
@@ -197,7 +214,22 @@ def task_backup_cliente(self, cliente_id, backup_id):
             cliente_dir = clientes_base / slug
             if cliente_dir.exists():
                 tar.add(str(cliente_dir), arcname='config')
+            else:
+                avisos.append('Diretorio de configuracao do cliente nao encontrado.')
             _prog(95)
+
+            n_entries = len(tar.getmembers())
+
+        if n_entries == 0:
+            arquivo.unlink()
+            mensagem = ' '.join(avisos) if avisos else 'Nenhum conteudo foi capturado para o backup.'
+            BackupCliente.objects.filter(pk=backup_id).update(
+                status='erro',
+                progresso=100,
+                mensagem=mensagem,
+            )
+            logger.error('Backup vazio para %s: %s', slug, mensagem)
+            return
 
         tamanho = arquivo.stat().st_size
         BackupCliente.objects.filter(pk=backup_id).update(
@@ -205,18 +237,23 @@ def task_backup_cliente(self, cliente_id, backup_id):
             progresso=100,
             arquivo_path=str(arquivo),
             tamanho_bytes=tamanho,
+            mensagem=' '.join(avisos),
         )
         logger.info('Backup concluido: %s (%.1f MB)', arquivo, tamanho / 1024 / 1024)
+        if avisos:
+            logger.warning('Backup de %s concluido com avisos: %s', slug, ' '.join(avisos))
 
         # Manter apenas os 3 mais recentes (arquivos e registros)
         todos_arquivos = sorted(backup_base.glob(f'backup_{slug}_*.tar.gz'), key=lambda p: p.stat().st_mtime)
         for antigo in todos_arquivos[:-3]:
             antigo.unlink()
         ids_manter = list(
-            BackupCliente.objects.filter(cliente=cliente, status='concluido')
+            BackupCliente.objects.filter(cliente=cliente, status='concluido', origem='automatico')
             .order_by('-criado_em').values_list('pk', flat=True)[:3]
         )
-        BackupCliente.objects.filter(cliente=cliente, status='concluido').exclude(pk__in=ids_manter).delete()
+        BackupCliente.objects.filter(
+            cliente=cliente, status='concluido', origem='automatico',
+        ).exclude(pk__in=ids_manter).delete()
 
     except Exception as exc:
         if arquivo.exists():
@@ -246,8 +283,13 @@ def task_restaurar_cliente(self, cliente_id, backup_id):
 
     BackupCliente.objects.filter(pk=backup_id).update(restaurando=True, progresso=0)
 
-    restore_dir = Path(os.getenv('CP_BACKUP_DIR', '/opt/backups/cp')) / f'_restore_{slug}'
+    # .resolve() garante um caminho absoluto com drive letter no Windows -
+    # sem isso, 'docker run -v <path>:...' rejeita o caminho ("not a valid
+    # Windows path") mesmo que o Python consiga ler/escrever nele normalmente.
+    restore_dir = (Path(os.getenv('CP_BACKUP_DIR', '/opt/backups/cp')) / f'_restore_{slug}').resolve()
     restore_dir.mkdir(parents=True, exist_ok=True)
+
+    avisos = []
 
     try:
         # 1. Para o serviço web do cliente
@@ -268,19 +310,29 @@ def task_restaurar_cliente(self, cliente_id, backup_id):
             capture_output=True, text=True,
         )
         db_ctr = r.stdout.strip().splitlines()[0] if r.stdout.strip() else None
-        if db_sql.exists() and db_ctr:
-            subprocess.run(
+        if not db_sql.exists():
+            avisos.append('Backup nao contem db.sql - banco nao foi restaurado.')
+        elif not db_ctr:
+            avisos.append(f'Container {slug}_db nao encontrado - banco nao foi restaurado.')
+        else:
+            psql = subprocess.run(
                 ['docker', 'exec', '-i', db_ctr,
-                 'psql', '-U', f'erp_{slug}', '-d', f'erp_{slug}'],
+                 'psql', '-v', 'ON_ERROR_STOP=1', '-U', f'erp_{slug}', '-d', f'erp_{slug}'],
                 input=db_sql.read_bytes(),
                 capture_output=True, timeout=300,
             )
+            if psql.returncode != 0:
+                stderr = psql.stderr.decode(errors='replace').strip()
+                logger.error('Restauracao do banco falhou para %s: %s', slug, stderr)
+                avisos.append(f'Restauracao do banco falhou: {stderr[:300]}')
         _prog(75)
 
         # 4. Restaura a mídia via container alpine temporário com acesso ao volume
         media_dir = restore_dir / 'media'
-        if media_dir.exists():
-            subprocess.run(
+        if not media_dir.exists():
+            avisos.append('Backup nao contem media/ - arquivos de midia nao foram restaurados.')
+        else:
+            docker_run = subprocess.run(
                 [
                     'docker', 'run', '--rm',
                     '-v', f'{slug}_media:/app/media',
@@ -290,12 +342,23 @@ def task_restaurar_cliente(self, cliente_id, backup_id):
                 ],
                 capture_output=True, timeout=120,
             )
+            if docker_run.returncode != 0:
+                stderr = docker_run.stderr.decode(errors='replace').strip()
+                logger.error('Restauracao da midia falhou para %s: %s', slug, stderr)
+                avisos.append(f'Restauracao da midia falhou: {stderr[:300]}')
         _prog(90)
 
+    except Exception as exc:
+        avisos.append(f'Erro inesperado: {exc}')
+        raise
     finally:
         shutil.rmtree(restore_dir, ignore_errors=True)
         subprocess.run(['docker', 'service', 'scale', f'{slug}_web=1'], capture_output=True, timeout=60)
-        BackupCliente.objects.filter(pk=backup_id).update(restaurando=False, progresso=100)
+        BackupCliente.objects.filter(pk=backup_id).update(
+            restaurando=False, progresso=100, mensagem_restauracao=' '.join(avisos),
+        )
+        if avisos:
+            logger.warning('Restauracao de %s concluida com avisos: %s', slug, ' '.join(avisos))
 
     logger.info('Restauração concluída para %s a partir de %s', slug, arquivo.name)
 

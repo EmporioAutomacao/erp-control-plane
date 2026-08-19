@@ -21,6 +21,9 @@ from registry.views import admin_ajuda
 
 urlpatterns = [
     path('', include('landing.urls')),
-    path('admin/', admin.site.urls),
+    # Precisa vir antes de 'admin/' — o catch_all_view do django.contrib.admin
+    # intercepta qualquer sub-path desconhecido sob 'admin/' antes que esta
+    # rota especifica seja tentada, se ficar depois.
     path('admin/ajuda/', admin.site.admin_view(admin_ajuda), name='admin_ajuda'),
+    path('admin/', admin.site.urls),
 ]
