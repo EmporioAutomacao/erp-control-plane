@@ -251,13 +251,21 @@ O `stack-prod.yml` monta `/root/.docker` do host manager nos containers `web` e 
 
 ### Label do Traefik e troca de domínio
 
-O botão **"Aplicar Configurações"** (`_view_aplicar_modulos`) atualiza via `docker service update --env-add` as variáveis `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MODULOS_ATIVOS` e `TEMA_SITE`. Ele também **sempre** atualiza a label do router principal do Traefik:
+O botão **"Aplicar Configurações"** (`_view_aplicar_modulos`) atualiza via `docker service update --env-add` as variáveis `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MODULOS_ATIVOS`, `TEMA_SITE`, `CP_CLIENTE_ID` e `CP_CLIENTE_NOME`. Ele também **sempre** atualiza a label do router principal do Traefik:
 
 ```python
 '--label-add', f'traefik.http.routers.{slug}-erp.rule=Host(`{subdominio}`)',
 ```
 
 **Por que isso importa:** se o `subdominio` do cliente for alterado no admin (ex.: migração de domínio de `ararasuite.com.br` para `jfnbrasil.com.br`), apenas atualizar o campo no banco não basta — a label do Traefik no serviço Docker ainda aponta para o domínio antigo. O wildcard DNS do domínio antigo continua roteando tráfego para o container, que agora rejeita o host com `DisallowedHost`. Clicar em "Aplicar Configurações" corrige ALLOWED_HOSTS e a label do Traefik de uma vez.
+
+### Vínculo CP → ERP para a ativação do SyncAgent (`CP_CLIENTE_ID`)
+
+O `MotorProvisionamento` grava `CP_CLIENTE_ID` (= `str(cliente.id)`, o UUID do `Cliente` no CP) e `CP_CLIENTE_NOME` (= `cliente.nome`) no `.env`/`environment` do stack do cliente. O ERP lê essas variáveis em `core/settings.py` (`CP_CLIENTE_ID`/`CP_CLIENTE_NOME`) e `sync_api.cp_tenant.get_current_cp_tenant()` as usa como fonte primária do ID do cliente ao gerar códigos de ativação do SyncAgent (Configurações > Sincronização > Códigos de ativação).
+
+Sem essas variáveis, o ERP cai no fallback `core.PlanoCliente.cp_cliente_id` — que **não** é populado em produção (só o comando de dev `bootstrap_integrated_dev_cliente` escreve nele) — e a tela de ativação bloqueia com *"Configure o ID do cliente no CP em Configurações > Plano..."*.
+
+Clientes provisionados **antes** desta mudança não têm as variáveis: rodar **"Aplicar Configurações"** injeta `CP_CLIENTE_ID`/`CP_CLIENTE_NOME` no serviço `{slug}_web` existente.
 
 ### Página de Ajuda do admin
 

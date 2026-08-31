@@ -30,6 +30,22 @@ class MotorProvisionamentoImagemTests(SimpleTestCase):
             stack,
         )
 
+    def test_stack_propaga_vinculo_cp_para_o_ambiente_do_web(self):
+        stack = self.motor._gerar_stack_yaml(
+            slug='acme',
+            subdominio='acme.ararasuite.com.br',
+            versao='0.0.71',
+            regiao='anapolis',
+            env_vars={
+                'POSTGRES_PASSWORD': 'senha',
+                'CP_CLIENTE_ID': '11111111-2222-3333-4444-555555555555',
+                'CP_CLIENTE_NOME': 'Anapolis',
+            },
+        )
+
+        self.assertIn('CP_CLIENTE_ID: "11111111-2222-3333-4444-555555555555"', stack)
+        self.assertIn('CP_CLIENTE_NOME: "Anapolis"', stack)
+
     @patch('registry.models.Cliente.objects.filter')
     @patch('registry.provisioning.CHECK_HTTP_HEALTH', False)
     @patch('registry.provisioning.subprocess.run')

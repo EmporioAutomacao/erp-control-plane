@@ -179,6 +179,8 @@ class ClienteAdmin(ModelAdmin):
                 'TEMA_SITE': tema,
                 'ALLOWED_HOSTS': allowed_hosts,
                 'CSRF_TRUSTED_ORIGINS': csrf_origins,
+                'CP_CLIENTE_ID': str(cliente.id),
+                'CP_CLIENTE_NOME': cliente.nome,
             }
             linhas = env_file.read_text().splitlines()
             novas = []
@@ -204,6 +206,8 @@ class ClienteAdmin(ModelAdmin):
             '--env-add', f'TEMA_SITE={tema}',
             '--env-add', f'ALLOWED_HOSTS={allowed_hosts}',
             '--env-add', f'CSRF_TRUSTED_ORIGINS={csrf_origins}',
+            '--env-add', f'CP_CLIENTE_ID={cliente.id}',
+            '--env-add', f'CP_CLIENTE_NOME={cliente.nome}',
             # Atualiza a label do router principal (subdomínio padrão) no Traefik
             '--label-add', f'traefik.http.routers.{slug}-erp.rule=Host(`{subdominio}`)',
         ]

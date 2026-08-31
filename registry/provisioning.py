@@ -82,6 +82,8 @@ class MotorProvisionamento:
             'DEBUG': 'false',
             'MODULOS_ATIVOS': modulos,
             'TEMA_SITE': tema,
+            'CP_CLIENTE_ID': str(self.cliente.id),
+            'CP_CLIENTE_NOME': self.cliente.nome,
             'EMPRESAS_CREDENCIAL_MASTER_KEY': master_key,
             'BACKUP_DIR': '/app/backups',
             'DJANGO_SUPERUSER_USERNAME': 'admin',
