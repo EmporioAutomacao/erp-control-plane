@@ -381,66 +381,46 @@ class ClienteAdmin(ModelAdmin):
 
         tunnel_cname = f'{tunnel_id}.cfargotunnel.com'
 
-        # Remove registro A conflitante, se existir
-        r_a = _requests.get(f'{base}/zones/{zone_id}/dns_records', params={'type': 'A', 'name': dominio}, headers=auth_headers, timeout=15)
-        if r_a.ok:
-            for rec in r_a.json().get('result', []):
-                _requests.delete(f'{base}/zones/{zone_id}/dns_records/{rec["id"]}', headers=auth_headers, timeout=15)
-
-        # Cria ou atualiza CNAME → tunnel
-        r = _cf_raise(_requests.get(f'{base}/zones/{zone_id}/dns_records', params={'type': 'CNAME', 'name': dominio}, headers=auth_headers, timeout=15))
-        records = r.json()['result']
-
-        if records:
-            record_id = records[0]['id']
-            if records[0]['content'] != tunnel_cname or not records[0].get('proxied'):
-                _cf_raise(_requests.put(
-                    f'{base}/zones/{zone_id}/dns_records/{record_id}',
-                    json={'type': 'CNAME', 'name': '@', 'content': tunnel_cname, 'proxied': True, 'ttl': 1},
-                    headers=json_headers, timeout=15,
-                ))
-            record_acao = 'atualizado'
-        else:
-            _cf_raise(_requests.post(
-                f'{base}/zones/{zone_id}/dns_records',
-                json={'type': 'CNAME', 'name': '@', 'content': tunnel_cname, 'proxied': True, 'ttl': 1},
-                headers=json_headers, timeout=15,
-            ))
-            record_acao = 'criado'
-
-        # Remove A record de www conflitante, se existir
-        r_a_www = _requests.get(
-            f'{base}/zones/{zone_id}/dns_records',
-            params={'type': 'A', 'name': f'www.{dominio}'},
-            headers=auth_headers, timeout=15,
-        )
-        if r_a_www.ok:
-            for rec in r_a_www.json().get('result', []):
-                _requests.delete(
-                    f'{base}/zones/{zone_id}/dns_records/{rec["id"]}',
+        def _upsert_cname(nome_label, nome_fqdn):
+            """Cria/atualiza um CNAME proxied → tunnel, removendo A/AAAA/CNAME
+            conflitantes no mesmo host. A busca é sempre pelo FQDN — a API do
+            Cloudflare ignora labels curtas como 'www'."""
+            # Remove A/AAAA conflitantes (CNAME não coexiste com eles)
+            for tipo in ('A', 'AAAA'):
+                rr = _requests.get(
+                    f'{base}/zones/{zone_id}/dns_records',
+                    params={'type': tipo, 'name': nome_fqdn},
                     headers=auth_headers, timeout=15,
                 )
+                if rr.ok:
+                    for rec in rr.json().get('result', []):
+                        _cf_raise(_requests.delete(
+                            f'{base}/zones/{zone_id}/dns_records/{rec["id"]}',
+                            headers=auth_headers, timeout=15,
+                        ))
 
-        # Cria ou atualiza CNAME www → tunnel
-        r_www = _cf_raise(_requests.get(
-            f'{base}/zones/{zone_id}/dns_records',
-            params={'type': 'CNAME', 'name': 'www'},
-            headers=auth_headers, timeout=15,
-        ))
-        records_www = r_www.json()['result']
-        if records_www:
-            if records_www[0]['content'] != tunnel_cname or not records_www[0].get('proxied'):
-                _cf_raise(_requests.put(
-                    f'{base}/zones/{zone_id}/dns_records/{records_www[0]["id"]}',
-                    json={'type': 'CNAME', 'name': 'www', 'content': tunnel_cname, 'proxied': True, 'ttl': 1},
-                    headers=json_headers, timeout=15,
-                ))
-        else:
+            rr = _cf_raise(_requests.get(
+                f'{base}/zones/{zone_id}/dns_records',
+                params={'type': 'CNAME', 'name': nome_fqdn},
+                headers=auth_headers, timeout=15,
+            ))
+            recs = rr.json()['result']
+            payload = {'type': 'CNAME', 'name': nome_label, 'content': tunnel_cname, 'proxied': True, 'ttl': 1}
+            if recs:
+                if recs[0]['content'] != tunnel_cname or not recs[0].get('proxied'):
+                    _cf_raise(_requests.put(
+                        f'{base}/zones/{zone_id}/dns_records/{recs[0]["id"]}',
+                        json=payload, headers=json_headers, timeout=15,
+                    ))
+                return 'atualizado'
             _cf_raise(_requests.post(
                 f'{base}/zones/{zone_id}/dns_records',
-                json={'type': 'CNAME', 'name': 'www', 'content': tunnel_cname, 'proxied': True, 'ttl': 1},
-                headers=json_headers, timeout=15,
+                json=payload, headers=json_headers, timeout=15,
             ))
+            return 'criado'
+
+        record_acao = _upsert_cname('@', dominio)
+        _upsert_cname('www', f'www.{dominio}')
 
         return {'ok': True, 'zona_criada': zona_criada, 'nameservers': nameservers, 'record': record_acao, 'tunnel_name': tunnel_name}
 

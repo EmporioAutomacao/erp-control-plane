@@ -77,7 +77,15 @@ Não passa por interpolação Docker, então usa `${1}` direto.
 dos existentes para evitar duplicatas, depois insere ambos.
 
 **CNAME www:** após criar/atualizar o CNAME apex (`@`), também cria/atualiza o CNAME
-`www` apontando para o mesmo tunnel CNAME.
+`www` apontando para o mesmo tunnel CNAME. Apex e www passam pelo helper `_upsert_cname()`,
+que **sempre busca registros existentes pelo FQDN** (`www.{dominio}`, não a label `www`) e
+remove tanto registros `A` quanto `AAAA` conflitantes antes de criar o CNAME.
+
+> **Bug corrigido:** a busca do CNAME `www` filtrava por `name='www'`, que a API do
+> Cloudflare ignora — o registro existente nunca era encontrado, o código caía no `POST` e
+> o Cloudflare respondia `400: An A, AAAA, or CNAME record with that host already exists`
+> quando o cliente já tinha um `www` no DNS. Agora a busca usa o FQDN e o registro é
+> atualizado no lugar.
 
 ---
 

@@ -398,10 +398,10 @@
         <td><span class="btn-demo" style="background:#0369a1;">☁ Configurar Cloudflare</span></td>
         <td>
           Chama a API da Cloudflare para o domínio custom:<br>
-          1. Adiciona o domínio ao <strong>ingress do Cloudflare Tunnel</strong> (→ <code>traefik_traefik:80</code>)<br>
+          1. Adiciona <code>dominio</code> e <code>www.dominio</code> ao <strong>ingress do Cloudflare Tunnel</strong> (→ <code>traefik_traefik:80</code>)<br>
           2. Cria/encontra a zona do domínio na conta Cloudflare<br>
-          3. Remove registro A conflitante (se existir)<br>
-          4. Cria/atualiza <strong>CNAME</strong> <code>@</code> → <code>{tunnel-id}.cfargotunnel.com</code> (proxy ativo)<br>
+          3. Remove registros A/AAAA conflitantes no apex e no <code>www</code> (se existirem)<br>
+          4. Cria/atualiza <strong>CNAME</strong> <code>@</code> e <code>www</code> → <code>{tunnel-id}.cfargotunnel.com</code> (proxy ativo)<br>
           <em>Idempotente — pode ser executado várias vezes sem problema.</em>
         </td>
         <td><span class="tag-ok">Não</span></td>
@@ -519,8 +519,12 @@
         <td>Nenhuma alteração. Idempotente.</td>
       </tr>
       <tr>
-        <td>Existia registro A antigo</td>
-        <td>O sistema remove o registro A e cria o CNAME automaticamente.</td>
+        <td>Existia registro A/AAAA antigo (no apex ou no <code>www</code>)</td>
+        <td>O sistema remove os registros A e AAAA e cria o CNAME automaticamente.</td>
+      </tr>
+      <tr>
+        <td>Já existia um CNAME <code>www</code> apontando para outro host</td>
+        <td>O sistema atualiza o CNAME existente para o tunnel (busca sempre pelo FQDN <code>www.dominio</code>). Antes da v0.0.27 isso falhava com <code>400: record with that host already exists</code>.</td>
       </tr>
       <tr>
         <td>Zona existe em outra conta Cloudflare</td>
