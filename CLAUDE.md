@@ -267,6 +267,12 @@ Sem essas variáveis, o ERP cai no fallback `core.PlanoCliente.cp_cliente_id` �
 
 Clientes provisionados **antes** desta mudança não têm as variáveis: rodar **"Aplicar Configurações"** injeta `CP_CLIENTE_ID`/`CP_CLIENTE_NOME` no serviço `{slug}_web` existente.
 
+**`erp_api_base_url` do `activation:complete` (ERP 0.0.96):** o ERP roda `daphne` atrás do Traefik (entrypoint `web`, porta 80; TLS terminado no Cloudflare). O Traefik reescreve `X-Forwarded-Proto=http`, então `request.build_absolute_uri()` devolvia `http://` — o SyncAgent recusa uma `erp_api_base_url` http de domínio público com `invalid_response`. `sync_api/views.py::_resolve_external_base_url` (ERP 0.0.96) força `https` para qualquer host que não seja localhost/IP privado. `SECURE_PROXY_SSL_HEADER` (0.0.95) sozinho não resolve porque o header chega `http`.
+
+**mTLS:** o instalador do SyncAgent gravava `ErpSecurity:RequireMutualTls=true`; como o ERP não faz mTLS, a sync pós-ativação parava com *"Client certificate is required"*. Corrigir com `"RequireMutualTls": false` no `appsettings.json` do agente (instalador pdv-local ≥ 1.3.2 já usa `false`).
+
+**Erros de ativação:** catálogo completo na seção "Sincronização — ativação do SyncAgent" da página de Ajuda do admin, e no guia canônico `docs/infra/sync-agent-ativacao-troubleshooting.md` do repo `erp`.
+
 ### Página de Ajuda do admin
 
 O item "Ajuda" da sidebar (`registry/views.py::admin_ajuda`) é uma view de função simples, registrada em `core/urls.py` por `path()` direta (não é um `ModelAdmin`) e renderiza `registry/templates/registry/admin_ajuda.html` (HTML estático, sem model/DB por trás). O conteúdo é organizado em seções demarcadas por comentários `<!-- ═══ NOME ═══ -->`, usando classes CSS próprias definidas no topo do template (`.ajuda-card`, `.ajuda-table`, `.ajuda-step`, `.ajuda-alert`/`.ajuda-alert-warn`, `.tag-ok`/`.tag-no`/`.tag-warn`). Para documentar uma funcionalidade nova, edite o template diretamente na seção correspondente (ou crie uma nova seção seguindo o mesmo padrão) — não é necessário criar model nem admin.

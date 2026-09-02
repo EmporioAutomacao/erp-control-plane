@@ -723,4 +723,91 @@
   💡 <strong>Diagnóstico rápido:</strong> se um domínio custom não responde, verifique em ordem: (1) o serviço está <strong>Running</strong> no Swarm (<code>docker service ps {slug}_web</code>); (2) as labels Traefik estão aplicadas (<code>docker service inspect {slug}_web</code>); (3) o tunnel tem o hostname no ingress (Cloudflare → Zero Trust → Tunnels → Public Hostnames); (4) o CNAME no DNS aponta para o tunnel.
 </div>
 
+<!-- ═══ SINCRONIZAÇÃO / SYNCAGENT ═══ -->
+<p class="ajuda-section-title">Sincronização — ativação do SyncAgent</p>
+<div class="ajuda-grid">
+
+  <div class="ajuda-card">
+    <h3>🔌 O que é</h3>
+    <p>O <strong>SyncAgent</strong> é um serviço Windows instalado na máquina do cliente (PDV local) que sincroniza operadores, produtos, clientes e vendas com o ERP daquele cliente. Ele se conecta ao ERP por HTTPS + token técnico — o CP não fala direto com o agente.</p>
+    <p style="margin-top:8px;">A ativação é feita <strong>uma vez</strong>, na máquina do cliente, em <code>http://127.0.0.1:47891/setup</code>, com um <strong>código de ativação</strong> gerado no admin do ERP (<em>API de Sincronização → Códigos de Ativação → Gerar</em>).</p>
+  </div>
+
+  <div class="ajuda-card">
+    <h3>⚙ Pré-requisitos no CP antes de ativar</h3>
+    <div class="ajuda-step" style="margin-top:4px;">
+      <div class="ajuda-step-num">1</div>
+      <div class="ajuda-step-text">Cliente com imagem ERP <strong>≥ 0.0.96</strong> — use <strong>"Atualizar versão"</strong> na página do cliente.</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">2</div>
+      <div class="ajuda-step-text">Clicar em <strong>⚙ Aplicar Configurações</strong> — injeta <code>CP_CLIENTE_ID</code>/<code>CP_CLIENTE_NOME</code> no serviço, sem os quais o ERP <strong>bloqueia</strong> a geração de códigos.</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">3</div>
+      <div class="ajuda-step-text">Conferir a versão pelo rodapé de <code>https://{slug}.ararasuite.com.br/admin/</code> ou por <code>docker service inspect {slug}_web</code> (campo da imagem).</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">4</div>
+      <div class="ajuda-step-text">No admin do ERP → <em>API de Sincronização → Instalações do SyncAgent</em> → apagar instalações <strong>órfãs</strong> do cliente (coluna "Visto por último" vazia, de códigos queimados antes).</div>
+    </div>
+  </div>
+
+  <div class="ajuda-card" style="grid-column: 1 / -1;">
+    <h3>🚑 Erros de ativação e correções</h3>
+    <table class="ajuda-table">
+      <tr><th>Mensagem / <code>code</code></th><th>Causa</th><th>Correção</th></tr>
+      <tr>
+        <td><code>Configure o ID do cliente no CP em Configurações &gt; Plano…</code></td>
+        <td>ERP sem o vínculo com o CP (<code>CP_CLIENTE_ID</code> ausente).</td>
+        <td>Botão <strong>⚙ Aplicar Configurações</strong> no cliente. Requer imagem ERP <span class="tag-ok">≥ 0.0.94</span>.</td>
+      </tr>
+      <tr>
+        <td><code>invalid_response</code> — <em>must use HTTPS outside local development</em></td>
+        <td>ERP <span class="tag-no">&lt; 0.0.96</span> devolvia a URL da API em <code>http://</code> (o Traefik reescreve <code>X-Forwarded-Proto</code>).</td>
+        <td>Atualizar o ERP para <span class="tag-ok">≥ 0.0.96</span>. O código já foi consumido → apagar a instalação órfã no ERP e gerar um novo.</td>
+      </tr>
+      <tr>
+        <td><code>activation_code_used</code></td>
+        <td>Código já consumido (tentativa anterior, ou envio duplo do formulário na tela do agente).</td>
+        <td>Gerar código novo. Preferir gerar <strong>sem</strong> "ID da instalação" — o ERP gera um e evita colisão.</td>
+      </tr>
+      <tr>
+        <td><code>activation_code_expired</code> / <code>activation_code_revoked</code></td>
+        <td>Fora da validade (5 min – 24 h) ou revogado.</td>
+        <td>Gerar um novo e usar em seguida.</td>
+      </tr>
+      <tr>
+        <td><code>tenant_invalid</code></td>
+        <td>Código gerado antes de o CP estar resolvido no ERP.</td>
+        <td>Aplicar Configurações no CP; depois gerar o código.</td>
+      </tr>
+      <tr>
+        <td><code>erp_unreachable</code> / <code>activation_timeout</code></td>
+        <td>A máquina do agente não alcança o ERP (rede, firewall, DNS, URL errada).</td>
+        <td>Testar <code>https://{slug}.ararasuite.com.br/health/</code> pelo navegador na própria máquina do agente.</td>
+      </tr>
+      <tr>
+        <td><code>Client certificate is required</code> (depois de ativar, agente fica <span class="tag-warn">degraded</span>)</td>
+        <td>O <code>appsettings.json</code> do agente tem <code>RequireMutualTls=true</code>, mas o ERP (Traefik/Cloudflare) não faz mTLS.</td>
+        <td>Na máquina do cliente: <code>"RequireMutualTls": false</code> na seção <code>ErpSecurity</code> do <code>appsettings.json</code> e reiniciar o serviço <code>AraraSuiteSync</code>. Instalador <span class="tag-ok">≥ 1.3.2</span> já usa <code>false</code>.</td>
+      </tr>
+      <tr>
+        <td><code>23505 … operators_login_key</code> (import de operadores)</td>
+        <td>Banco local do agente reaproveitado entre <strong>clientes diferentes</strong>.</td>
+        <td>Agente <span class="tag-ok">≥ 1.3.1</span> (import resiliente). Instalação nova não apresenta.</td>
+      </tr>
+      <tr>
+        <td><code>Aguardando ativação com o ERP</code> (<code>not_provisioned</code>)</td>
+        <td>Estado <strong>normal</strong> — a ativação ainda não foi concluída.</td>
+        <td>Concluir a ativação em <code>http://127.0.0.1:47891/setup</code> na máquina do cliente.</td>
+      </tr>
+    </table>
+    <div class="ajuda-alert-warn" style="margin-top:10px;margin-bottom:0;">
+      ⚠️ O código de ativação é de <strong>uso único</strong>. Toda tentativa que chega a criar a <code>SyncInstallation</code> no ERP <strong>queima</strong> o código, mesmo que o agente rejeite a resposta depois — por isso quase sempre é preciso <strong>apagar a instalação órfã</strong> e <strong>gerar um código novo</strong> a cada correção. Guia técnico completo: <code>docs/infra/sync-agent-ativacao-troubleshooting.md</code> (repo <code>erp</code>).
+    </div>
+  </div>
+
+</div>
+
 {% endblock %}
