@@ -808,6 +808,37 @@
     </div>
   </div>
 
+  <div class="ajuda-card" style="grid-column: 1 / -1;">
+    <h3>⬆ Atualizar o PDV Local nas máquinas (botão "Atualizar App")</h3>
+    <p>Cada Release em <code>github.com/EmporioAutomacao/pdv-local/releases</code> traz dois arquivos: <code>pdv-local-vX.Y.Z.zip</code> (pacote de auto-update) e <code>PdvLocalInstaller-vX.Y.Z.exe</code> (instalação nova). A bandeja do agente só oferece a versão marcada como <strong>atual</strong> no ERP do cliente.</p>
+    <div class="ajuda-step" style="margin-top:6px;">
+      <div class="ajuda-step-num">1</div>
+      <div class="ajuda-step-text">No admin do ERP do cliente → <strong>API de Sincronização → Pacotes de atualização</strong> → <strong>Adicionar</strong>: versão, URL do <code>.zip</code> do Release e SHA256 (do <code>.zip.sha256</code>).</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">2</div>
+      <div class="ajuda-step-text">Selecionar o pacote → ação <strong>"Marcar como versão atual"</strong> (desmarca as outras). O campo não é editável no formulário de propósito.</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">3</div>
+      <div class="ajuda-step-text">Na máquina do cliente: bandeja → <strong>Atualizar App</strong>. Baixa o <code>.zip</code>, confere o SHA256 e roda <code>self-update.ps1</code> (backup + troca + rollback automático). O <code>appsettings.json</code> e as credenciais são preservados.</div>
+    </div>
+    <table class="ajuda-table" style="margin-top:10px;">
+      <tr><th>Mensagem na bandeja</th><th>Causa</th><th>Correção</th></tr>
+      <tr>
+        <td><code>Nenhuma versão publicada foi encontrada no ERP</code></td>
+        <td>Nenhum pacote marcado como atual <strong>nesse</strong> ERP.</td>
+        <td>Passo 2. Conferir também que o agente está no ERP certo (<code>/status</code> → <code>erp_api_base_url</code>).</td>
+      </tr>
+      <tr>
+        <td><code>Já está na versão mais recente</code></td>
+        <td>Versão instalada = versão do pacote.</td>
+        <td>Publicar um Release com número diferente.</td>
+      </tr>
+    </table>
+    <p style="margin-top:8px;">Guia técnico: <code>docs/infra/sync-agent-auto-update.md</code> (repo <code>erp</code>). Publicar Release: <code>git tag vX.Y.Z &amp;&amp; git push origin vX.Y.Z</code> no <code>pdv-local</code> (workflow builda e publica sozinho).</p>
+  </div>
+
 </div>
 
 {% endblock %}
