@@ -839,6 +839,17 @@
     <p style="margin-top:8px;">Guia técnico: <code>docs/infra/sync-agent-auto-update.md</code> (repo <code>erp</code>). Publicar Release: <code>git tag vX.Y.Z &amp;&amp; git push origin vX.Y.Z</code> no <code>pdv-local</code> (workflow builda e publica sozinho).</p>
   </div>
 
+  <div class="ajuda-card" style="grid-column: 1 / -1;">
+    <h3>🔗 Conexões Arpa Control (geridas pelo agente)</h3>
+    <p>A partir do SyncAgent <strong>1.5.0</strong>, as conexões com bancos Arpa Control são configuradas <strong>no dashboard do agente</strong>, na máquina do cliente (<code>http://127.0.0.1:47891/config/arpa</code>) — uma por Loja/Estoque, com toggles Produtos / Clientes / Estoque / Vendas / Financeiro. Não mais no <code>appsettings.json</code> nem no admin do ERP.</p>
+    <ul>
+      <li>O agente <strong>reporta as conexões no heartbeat</strong> (sem senha). O ERP cria/atualiza linhas em <em>Conexões Arpa Control</em> marcadas <span class="tag-ok">Gerido pelo SyncAgent</span> — <strong>somente leitura</strong> (editar só no agente); <em>Empresa</em>/<em>Estoque</em>/<em>Conta de Caixa</em> seguem editáveis para o admin completar o mapeamento.</li>
+      <li>Conexões geridas pelo agente <strong>não</strong> podem ser excluídas no admin — somem quando removidas no dashboard do agente. Conexões <strong>manuais</strong> (lojas sem SyncAgent, sync direto do ERP) não são tocadas.</li>
+      <li>As views <code>sync_export.*</code> no banco Arpa de cada cliente são criadas pelo botão <strong>"Preparar views"</strong> do dashboard, ou pelo fluxo de diagnóstico quando o schema real diverge.</li>
+    </ul>
+    <p style="margin-top:8px;">Guias: <code>docs/infra/sync-agent-arpa.md</code> (repo <code>erp</code>), <code>docs/arpa-collector-piloto.md</code> (repo <code>pdv-local</code>).</p>
+  </div>
+
 </div>
 
 {% endblock %}
