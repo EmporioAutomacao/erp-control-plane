@@ -809,34 +809,47 @@
   </div>
 
   <div class="ajuda-card" style="grid-column: 1 / -1;">
-    <h3>⬆ Atualizar o PDV Local nas máquinas (botão "Atualizar App")</h3>
-    <p>Cada Release em <code>github.com/EmporioAutomacao/pdv-local/releases</code> traz dois arquivos: <code>pdv-local-vX.Y.Z.zip</code> (pacote de auto-update) e <code>PdvLocalInstaller-vX.Y.Z.exe</code> (instalação nova). A bandeja do agente só oferece a versão marcada como <strong>atual</strong> no ERP do cliente.</p>
-    <div class="ajuda-step" style="margin-top:6px;">
+    <h3>⬆ Curadoria de versões do PDV Local por cliente (painel de controle)</h3>
+    <p>Desde a versão <strong>1.6.0</strong> do PDV Local, o botão <strong>"Atualizar App"</strong> na bandeja do cliente mostra uma <strong>lista</strong> de versões — não mais "a versão atual" única. Quem decide quais versões cada cliente pode escolher é <strong>este painel</strong>, na página do próprio <strong>Cliente</strong> (aba <strong>"Versões do SyncAgent/PDV"</strong>), não mais direto no admin do ERP de cada cliente.</p>
+    <div class="ajuda-alert" style="margin-top:10px;">
+      💡 O ERP de cada cliente aplica as travas de verdade — o CP só cura o que <em>pode</em> ser oferecido. <strong>Downgrade nunca é oferecido</strong> (mesmo que uma versão antiga esteja marcada aqui) e uma versão que exija um ERP mais novo aparece <strong>desabilitada com o motivo</strong> na bandeja, nunca aplicável.
+    </div>
+    <div class="ajuda-step" style="margin-top:10px;">
       <div class="ajuda-step-num">1</div>
-      <div class="ajuda-step-text">No admin do ERP do cliente → <strong>API de Sincronização → Pacotes de atualização</strong> → <strong>Adicionar</strong>: versão, URL do <code>.zip</code> do Release e SHA256 (do <code>.zip.sha256</code>).</div>
+      <div class="ajuda-step-text"><strong>Cadastrar a versão no catálogo</strong> (uma vez só, vale pra todos os clientes) — <strong>Clientes → Versões do Agente</strong> → Adicionar: número da versão, URL do <code>.zip</code> do Release (<code>github.com/EmporioAutomacao/pdv-local/releases</code>) e SHA256 (conteúdo do <code>.zip.sha256</code>, não a URL do arquivo). Preencha <strong>"Versão mínima do ERP exigida"</strong> só se essa versão do PDV Local precisar de recursos do ERP que ainda não existem em versões antigas.</div>
     </div>
     <div class="ajuda-step">
       <div class="ajuda-step-num">2</div>
-      <div class="ajuda-step-text">Selecionar o pacote → ação <strong>"Marcar como versão atual"</strong> (desmarca as outras). O campo não é editável no formulário de propósito.</div>
+      <div class="ajuda-step-text"><strong>Permitir para o cliente</strong> — na página do <strong>Cliente</strong>, aba "Versões do SyncAgent/PDV", adicione a versão em <strong>"Versões permitidas"</strong> e salve. Isso dispara sozinho o envio pro ERP daquele cliente (ou clique em <strong>⇪ Sincronizar Versões com o ERP</strong> pra forçar na hora).</div>
     </div>
     <div class="ajuda-step">
       <div class="ajuda-step-num">3</div>
-      <div class="ajuda-step-text">Na máquina do cliente: bandeja → <strong>Atualizar App</strong>. Baixa o <code>.zip</code>, confere o SHA256 e roda <code>self-update.ps1</code> (backup + troca + rollback automático). O <code>appsettings.json</code> e as credenciais são preservados.</div>
+      <div class="ajuda-step-text">Na máquina do cliente: bandeja → <strong>Atualizar App</strong> → o dono da loja escolhe entre as versões permitidas e não-bloqueadas. Baixa o <code>.zip</code>, confere o SHA256 e roda <code>self-update.ps1</code> (backup + troca + rollback automático). <code>appsettings.json</code> e credenciais são preservados.</div>
     </div>
     <table class="ajuda-table" style="margin-top:10px;">
-      <tr><th>Mensagem na bandeja</th><th>Causa</th><th>Correção</th></tr>
+      <tr><th>Situação</th><th>Causa</th><th>Correção</th></tr>
       <tr>
-        <td><code>Nenhuma versão publicada foi encontrada no ERP</code></td>
-        <td>Nenhum pacote marcado como atual <strong>nesse</strong> ERP.</td>
-        <td>Passo 2. Conferir também que o agente está no ERP certo (<code>/status</code> → <code>erp_api_base_url</code>).</td>
+        <td>Botão <strong>"⇪ Sincronizar Versões"</strong> demora e volta com erro de timeout/SSL</td>
+        <td>Normal em ambiente <strong>local de dev</strong> sem Traefik/TLS na frente do ERP de teste (o CP sempre chama <code>https://{subdomínio}</code>). Em produção, o Traefik do cliente termina o TLS normalmente.</td>
+        <td>Nada a corrigir em produção. Em dev local, teste o endpoint direto por IP/porta do container (ver <code>docs/registry/release-curadoria-versoes-syncagent.md</code>).</td>
       </tr>
       <tr>
-        <td><code>Já está na versão mais recente</code></td>
-        <td>Versão instalada = versão do pacote.</td>
-        <td>Publicar um Release com número diferente.</td>
+        <td>Botão de sincronizar avisa "sem segredo de integração ainda"</td>
+        <td>Cliente provisionado antes desta funcionalidade — não tem <code>integracao_secret</code> gerado.</td>
+        <td>Clique em <strong>⚙ Aplicar Configurações</strong> uma vez (gera o segredo e o envia pro ERP), depois sincronize as versões.</td>
+      </tr>
+      <tr>
+        <td>Bandeja mostra <code>Nenhuma versão publicada foi encontrada no ERP</code></td>
+        <td>Nenhuma versão permitida chegou ainda nesse ERP (nunca sincronizou, ou todas foram removidas da curadoria).</td>
+        <td>Passos 1–2 acima. Conferir também que o agente está no ERP certo (<code>/status</code> → <code>erp_api_base_url</code>).</td>
+      </tr>
+      <tr>
+        <td>Versão aparece na bandeja mas desabilitada</td>
+        <td>"Versão mínima do ERP exigida" daquela versão é maior que a versão real do ERP do cliente.</td>
+        <td>Atualizar o ERP do cliente primeiro (<strong>"Atualizar versão"</strong> na página do cliente), ou permitir uma versão do PDV Local compatível.</td>
       </tr>
     </table>
-    <p style="margin-top:8px;">Guia técnico: <code>docs/infra/sync-agent-auto-update.md</code> (repo <code>erp</code>). Publicar Release: <code>git tag vX.Y.Z &amp;&amp; git push origin vX.Y.Z</code> no <code>pdv-local</code> (workflow builda e publica sozinho).</p>
+    <p style="margin-top:8px;">Guias técnicos: <code>docs/registry/release-curadoria-versoes-syncagent.md</code> (este repo), <code>docs/infra/sync-agent-auto-update.md</code> (repo <code>erp</code>). Publicar Release novo do PDV Local: <code>git tag vX.Y.Z &amp;&amp; git push origin vX.Y.Z</code> no <code>pdv-local</code> (workflow builda e publica sozinho).</p>
   </div>
 
   <div class="ajuda-card" style="grid-column: 1 / -1;">
