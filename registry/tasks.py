@@ -56,6 +56,27 @@ def task_atualizar_versao(self, cliente_id, versao_nova):
         raise self.retry(exc=exc)
 
 
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def task_sincronizar_versoes_agente(self, cliente_id):
+    """Dispara SincronizadorVersoes.sincronizar() em background -- usado pelo
+    push automatico (registry.signals, quando a curadoria de um cliente ou o
+    catalogo mestre mudam) e reaproveitavel por qualquer outro chamador
+    assincrono futuro. O botao manual do admin ("Sincronizar Versoes com o
+    ERP") chama SincronizadorVersoes diretamente, sem passar por task --
+    quer feedback imediato na tela, nao retry em background."""
+    from .cp_push import SincronizadorVersoes
+    from .models import Cliente
+
+    try:
+        cliente = Cliente.objects.get(pk=cliente_id)
+    except Cliente.DoesNotExist:
+        return
+
+    registro = SincronizadorVersoes(cliente).sincronizar()
+    if registro.status == 'erro':
+        raise self.retry(exc=Exception(registro.mensagem_erro or 'Falha ao sincronizar versoes.'))
+
+
 @shared_task
 def task_suspender_cliente(cliente_id):
     from .models import Cliente
