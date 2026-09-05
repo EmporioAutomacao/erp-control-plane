@@ -1,5 +1,12 @@
 import uuid
+from django.core.validators import RegexValidator
 from django.db import models
+
+sha256_hex_validator = RegexValidator(
+    regex=r"^[0-9A-Fa-f]{64}$",
+    message="Deve ser o hash SHA256 em hexadecimal (64 caracteres) — o conteudo do arquivo "
+    ".sha256, nao a URL dele.",
+)
 
 
 class Modulo(models.Model):
@@ -121,6 +128,23 @@ class Cliente(models.Model):
 
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='aguardando_provisao', db_index=True)
 
+    versoes_permitidas = models.ManyToManyField(
+        'VersaoAgente', blank=True, related_name='clientes',
+        verbose_name='Versões do SyncAgent/PDV permitidas',
+        help_text='Conjunto que este cliente pode escolher para atualizar (curadoria da equipe). '
+        'O dono da loja escolhe dentro deste conjunto na tela "Atualizar App" do Tray; nunca '
+        'consegue fazer downgrade, mesmo que uma versão menor esteja marcada aqui (trava do '
+        'lado erp/SyncAgent). Versões que exigem um ERP mais novo que "Versão ERP" abaixo '
+        'chegam desabilitadas no Tray, com o motivo.',
+    )
+    integracao_secret = models.CharField(
+        max_length=100, blank=True,
+        verbose_name='Segredo de integração CP → ERP',
+        help_text='Gerado no provisionamento. Usado como Bearer token nas chamadas HTTPS do CP '
+        'para esta instância (ex.: sincronizar versões permitidas). Rotacione se suspeitar de '
+        'vazamento — reprovisionar/reaplicar módulos gera um novo.',
+    )
+
     trial_ate = models.DateField(null=True, blank=True)
     data_ativacao = models.DateField(null=True, blank=True)
     data_suspensao = models.DateField(null=True, blank=True)
@@ -194,6 +218,71 @@ class AtualizacaoVersao(models.Model):
 
     def __str__(self):
         return f'{self.cliente.slug}: {self.versao_anterior} → {self.versao_nova}'
+
+
+class VersaoAgente(models.Model):
+    """Catálogo mestre de versões do SyncAgent/PDV Local (pdv-local) — global,
+    não por cliente: download_url/sha256 apontam pro mesmo artefato do GitHub
+    Releases pra todo mundo. Por cliente só varia qual subconjunto está
+    permitido (ver Cliente.versoes_permitidas)."""
+
+    versao = models.CharField(max_length=20, unique=True)
+    erp_minimo = models.CharField(
+        max_length=20, blank=True,
+        verbose_name='Versão mínima do ERP exigida',
+        help_text='Comparação semver X.Y.Z (mesmo formato de Cliente.versao_erp). Em branco = '
+        'sem requisito de versão do ERP.',
+    )
+    download_url = models.URLField(max_length=500)
+    sha256 = models.CharField(
+        max_length=64,
+        validators=[sha256_hex_validator],
+        help_text='Hash SHA256 do ZIP em hexadecimal (64 caracteres) — abra o arquivo .sha256 '
+        'publicado no Release e cole o conteúdo dele aqui, não a URL do arquivo.',
+    )
+    release_notes = models.TextField(blank=True)
+    ativo = models.BooleanField(
+        default=True,
+        help_text='Desmarque para aposentar uma versão do catálogo (ex.: recall por bug) sem '
+        'apagar histórico. Uma versão inativa nunca é enviada num push novo, mesmo que ainda '
+        'esteja na curadoria de algum cliente.',
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Versão do Agente (SyncAgent/PDV)'
+        verbose_name_plural = 'Catálogo de Versões do Agente'
+        ordering = ['-criado_em']
+
+    def __str__(self):
+        return self.versao
+
+
+class SincronizacaoVersoesAgente(models.Model):
+    """Log de cada push do CP pro erp de um cliente com as versões
+    atualmente permitidas — mesmo padrão de auditoria de AtualizacaoVersao."""
+
+    STATUS_CHOICES = [
+        ('enviando', 'Enviando'),
+        ('concluida', 'Concluída'),
+        ('erro', 'Erro'),
+    ]
+
+    cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='sincronizacoes_versoes')
+    versoes_enviadas = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='enviando')
+    iniciada_em = models.DateTimeField(auto_now_add=True)
+    concluida_em = models.DateTimeField(null=True, blank=True)
+    resposta_http_status = models.PositiveIntegerField(null=True, blank=True)
+    mensagem_erro = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = 'Sincronização de Versões (CP → ERP)'
+        verbose_name_plural = 'Sincronizações de Versões (CP → ERP)'
+        ordering = ['-iniciada_em']
+
+    def __str__(self):
+        return f'{self.cliente.slug} — {self.status} em {self.iniciada_em:%d/%m/%Y %H:%M}'
 
 
 class ConfiguracaoEmail(models.Model):

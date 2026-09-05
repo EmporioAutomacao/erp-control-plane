@@ -67,6 +67,11 @@ class MotorProvisionamento:
         secret_key = env_existente.get('DJANGO_SECRET_KEY') or secrets.token_hex(50)
         master_key = env_existente.get('EMPRESAS_CREDENCIAL_MASTER_KEY') or secrets.token_hex(32)
         senha_temp = env_existente.get('DJANGO_SUPERUSER_PASSWORD') or secrets.token_urlsafe(12)
+        # Segredo usado pelo CP para autenticar chamadas HTTPS PARA esta
+        # instancia (ex.: sincronizar versoes permitidas do SyncAgent/PDV) —
+        # reusa o que ja estiver salvo no Cliente antes de gerar um novo, pra
+        # nao invalidar integracoes existentes a cada reprovisionamento.
+        cp_shared_secret = self.cliente.integracao_secret or env_existente.get('CP_SHARED_SECRET') or secrets.token_hex(32)
 
         env_vars = {
             'SLUG': slug,
@@ -84,6 +89,7 @@ class MotorProvisionamento:
             'TEMA_SITE': tema,
             'CP_CLIENTE_ID': str(self.cliente.id),
             'CP_CLIENTE_NOME': self.cliente.nome,
+            'CP_SHARED_SECRET': cp_shared_secret,
             'EMPRESAS_CREDENCIAL_MASTER_KEY': master_key,
             'BACKUP_DIR': '/app/backups',
             'DJANGO_SUPERUSER_USERNAME': 'admin',
@@ -121,7 +127,9 @@ class MotorProvisionamento:
             versao_erp=versao,
             stack_path=str(cliente_dir),
             data_ativacao=timezone.now().date(),
+            integracao_secret=cp_shared_secret,
         )
+        self.cliente.integracao_secret = cp_shared_secret
 
     def atualizar_versao(self, versao_nova):
         slug = self.cliente.slug

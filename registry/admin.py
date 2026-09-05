@@ -6,7 +6,7 @@ from django.urls import path
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.html import escape, format_html, mark_safe
 from unfold.admin import ModelAdmin
-from .models import Modulo, Plano, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare, BackupCliente
+from .models import Modulo, Plano, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare, BackupCliente, VersaoAgente, SincronizacaoVersoesAgente
 
 
 @admin.register(Modulo)
@@ -72,6 +72,24 @@ class AtualizacaoVersaoInline(admin.TabularInline):
     can_delete = False
 
 
+class SincronizacaoVersoesAgenteInline(admin.TabularInline):
+    model = SincronizacaoVersoesAgente
+    extra = 0
+    readonly_fields = ['versoes_enviadas', 'status', 'resposta_http_status', 'iniciada_em', 'concluida_em', 'mensagem_erro']
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(VersaoAgente)
+class VersaoAgenteAdmin(ModelAdmin):
+    list_display = ['versao', 'erp_minimo', 'ativo', 'criado_em']
+    list_filter = ['ativo']
+    search_fields = ['versao']
+    readonly_fields = ['criado_em']
+
+
 def acao_reprovisionar(modeladmin, request, queryset):
     from .tasks import task_provisionar_cliente
     for cliente in queryset:
@@ -96,15 +114,16 @@ class ClienteAdmin(ModelAdmin):
     list_display = ['slug', 'nome', 'subdominio', 'plano', 'status_badge', 'isento_cobranca', 'versao_erp', 'criado_em']
     list_filter = ['status', 'plano', 'host', 'isento_cobranca']
     search_fields = ['slug', 'nome', 'cnpj', 'email_contato']
-    readonly_fields = ['id', 'criado_em', 'atualizado_em', 'status_badge', 'painel_acesso', 'acoes_provisionamento', 'badge_isencao', 'lista_backups']
-    filter_horizontal = ['modulos_ativos']
+    readonly_fields = ['id', 'criado_em', 'atualizado_em', 'status_badge', 'painel_acesso', 'acoes_provisionamento', 'badge_isencao', 'lista_backups', 'acoes_versoes']
+    filter_horizontal = ['modulos_ativos', 'versoes_permitidas']
     actions = [acao_reprovisionar, acao_destruir]
-    inlines = [ProvisionamentoLogInline, AtualizacaoVersaoInline]
+    inlines = [ProvisionamentoLogInline, AtualizacaoVersaoInline, SincronizacaoVersoesAgenteInline]
     fieldsets = [
         ('Identificação', {'fields': ['id', 'slug', 'nome', 'cnpj', 'email_contato', 'telefone']}),
         ('Acesso', {'fields': ['painel_acesso']}),
         ('Infraestrutura', {'fields': ['host', 'versao_erp', 'stack_path', 'subdominio', 'dominio_custom']}),
         ('Plano', {'fields': ['plano', 'modulos_ativos', 'tema_site']}),
+        ('Versões do SyncAgent/PDV', {'fields': ['versoes_permitidas', 'acoes_versoes']}),
         ('Faturamento', {'fields': ['asaas_customer_id', 'asaas_subscription_id', 'badge_isencao', 'isento_cobranca', 'motivo_isencao']}),
         ('Status', {'fields': ['status_badge', 'status', 'trial_ate', 'data_ativacao', 'data_suspensao', 'data_cancelamento']}),
         ('Ações', {'fields': ['acoes_provisionamento']}),
@@ -120,6 +139,7 @@ class ClienteAdmin(ModelAdmin):
             path('<pk>/reenviar-boas-vindas/', self.admin_site.admin_view(self._view_reenviar_boas_vindas), name='registry_cliente_reenviar_boas_vindas'),
             path('<pk>/aplicar-modulos/', self.admin_site.admin_view(self._view_aplicar_modulos), name='registry_cliente_aplicar_modulos'),
             path('<pk>/configurar-cloudflare/', self.admin_site.admin_view(self._view_configurar_cloudflare), name='registry_cliente_configurar_cloudflare'),
+            path('<pk>/sincronizar-versoes/', self.admin_site.admin_view(self._view_sincronizar_versoes), name='registry_cliente_sincronizar_versoes'),
             path('<pk>/backup/', self.admin_site.admin_view(self._view_backup), name='registry_cliente_backup'),
             path('<pk>/backup/upload/', self.admin_site.admin_view(self._view_upload_backup), name='registry_cliente_backup_upload'),
             path('<pk>/backups/<int:backup_id>/download/', self.admin_site.admin_view(self._view_download_backup), name='registry_cliente_backup_download'),
@@ -171,6 +191,16 @@ class ClienteAdmin(ModelAdmin):
             else f'https://{subdominio}'
         )
 
+        import secrets
+
+        # Backfill do segredo de integracao CP -> erp (sincronizar-versoes) pra
+        # clientes provisionados antes desta feature. Reusa o que ja estiver
+        # salvo -- nunca troca um segredo existente por baixo do pano.
+        cp_shared_secret = cliente.integracao_secret
+        if not cp_shared_secret:
+            cp_shared_secret = secrets.token_hex(32)
+            Cliente.objects.filter(pk=cliente.pk).update(integracao_secret=cp_shared_secret)
+
         base_path = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes'))
         env_file = base_path / slug / '.env'
         if env_file.exists():
@@ -181,6 +211,7 @@ class ClienteAdmin(ModelAdmin):
                 'CSRF_TRUSTED_ORIGINS': csrf_origins,
                 'CP_CLIENTE_ID': str(cliente.id),
                 'CP_CLIENTE_NOME': cliente.nome,
+                'CP_SHARED_SECRET': cp_shared_secret,
             }
             linhas = env_file.read_text().splitlines()
             novas = []
@@ -208,6 +239,7 @@ class ClienteAdmin(ModelAdmin):
             '--env-add', f'CSRF_TRUSTED_ORIGINS={csrf_origins}',
             '--env-add', f'CP_CLIENTE_ID={cliente.id}',
             '--env-add', f'CP_CLIENTE_NOME={cliente.nome}',
+            '--env-add', f'CP_SHARED_SECRET={cp_shared_secret}',
             # Atualiza a label do router principal (subdomínio padrão) no Traefik
             '--label-add', f'traefik.http.routers.{slug}-erp.rule=Host(`{subdominio}`)',
         ]
@@ -262,6 +294,36 @@ class ClienteAdmin(ModelAdmin):
                 messages.warning(request, f'.env atualizado, mas falha ao atualizar serviço Docker: {result.stderr.strip()}')
         except Exception as exc:
             messages.warning(request, f'.env atualizado, mas falha ao atualizar serviço Docker: {exc}')
+
+        return redirect('admin:registry_cliente_change', pk)
+
+    def _view_sincronizar_versoes(self, request, pk):
+        from django.contrib import messages
+        from .cp_push import SincronizadorVersoes
+
+        cliente = get_object_or_404(Cliente, pk=pk)
+
+        if not cliente.integracao_secret:
+            messages.warning(
+                request,
+                'Este cliente ainda não tem um segredo de integração gerado. '
+                'Clique em "⚙ Aplicar Configurações" primeiro (gera o segredo e o envia pro ERP), '
+                'depois tente sincronizar as versões de novo.',
+            )
+            return redirect('admin:registry_cliente_change', pk)
+
+        registro = SincronizadorVersoes(cliente).sincronizar()
+        if registro.status == 'concluida':
+            messages.success(
+                request,
+                f'Versões sincronizadas com sucesso: {len(registro.versoes_enviadas)} '
+                f'permitida(s) enviada(s) para o ERP de "{cliente.slug}".',
+            )
+        else:
+            messages.error(
+                request,
+                f'Falha ao sincronizar versões com "{cliente.slug}": {registro.mensagem_erro}',
+            )
 
         return redirect('admin:registry_cliente_change', pk)
 
@@ -609,6 +671,31 @@ class ClienteAdmin(ModelAdmin):
             url_modulos, url_cloudflare, url_reprov, url_destruir, url_boas_vindas,
         )
     acoes_provisionamento.short_description = 'Provisionamento'
+
+    def acoes_versoes(self, obj):
+        if not obj.pk:
+            return '—'
+        from django.urls import reverse
+        url_sync = reverse('admin:registry_cliente_sincronizar_versoes', args=[obj.pk])
+        aviso_secret = ''
+        if not obj.integracao_secret:
+            aviso_secret = (
+                '<p style="margin:0 0 10px;padding:8px 12px;background:#fff8e1;border-left:4px solid #f9a825;'
+                'font-size:12px;color:#5d4037;">⚠️ Sem segredo de integração ainda — clique em '
+                '"⚙ Aplicar Configurações" (aba Ações) uma vez antes de sincronizar.</p>'
+            )
+        return format_html(
+            '{}'
+            '<p style="margin:0 0 10px;padding:8px 12px;background:#f5f5f5;border-left:4px solid #9e9e9e;'
+            'font-size:12px;color:#424242;">Envia o conjunto de versões marcadas acima pro ERP deste cliente '
+            '(<code>SyncPackage.allowed</code>) — não reinicia o serviço, é só uma chamada HTTPS.</p>'
+            '<a href="{}" style="display:inline-block;padding:6px 14px;background:#2e7d32;color:#fff;'
+            'border-radius:4px;text-decoration:none;font-size:13px;" '
+            'onclick="return confirm(\'Salve o formulário antes (se mudou as versões permitidas). Enviar a '
+            'lista atual para o ERP deste cliente agora?\')">⇪ Sincronizar Versões com o ERP</a>',
+            mark_safe(aviso_secret), url_sync,
+        )
+    acoes_versoes.short_description = 'Sincronizar com o ERP'
 
     def lista_backups(self, obj):
         if not obj.pk:
