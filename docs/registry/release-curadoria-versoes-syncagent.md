@@ -69,10 +69,12 @@ UX. O SyncAgent é a última linha de defesa.
 
 ## 3. Onde mexer no dia a dia
 
-1. **Cadastrar uma versão nova no catálogo** (uma vez, vale pra todos os
-   clientes): **Clientes → Versões do Agente** → Adicionar. Ver a "Ajuda" do
-   admin (seção "Curadoria de versões do PDV Local por cliente") para o
-   passo a passo com os campos.
+1. **Atualizar o catálogo** (uma vez, vale pra todos os clientes):
+   **Clientes → Versões do Agente** → botão **"🔍 Verificar novas versões no
+   GitHub"** — varre `github.com/EmporioAutomacao/pdv-local/releases`
+   sozinho, sem precisar digitar nada (ver seção 3.1). Cadastro manual
+   (Adicionar, ou o comando `register_versao_agente`) continua funcionando
+   como alternativa.
 2. **Permitir para um cliente específico**: página do `Cliente` → aba
    **"Versões do SyncAgent/PDV"** → adicionar em "Versões permitidas" →
    salvar (dispara o push sozinho) ou clicar em **"⇪ Sincronizar Versões com
@@ -80,6 +82,25 @@ UX. O SyncAgent é a última linha de defesa.
 3. **Ver o histórico de pushes**: inline "Sincronização de Versões (CP → ERP)"
    na própria página do cliente — status, payload enviado, código HTTP,
    mensagem de erro se houver.
+
+### 3.1 Descoberta automática de versões (`registry/github_releases.py`)
+
+Em vez de alguém ter que cadastrar cada versão nova na mão (ou o CI do
+`pdv-local` ter que avisar o CP — canal que existe como alternativa, seção 6,
+mas não está ligado a nenhum workflow hoje), o próprio botão **"🔍 Verificar
+novas versões no GitHub"** varre a API pública de Releases do repo
+(`PDV_LOCAL_GITHUB_REPO`, padrão `EmporioAutomacao/pdv-local`) e, pra cada
+Release publicado (ignora rascunho/pré-release) que tenha um
+`pdv-local-vX.Y.Z.zip` + `.zip.sha256`, faz upsert do `VersaoAgente`
+correspondente — versão, URL, SHA256 e as notas do Release. **Nunca** mexe em
+`erp_minimo` de uma versão já cadastrada (o GitHub não tem essa informação;
+fica só sob controle manual) e **nunca** permite a versão pra nenhum cliente
+sozinho — isso continua decisão manual, por cliente (passo 2 acima).
+Idempotente: clicar de novo não duplica nem apaga nada.
+
+Opcional: `GITHUB_TOKEN` (settings) aumenta o limite de requisições da API do
+GitHub — funciona sem ele, só com limite mais baixo (60/h por IP, suficiente
+pra cliques manuais ocasionais).
 
 ## 4. Modelos novos (`registry/models.py`)
 
@@ -119,6 +140,18 @@ Fica **fora** do prefixo `v1/sync/...` de propósito — é canal interno CP→e
 não o contrato produto ERP↔SyncAgent (esse ganhou `GET /available-packages`,
 contrato `sync` v2.6.0).
 
+### 6.1 Endpoint recebido pelo próprio CP (canal alternativo, não usado por nenhum CI)
+
+`POST /v1/releases/pdv-local:register` (`registry/release_api.py`) — pensado
+originalmente pra o workflow de release do `pdv-local` chamar depois de
+publicar um Release, mas a **forma recomendada** de popular o catálogo virou
+o botão de descoberta automática (seção 3.1), então este endpoint **não está
+ligado a nenhum workflow hoje** — fica disponível como canal alternativo
+(scripts, automações futuras) e como base da mesma lógica que o comando
+`register_versao_agente` usa. Autenticado por `PDV_LOCAL_RELEASE_TOKEN`
+(shared secret, não o `Cliente.integracao_secret` de ninguém). Só popula o
+catálogo — nunca permite a versão pra nenhum cliente sozinho.
+
 ## 7. Validação feita (ambiente local, não produção)
 
 Testado ao vivo com `docker-compose.integrated-dev.yml` (CP em `:8001` +
@@ -136,6 +169,34 @@ desta feature):
 - Autenticação do push: 401 sem/errado, 409 `cliente_id` divergente.
 - Admin (login, página do `VersaoAgente`, página do `Cliente` com a aba nova,
   botão "Sincronizar Versões") renderizando sem erro.
+- Botão "🔍 Verificar novas versões no GitHub" testado contra a API **real**
+  do GitHub (`EmporioAutomacao/pdv-local`) — encontrou e cadastrou as 4
+  versões publicadas (`1.4.0`, `1.5.0`, `1.5.1`, `1.6.0`) com URL/SHA256
+  corretos; clicar de novo não duplicou nada (idempotente).
+- `python manage.py test registry.tests.test_release_api
+  registry.tests.test_github_releases` — 11 testes, todos passando, contra
+  banco de teste isolado (`test_erp_cp`) criado do zero (valida a migração
+  `0014` funcionando limpa também).
+
+### Bugs encontrados e corrigidos durante o teste ao vivo
+
+- **Item novo invisível no menu**: `VersaoAgenteAdmin` foi registrado, mas o
+  menu lateral deste admin usa uma lista fixa (`UNFOLD.SIDEBAR.navigation`
+  em `core/settings.py`, `show_all_applications: False`) — o link não foi
+  adicionado lá, então a tela existia (por URL direta) mas não aparecia pra
+  ninguém achar. Foi assim que o usuário reportou "não estou achando
+  Clientes → Versões do Agente". Corrigido adicionando o item na navegação.
+- **`NameError: name 'messages' is not defined`** em `_view_verificar_github`
+  — `messages` é importado localmente dentro de cada view neste arquivo
+  (convenção do `admin.py`), esqueci o import na view nova. Só apareceu
+  rodando de verdade (`manage.py check` não pega isso), corrigido depois de
+  reproduzir o 500 ao vivo.
+- **Testes shadowed**: este app tem um pacote `registry/tests/` (vários
+  arquivos `test_*.py`), mas também existia um `registry/tests.py` (boilerplate
+  do Django nunca removido) — o pacote sempre vence na resolução de import, e
+  qualquer teste escrito em `tests.py` nunca rodava de verdade, silenciosamente.
+  Os testes desta feature foram movidos pra `registry/tests/test_release_api.py`
+  e `registry/tests/test_github_releases.py`; `tests.py` foi removido.
 
 ### Problema de ambiente encontrado (não é bug da feature)
 
@@ -164,10 +225,10 @@ por um consumidor.
 3. **Celery/Redis do CP em produção**: confirmar que o worker está de pé
    (`docker service ls | grep celery`) para o push automático (seção 5)
    funcionar sem depender do botão manual.
-4. **Publicar uma versão real no catálogo**: `PDV Local 1.6.0` já está
-   publicado no GitHub (`github.com/EmporioAutomacao/pdv-local/releases/tag/v1.6.0`)
-   — falta cadastrar em **Clientes → Versões do Agente** e permitir pros
-   clientes que devem recebê-la.
+4. **Popular o catálogo em produção**: clicar **"🔍 Verificar novas versões no
+   GitHub"** uma vez em **Clientes → Versões do Agente** — cadastra `1.4.0` a
+   `1.6.0` sozinho. Falta só **permitir** pros clientes que devem receber
+   cada versão (decisão manual, por cliente, de propósito).
 5. **Repo `sync`** (contrato `2.6.0`, endpoint `available-packages`
    documentado) está commitado localmente mas **sem remote configurado**
    nesta máquina — não foi publicado em lugar nenhum ainda.
@@ -186,6 +247,6 @@ novo e pode desfazer a edição manual.
 | Repo | Commits |
 |---|---|
 | `erp` | `a366651` (SyncPackage.allowed + travas), `f36f93e` (endpoint cp_push), `5812945` (docs + aviso no admin) |
-| `erp-control-plane` | `3e8df00` (catálogo + curadoria + push manual), `a7d14a2` (push automático), este commit (docs + Ajuda) |
+| `erp-control-plane` | `3e8df00` (catálogo + curadoria + push manual), `a7d14a2` (push automático), `924aaeb` (docs + Ajuda v1), este commit (menu lateral do catálogo, descoberta automática via GitHub, endpoint alternativo `release_api.py`) |
 | `pdv-local` | `71ae236` (Tray vira lista + travas client-side), tag `v1.6.0` publicada |
 | `sync` | `1349da2` (contrato 2.6.0) — local, sem remote |

@@ -18,6 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 
 from registry.views import admin_ajuda
+from registry.release_api import register_pdv_local_release
 
 urlpatterns = [
     path('', include('landing.urls')),
@@ -26,4 +27,7 @@ urlpatterns = [
     # rota especifica seja tentada, se ficar depois.
     path('admin/ajuda/', admin.site.admin_view(admin_ajuda), name='admin_ajuda'),
     path('admin/', admin.site.urls),
+    # Chamado pelo workflow de release do repo pdv-local (GitHub Actions) —
+    # ver registry/release_api.py.
+    path('v1/releases/pdv-local:register', register_pdv_local_release, name='register_pdv_local_release'),
 ]

@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / '.env')
 
-VERSION = '0.0.32'
+VERSION = '0.0.33'
 
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-change-me')
 DEBUG = os.getenv('DEBUG', 'true').lower() in ('1', 'true', 'yes')
@@ -48,6 +48,7 @@ UNFOLD = {
                     {"title": "Clientes", "icon": "groups", "link": reverse_lazy("admin:registry_cliente_changelist")},
                     {"title": "Planos", "icon": "workspace_premium", "link": reverse_lazy("admin:registry_plano_changelist")},
                     {"title": "Módulos", "icon": "extension", "link": reverse_lazy("admin:registry_modulo_changelist")},
+                    {"title": "Versões do Agente", "icon": "system_update", "link": reverse_lazy("admin:registry_versaoagente_changelist")},
                     {"title": "Hosts de Infraestrutura", "icon": "dns", "link": reverse_lazy("admin:registry_hostinfraestrutura_changelist")},
                     {"title": "Verificações de Saúde", "icon": "monitor_heart", "link": reverse_lazy("admin:registry_verificacaosaude_changelist")},
                 ],
@@ -74,6 +75,18 @@ UNFOLD = {
 
 SAAS_DOMAIN = os.getenv('SAAS_DOMAIN', 'ararasuite.com.br')
 ERP_LATEST_VERSION = os.getenv('ERP_LATEST_VERSION', '0.0.26')
+
+# Catalogo de versoes do SyncAgent/PDV (Clientes > Versoes do Agente). Forma
+# recomendada de popular: botao "Verificar novas versoes no GitHub" na propria
+# tela (registry/github_releases.py), sem precisar de nenhuma configuracao
+# alem do repo/token abaixo (token so aumenta o limite de requisicoes da API
+# do GitHub -- funciona sem ele, so que com limite mais baixo).
+PDV_LOCAL_GITHUB_REPO = os.getenv('PDV_LOCAL_GITHUB_REPO', 'EmporioAutomacao/pdv-local')
+GITHUB_TOKEN = (os.getenv('GITHUB_TOKEN') or '').strip()
+# Canal alternativo (push, nao usado por nenhum CI hoje -- ver registry/release_api.py
+# e o comando `register_versao_agente`): autentica POST /v1/releases/pdv-local:register.
+# Vazio = endpoint sempre recusa (fail-safe).
+PDV_LOCAL_RELEASE_TOKEN = (os.getenv('PDV_LOCAL_RELEASE_TOKEN') or '').strip()
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',

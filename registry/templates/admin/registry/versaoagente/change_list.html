@@ -1,0 +1,25 @@
+{% extends "admin/change_list.html" %}
+
+{% block content %}
+  <section style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:12px;padding:16px;">
+    <h2 style="margin:0;font-size:20px;">Catálogo de versões do SyncAgent/PDV</h2>
+    <p style="color:#64748b;font-size:13px;line-height:1.5;margin:8px 0 0;">
+      Versões disponíveis para <strong>curar por cliente</strong> em
+      <code>Cliente &gt; Versões do SyncAgent/PDV</code>. Cadastrar aqui não permite
+      a versão pra ninguém sozinho — é só o catálogo mestre.
+    </p>
+    <p style="margin-top:14px;">
+      <a href="{% url 'admin:registry_versaoagente_verificar_github' %}"
+         style="display:inline-block;padding:6px 14px;background:#2e7d32;color:#fff;border-radius:4px;text-decoration:none;font-size:13px;">
+        🔍 Verificar novas versões no GitHub
+      </a>
+    </p>
+    <p style="color:#64748b;font-size:12px;line-height:1.5;margin:10px 0 0;">
+      Varre <code>github.com/EmporioAutomacao/pdv-local/releases</code> e cria/atualiza
+      automaticamente a versão, URL e SHA256 de cada Release publicado (ignora rascunhos
+      e pré-releases). Nunca mexe em <strong>"Versão mínima do ERP exigida"</strong> de uma
+      versão já cadastrada — esse campo é sempre decisão manual.
+    </p>
+  </section>
+  {{ block.super }}
+{% endblock %}

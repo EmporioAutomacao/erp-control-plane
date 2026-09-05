@@ -816,7 +816,7 @@
     </div>
     <div class="ajuda-step" style="margin-top:10px;">
       <div class="ajuda-step-num">1</div>
-      <div class="ajuda-step-text"><strong>Cadastrar a versão no catálogo</strong> (uma vez só, vale pra todos os clientes) — <strong>Clientes → Versões do Agente</strong> → Adicionar: número da versão, URL do <code>.zip</code> do Release (<code>github.com/EmporioAutomacao/pdv-local/releases</code>) e SHA256 (conteúdo do <code>.zip.sha256</code>, não a URL do arquivo). Preencha <strong>"Versão mínima do ERP exigida"</strong> só se essa versão do PDV Local precisar de recursos do ERP que ainda não existem em versões antigas.</div>
+      <div class="ajuda-step-text"><strong>Atualizar o catálogo</strong> (uma vez, vale pra todos os clientes) — <strong>Clientes → Versões do Agente</strong> → botão <strong>"🔍 Verificar novas versões no GitHub"</strong>. Varre <code>github.com/EmporioAutomacao/pdv-local/releases</code> sozinho e cria/atualiza versão, URL e SHA256 de cada Release publicado — nada pra digitar. Pode clicar de novo a qualquer momento (não duplica nem desfaz nada). Só preencha manualmente <strong>"Versão mínima do ERP exigida"</strong> na versão, se ela precisar de recursos do ERP que ainda não existem em versões antigas — o GitHub não sabe disso, e uma nova verificação nunca apaga o que você já preencheu aí. (Alternativa por linha de comando, sem depender do GitHub: <code>python manage.py register_versao_agente --versao X.Y.Z --download-url &lt;zip&gt; --sha256 &lt;hash&gt;</code>.)</div>
     </div>
     <div class="ajuda-step">
       <div class="ajuda-step-num">2</div>

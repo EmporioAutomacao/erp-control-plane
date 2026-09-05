@@ -84,10 +84,42 @@ class SincronizacaoVersoesAgenteInline(admin.TabularInline):
 
 @admin.register(VersaoAgente)
 class VersaoAgenteAdmin(ModelAdmin):
+    change_list_template = 'admin/registry/versaoagente/change_list.html'
     list_display = ['versao', 'erp_minimo', 'ativo', 'criado_em']
     list_filter = ['ativo']
     search_fields = ['versao']
     readonly_fields = ['criado_em']
+
+    def get_urls(self):
+        urls = super().get_urls()
+        return [
+            path('verificar-github/', self.admin_site.admin_view(self._view_verificar_github), name='registry_versaoagente_verificar_github'),
+        ] + urls
+
+    def _view_verificar_github(self, request):
+        from django.contrib import messages
+        from .github_releases import sync_versoes_from_github
+
+        try:
+            resultado = sync_versoes_from_github()
+        except Exception as exc:
+            self.message_user(request, f'Falha ao consultar o GitHub: {exc}', level=messages.ERROR)
+            return redirect('admin:registry_versaoagente_changelist')
+
+        partes = []
+        if resultado['criadas']:
+            partes.append(f"criadas: {', '.join(resultado['criadas'])}")
+        if resultado['atualizadas']:
+            partes.append(f"atualizadas: {', '.join(resultado['atualizadas'])}")
+        if not partes:
+            self.message_user(request, 'Nenhuma versao nova ou alterada encontrada nos Releases do GitHub.', level=messages.INFO)
+        else:
+            self.message_user(request, 'Catalogo sincronizado com o GitHub — ' + '; '.join(partes) + '.', level=messages.SUCCESS)
+
+        for versao, motivo in resultado['ignoradas']:
+            self.message_user(request, f'Release v{versao} ignorado: {motivo}', level=messages.WARNING)
+
+        return redirect('admin:registry_versaoagente_changelist')
 
 
 def acao_reprovisionar(modeladmin, request, queryset):
