@@ -24,6 +24,20 @@ class SincronizadorVersoes:
     def __init__(self, cliente):
         self.cliente = cliente
 
+    def _versoes_a_enviar(self):
+        """Fonte das versoes que vao no push, conforme o modo do cliente:
+
+        - modo automatico (Cliente.atualizacao_automatica_agente): todo o
+          catalogo de versoes ATIVAS -- a curadoria manual e ignorada, e
+          releases novos entram sozinhos (ver signals.versao_agente_atualizada).
+        - modo curadoria (padrao): so o que a equipe marcou em
+          Cliente.versoes_permitidas (e que ainda esteja ativo no catalogo).
+        """
+        if self.cliente.atualizacao_automatica_agente:
+            from .models import VersaoAgente
+            return VersaoAgente.objects.filter(ativo=True)
+        return self.cliente.versoes_permitidas.filter(ativo=True)
+
     def _montar_payload(self):
         packages = [
             {
@@ -33,7 +47,7 @@ class SincronizadorVersoes:
                 'release_notes': versao.release_notes,
                 'erp_minimo': versao.erp_minimo or None,
             }
-            for versao in self.cliente.versoes_permitidas.filter(ativo=True)
+            for versao in self._versoes_a_enviar()
         ]
         return {'cliente_id': str(self.cliente.id), 'packages': packages}
 

@@ -144,7 +144,7 @@ acao_destruir.short_description = 'Destruir cliente(s) — remove stack, volumes
 @admin.register(Cliente)
 class ClienteAdmin(ModelAdmin):
     list_display = ['slug', 'nome', 'subdominio', 'plano', 'status_badge', 'isento_cobranca', 'versao_erp', 'criado_em']
-    list_filter = ['status', 'plano', 'host', 'isento_cobranca']
+    list_filter = ['status', 'plano', 'host', 'isento_cobranca', 'atualizacao_automatica_agente']
     search_fields = ['slug', 'nome', 'cnpj', 'email_contato']
     readonly_fields = ['id', 'criado_em', 'atualizado_em', 'status_badge', 'painel_acesso', 'acoes_provisionamento', 'badge_isencao', 'lista_backups', 'acoes_versoes']
     filter_horizontal = ['modulos_ativos', 'versoes_permitidas']
@@ -155,7 +155,7 @@ class ClienteAdmin(ModelAdmin):
         ('Acesso', {'fields': ['painel_acesso']}),
         ('Infraestrutura', {'fields': ['host', 'versao_erp', 'stack_path', 'subdominio', 'dominio_custom']}),
         ('Plano', {'fields': ['plano', 'modulos_ativos', 'tema_site']}),
-        ('Versões do SyncAgent/PDV', {'fields': ['versoes_permitidas', 'acoes_versoes']}),
+        ('Versões do SyncAgent/PDV', {'fields': ['atualizacao_automatica_agente', 'versoes_permitidas', 'acoes_versoes']}),
         ('Faturamento', {'fields': ['asaas_customer_id', 'asaas_subscription_id', 'badge_isencao', 'isento_cobranca', 'motivo_isencao']}),
         ('Status', {'fields': ['status_badge', 'status', 'trial_ate', 'data_ativacao', 'data_suspensao', 'data_cancelamento']}),
         ('Ações', {'fields': ['acoes_provisionamento']}),
@@ -243,6 +243,7 @@ class ClienteAdmin(ModelAdmin):
                 'CSRF_TRUSTED_ORIGINS': csrf_origins,
                 'CP_CLIENTE_ID': str(cliente.id),
                 'CP_CLIENTE_NOME': cliente.nome,
+                'CP_CLIENTE_CNPJ': cliente.cnpj,
                 'CP_SHARED_SECRET': cp_shared_secret,
             }
             linhas = env_file.read_text().splitlines()
@@ -271,6 +272,7 @@ class ClienteAdmin(ModelAdmin):
             '--env-add', f'CSRF_TRUSTED_ORIGINS={csrf_origins}',
             '--env-add', f'CP_CLIENTE_ID={cliente.id}',
             '--env-add', f'CP_CLIENTE_NOME={cliente.nome}',
+            '--env-add', f'CP_CLIENTE_CNPJ={cliente.cnpj}',
             '--env-add', f'CP_SHARED_SECRET={cp_shared_secret}',
             # Atualiza a label do router principal (subdomínio padrão) no Traefik
             '--label-add', f'traefik.http.routers.{slug}-erp.rule=Host(`{subdominio}`)',
@@ -346,10 +348,11 @@ class ClienteAdmin(ModelAdmin):
 
         registro = SincronizadorVersoes(cliente).sincronizar()
         if registro.status == 'concluida':
+            modo = 'catálogo automático' if cliente.atualizacao_automatica_agente else 'curadoria manual'
             messages.success(
                 request,
-                f'Versões sincronizadas com sucesso: {len(registro.versoes_enviadas)} '
-                f'permitida(s) enviada(s) para o ERP de "{cliente.slug}".',
+                f'Versões sincronizadas com sucesso ({modo}): {len(registro.versoes_enviadas)} '
+                f'versão(ões) enviada(s) para o ERP de "{cliente.slug}".',
             )
         else:
             messages.error(
@@ -716,16 +719,29 @@ class ClienteAdmin(ModelAdmin):
                 'font-size:12px;color:#5d4037;">⚠️ Sem segredo de integração ainda — clique em '
                 '"⚙ Aplicar Configurações" (aba Ações) uma vez antes de sincronizar.</p>'
             )
+
+        if obj.atualizacao_automatica_agente:
+            banner = (
+                '<p style="margin:0 0 10px;padding:8px 12px;background:#e8f5e9;border-left:4px solid #2e7d32;'
+                'font-size:12px;color:#1b5e20;">🔄 <strong>Atualização automática LIGADA</strong> — o catálogo '
+                'inteiro de versões ativas é enviado pro ERP deste cliente; a lista "Versões permitidas" acima '
+                'fica ignorada enquanto isso, e cada release novo entra sozinho. O botão abaixo força o reenvio '
+                'na hora (útil logo depois de ligar o modo).</p>'
+            )
+        else:
+            banner = (
+                '<p style="margin:0 0 10px;padding:8px 12px;background:#f5f5f5;border-left:4px solid #9e9e9e;'
+                'font-size:12px;color:#424242;">Envia o conjunto de versões marcadas acima pro ERP deste cliente '
+                '(<code>SyncPackage.allowed</code>) — não reinicia o serviço, é só uma chamada HTTPS.</p>'
+            )
+
         return format_html(
-            '{}'
-            '<p style="margin:0 0 10px;padding:8px 12px;background:#f5f5f5;border-left:4px solid #9e9e9e;'
-            'font-size:12px;color:#424242;">Envia o conjunto de versões marcadas acima pro ERP deste cliente '
-            '(<code>SyncPackage.allowed</code>) — não reinicia o serviço, é só uma chamada HTTPS.</p>'
+            '{}{}'
             '<a href="{}" style="display:inline-block;padding:6px 14px;background:#2e7d32;color:#fff;'
             'border-radius:4px;text-decoration:none;font-size:13px;" '
-            'onclick="return confirm(\'Salve o formulário antes (se mudou as versões permitidas). Enviar a '
-            'lista atual para o ERP deste cliente agora?\')">⇪ Sincronizar Versões com o ERP</a>',
-            mark_safe(aviso_secret), url_sync,
+            'onclick="return confirm(\'Salve o formulário antes (se mudou as versões permitidas ou o modo '
+            'automático). Enviar a lista atual para o ERP deste cliente agora?\')">⇪ Sincronizar Versões com o ERP</a>',
+            mark_safe(aviso_secret), mark_safe(banner), url_sync,
         )
     acoes_versoes.short_description = 'Sincronizar com o ERP'
 

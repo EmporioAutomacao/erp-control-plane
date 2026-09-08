@@ -89,6 +89,7 @@ class MotorProvisionamento:
             'TEMA_SITE': tema,
             'CP_CLIENTE_ID': str(self.cliente.id),
             'CP_CLIENTE_NOME': self.cliente.nome,
+            'CP_CLIENTE_CNPJ': self.cliente.cnpj,
             'CP_SHARED_SECRET': cp_shared_secret,
             'EMPRESAS_CREDENCIAL_MASTER_KEY': master_key,
             'BACKUP_DIR': '/app/backups',

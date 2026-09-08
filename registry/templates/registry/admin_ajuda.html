@@ -277,9 +277,38 @@
   <div class="ajuda-step">
     <div class="ajuda-step-num">5</div>
     <div class="ajuda-step-text">
+      Ainda no boot do container, o <code>entrypoint.sh</code> do ERP roda <code>manage.py seed_cliente_inicial</code>:
+      pré-cadastra a <strong>Empresa</strong> (Configurações → Empresas, com <code>razão social</code>/<code>CNPJ</code> vindos de
+      <code>CP_CLIENTE_NOME</code>/<code>CP_CLIENTE_CNPJ</code>) e o <strong>Estoque</strong> (Produtos → Estoque, nome <em>"Matriz"</em>),
+      dados obrigatórios para o ERP operar. É idempotente — se já existir Empresa/Estoque, não faz nada.
+    </div>
+  </div>
+  <div class="ajuda-step">
+    <div class="ajuda-step-num">6</div>
+    <div class="ajuda-step-text">
       A task <strong>task_enviar_email_boas_vindas</strong> envia e-mail HTML com URL, usuário <code>admin</code> e senha inicial.
     </div>
   </div>
+</div>
+
+<div class="ajuda-card" style="margin-bottom:32px;">
+  <p class="ajuda-card-title">Empresa e Estoque iniciais</p>
+  <p>
+    Todo cliente novo já nasce com uma <strong>Empresa</strong> e um <strong>Estoque</strong> cadastrados no ERP — sem eles a
+    aplicação não roda (cadastro de produtos, vendas e caixa dependem de ambos). Quem cria é o
+    <code>seed_cliente_inicial</code> no entrypoint do ERP, usando os dados que o CP injeta no stack:
+  </p>
+  <ul>
+    <li><code>CP_CLIENTE_NOME</code> → <em>razão social</em> e <em>nome fantasia</em> da Empresa</li>
+    <li><code>CP_CLIENTE_CNPJ</code> → <em>CNPJ</em> da Empresa (o mesmo do cadastro do Cliente aqui no CP)</li>
+    <li>Estoque criado com o nome <em>"Matriz"</em>, vinculado a essa Empresa</li>
+  </ul>
+  <p>
+    <span class="tag-warn">Requer ERP ≥ 0.0.104</span> Clientes provisionados com uma imagem anterior não recebem o seed.
+    Depois de atualizar a versão do ERP do cliente, clique em <strong>"⚙ Aplicar Configurações"</strong> — isso injeta
+    <code>CP_CLIENTE_CNPJ</code> e recria o <code>{slug}_web</code>, e o <code>seed_cliente_inicial</code> roda nesse boot.
+    Se o cliente já tiver Empresa/Estoque cadastrados, o seed não faz nada.
+  </p>
 </div>
 
 <!-- ═══ CARDS GERAIS ═══ -->
@@ -825,6 +854,9 @@
     <div class="ajuda-step">
       <div class="ajuda-step-num">3</div>
       <div class="ajuda-step-text">Na máquina do cliente: bandeja → <strong>Atualizar App</strong> → o dono da loja escolhe entre as versões permitidas e não-bloqueadas. Baixa o <code>.zip</code>, confere o SHA256 e roda <code>self-update.ps1</code> (backup + troca + rollback automático). <code>appsettings.json</code> e credenciais são preservados.</div>
+    </div>
+    <div class="ajuda-alert" style="margin-top:10px;">
+      🔄 <strong>Atalho: "Atualização automática"</strong> — no lugar de repetir o passo 2 a cada release, marque a caixa <strong>"Atualização automática"</strong> na aba "Versões do SyncAgent/PDV" do cliente. Com ela ligada o CP manda <strong>todo o catálogo de versões ativas</strong> pro ERP daquele cliente e mantém sincronizado sozinho — cada nova versão descoberta no GitHub (passo 1) entra na hora. A lista "Versões permitidas" fica ignorada (mas guardada, volta a valer se desligar). A bandeja continua igual pro dono da loja: <strong>ele ainda abre "Atualizar App" e confirma</strong>, só que a versão mais nova compatível já vem pré-selecionada. As travas de downgrade e de ERP mínimo continuam valendo.
     </div>
     <table class="ajuda-table" style="margin-top:10px;">
       <tr><th>Situação</th><th>Causa</th><th>Correção</th></tr>

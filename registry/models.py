@@ -128,6 +128,15 @@ class Cliente(models.Model):
 
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='aguardando_provisao', db_index=True)
 
+    atualizacao_automatica_agente = models.BooleanField(
+        default=False,
+        verbose_name='Atualização automática (sempre a última versão)',
+        help_text='Quando ligado, ignora a curadoria manual abaixo e envia todo o catálogo de '
+        'versões ATIVAS para o ERP deste cliente. A tela "Atualizar App" do Tray passa a oferecer '
+        'sempre a versão mais nova compatível — sem a equipe precisar adicionar cada release aqui. '
+        'As travas de downgrade e de versão mínima de ERP continuam valendo (lado erp/SyncAgent). '
+        'A lista "Versões permitidas" fica guardada e volta a valer se desligar.',
+    )
     versoes_permitidas = models.ManyToManyField(
         'VersaoAgente', blank=True, related_name='clientes',
         verbose_name='Versões do SyncAgent/PDV permitidas',

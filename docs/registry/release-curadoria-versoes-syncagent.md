@@ -83,6 +83,10 @@ UX. O SyncAgent é a última linha de defesa.
    na própria página do cliente — status, payload enviado, código HTTP,
    mensagem de erro se houver.
 
+Alternativa ao passo 2, quando o cliente deve sempre acompanhar a última
+versão: ligue **"Atualização automática"** (seção 3.2) e nunca mais cure
+versão por versão pra esse cliente.
+
 ### 3.1 Descoberta automática de versões (`registry/github_releases.py`)
 
 Em vez de alguém ter que cadastrar cada versão nova na mão (ou o CI do
@@ -102,12 +106,36 @@ Opcional: `GITHUB_TOKEN` (settings) aumenta o limite de requisições da API do
 GitHub — funciona sem ele, só com limite mais baixo (60/h por IP, suficiente
 pra cliques manuais ocasionais).
 
+### 3.2 Modo "Atualização automática" (`Cliente.atualizacao_automatica_agente`)
+
+Caixa na aba **"Versões do SyncAgent/PDV"** do cliente. Ligada:
+
+- `SincronizadorVersoes._montar_payload` (`registry/cp_push.py`) passa a mandar
+  **todo o catálogo `VersaoAgente.objects.filter(ativo=True)`** em vez de
+  `Cliente.versoes_permitidas`. A curadoria manual fica **ignorada** enquanto o
+  modo está ligado (mas guardada — desligar volta a valer, e dispara um push
+  novo com o conjunto manual).
+- Uma versão **nova** no catálogo (botão de descoberta, `register_versao_agente`,
+  admin) dispara `versao_agente_atualizada` com `created=True`, que agora
+  **inclui todo cliente automático** com `integracao_secret` — o release entra
+  no ERP do cliente na hora, sem ninguém curar.
+- Ligar/desligar a caixa dispara `task_sincronizar_versoes_agente` na hora
+  (`pre_save` guarda o valor anterior, `post_save` compara — ver seção 5).
+
+O que **não** muda: as travas de downgrade e `erp_minimo` (aplicadas pelo ERP em
+`get_available_packages` + re-checadas pelo SyncAgent), e o fluxo do dono da loja
+(ele ainda abre **"Atualizar App"** e confirma — só que a versão mais nova
+compatível já vem pré-selecionada, porque o ERP passou a ordenar a lista por
+semver, ver `sync_api/services.py::get_available_packages` no repo `erp`).
+
 ## 4. Modelos novos (`registry/models.py`)
 
 - `VersaoAgente` — catálogo mestre global (`versao`, `erp_minimo`,
   `download_url`, `sha256` com o mesmo `RegexValidator` de 64 hex do `erp`,
   `release_notes`, `ativo`).
-- `Cliente.versoes_permitidas` — M2M pro catálogo, curadoria por cliente.
+- `Cliente.versoes_permitidas` — M2M pro catálogo, curadoria manual por cliente.
+- `Cliente.atualizacao_automatica_agente` — bool (`0015_cliente_atualizacao_automatica_agente`).
+  Ligado = manda o catálogo ativo inteiro e ignora a curadoria manual (seção 3.2).
 - `Cliente.integracao_secret` — Bearer token usado pelo CP nas chamadas pra
   aquela instância. Gerado no provisionamento (`MotorProvisionamento`) ou no
   backfill do botão **"⚙ Aplicar Configurações"**, para clientes já
@@ -122,9 +150,15 @@ Migração: `registry/migrations/0014_versao_agente_curadoria.py`.
 - `m2m_changed` em `Cliente.versoes_permitidas.through` (conectado
   imperativamente em `RegistryConfig.ready()` — o through model auto-gerado
   não tem nome estável pra usar com `@receiver(sender='app.Model')`).
+- `pre_save` + `post_save` em `Cliente` — detecta o toggle de
+  `atualizacao_automatica_agente` (o `pre_save` lê o valor que está no banco e
+  guarda em `instance._auto_update_anterior`; o `post_save` compara e, se mudou
+  e há `integracao_secret`, dispara o push). Ligar **ou** desligar dispara.
 - `post_save` em `VersaoAgente` — se o catálogo mestre mudar (corrigir um
   sha256, aposentar uma versão com `ativo=False`, trocar `erp_minimo`),
-  reenvia a curadoria de todo cliente que tenha essa versão marcada.
+  reenvia a curadoria de todo cliente que tenha essa versão marcada **mais**
+  todo cliente em modo automático. Numa versão **nova** (`created=True`) só os
+  automáticos entram (a versão ainda não está curada pra ninguém).
 - `task_sincronizar_versoes_agente` (Celery, `bind=True, max_retries=3`) —
   mesma classe `SincronizadorVersoes` do botão manual, só que assíncrona.
 - Clientes sem `integracao_secret` ainda são ignorados pelos signals (nada a

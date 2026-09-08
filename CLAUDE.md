@@ -273,6 +273,28 @@ Clientes provisionados **antes** desta mudança não têm as variáveis: rodar *
 
 **Erros de ativação:** catálogo completo na seção "Sincronização — ativação do SyncAgent" da página de Ajuda do admin, e no guia canônico `docs/infra/sync-agent-ativacao-troubleshooting.md` do repo `erp`.
 
+### Curadoria de versões do SyncAgent/PDV por cliente
+
+Guia completo: `docs/registry/release-curadoria-versoes-syncagent.md`. Resumo:
+
+- **`VersaoAgente`** (`registry/models.py`) — catálogo mestre global de versões do `pdv-local` (`versao`, `download_url`, `sha256`, `erp_minimo`, `ativo`). Populado pelo botão **"🔍 Verificar novas versões no GitHub"** (`registry/github_releases.py`) ou `python manage.py register_versao_agente`.
+- **`Cliente.versoes_permitidas`** (M2M) — curadoria manual: quais versões aquela loja pode escolher no "Atualizar App" do Tray.
+- **`Cliente.atualizacao_automatica_agente`** (bool) — quando ligado, **ignora** `versoes_permitidas` e manda o catálogo `ativo=True` inteiro pro ERP do cliente; releases novos entram sozinhos. O dono da loja continua confirmando no "Atualizar App" (a versão mais nova compatível vem pré-selecionada).
+- **Push CP → ERP:** `registry/cp_push.py::SincronizadorVersoes` faz `POST https://{host}/v1/cp/agent-packages:sync` (Bearer `Cliente.integracao_secret`), full-sync. Disparado por: `m2m_changed` em `versoes_permitidas`; `pre_save`/`post_save` no `Cliente` (toggle do modo automático); `post_save` em `VersaoAgente` (mudança no catálogo → clientes que curam essa versão + todos os automáticos). Task Celery `task_sincronizar_versoes_agente`. Botão manual "⇪ Sincronizar Versões com o ERP" na página do cliente.
+- Lado ERP: `sync_api/cp_push.py` recebe e reflete em `SyncPackage.allowed`; `sync_api/services.py::get_available_packages` ordena por **semver** (não por `created_at`) e aplica as travas de downgrade/`erp_minimo`.
+
+### Empresa e Estoque iniciais (`CP_CLIENTE_CNPJ` + `seed_cliente_inicial`)
+
+Todo cliente novo precisa de pelo menos uma **Empresa** (Configurações > Empresas) e um **Estoque** (Produtos > Estoque, modelo `produtos.Loja`) para o ERP operar — cadastro de produtos, vendas e caixa dependem de ambos. O `MotorProvisionamento` grava `CP_CLIENTE_CNPJ` (= `cliente.cnpj`) no `.env`/`environment` do stack, junto de `CP_CLIENTE_ID`/`CP_CLIENTE_NOME`. O ERP lê em `core/settings.py` (`CP_CLIENTE_CNPJ`) e o `entrypoint.sh` roda `python manage.py seed_cliente_inicial` logo após as migrations e a criação do superuser:
+
+- Se **não** houver Empresa, cria uma com `razao_social`/`nome_fantasia` = `CP_CLIENTE_NOME` e `cnpj` = `CP_CLIENTE_CNPJ`.
+- Se **não** houver Estoque (`Loja`), cria um chamado `"Matriz"` vinculado a essa Empresa.
+- Idempotente: com Empresa/Estoque já existentes, não faz nada (roda a cada boot sem efeito colateral).
+
+Requer **ERP ≥ 0.0.104**. Clientes provisionados antes: cadastrar manualmente no ERP **ou** clicar em **"Aplicar Configurações"** (injeta `CP_CLIENTE_CNPJ` no serviço `{slug}_web`) e reiniciar o serviço — o seed roda no próximo boot.
+
+> Ao mexer nisso foi corrigido de passagem um bug pré-existente no grafo de migrations do ERP: a criação de um banco do zero (todo provisionamento de cliente novo roda `migrate` num volume postgres vazio) falhava em `financeiro.0021` com *"column financeiro_condicaopagamento.quantidade_parcelas does not exist"* — nenhum cliente novo era provisionável desde ~jun/2026. Fix no repo `erp`: duas arestas de dependência em `financeiro/migrations/0018_rename_tables_condicao_especie.py` (`vendas.0024` e `dedetizacao.0006`), consistentes com a ordem histórica de aplicação. Detalhes na seção "Migration graph" do `CLAUDE.md` do `erp`.
+
 ### Página de Ajuda do admin
 
 O item "Ajuda" da sidebar (`registry/views.py::admin_ajuda`) é uma view de função simples, registrada em `core/urls.py` por `path()` direta (não é um `ModelAdmin`) e renderiza `registry/templates/registry/admin_ajuda.html` (HTML estático, sem model/DB por trás). O conteúdo é organizado em seções demarcadas por comentários `<!-- ═══ NOME ═══ -->`, usando classes CSS próprias definidas no topo do template (`.ajuda-card`, `.ajuda-table`, `.ajuda-step`, `.ajuda-alert`/`.ajuda-alert-warn`, `.tag-ok`/`.tag-no`/`.tag-warn`). Para documentar uma funcionalidade nova, edite o template diretamente na seção correspondente (ou crie uma nova seção seguindo o mesmo padrão) — não é necessário criar model nem admin.
@@ -287,6 +309,6 @@ O item "Ajuda" da sidebar (`registry/views.py::admin_ajuda`) é uma view de fun�
 | `CLIENTES_BASE_PATH` | `/opt/clientes` | Diretório base dos stacks por cliente |
 | `ERP_DOMAIN` | `ararasuite.com.br` | Domínio base dos subdominios |
 | `SAAS_DOMAIN` | `ararasuite.com.br` | Usado na landing para preview de subdomínio |
-| `ERP_LATEST_VERSION` | `0.0.22` | Versão do ERP para novos clientes |
+| `ERP_LATEST_VERSION` | `0.0.22` | Versão do ERP para novos clientes (seed de Empresa/Estoque exige ≥ 0.0.104) |
 | `CP_BACKUP_DIR` | `/opt/backups/cp` | Destino dos backups do CLIENTES_BASE_PATH |
 | `CP_BACKUP_MANTER` | `7` | Quantos backups do CLIENTES_BASE_PATH retener (task_backup_clientes) |

@@ -40,11 +40,13 @@ class MotorProvisionamentoImagemTests(SimpleTestCase):
                 'POSTGRES_PASSWORD': 'senha',
                 'CP_CLIENTE_ID': '11111111-2222-3333-4444-555555555555',
                 'CP_CLIENTE_NOME': 'Anapolis',
+                'CP_CLIENTE_CNPJ': '12.345.678/0001-90',
             },
         )
 
         self.assertIn('CP_CLIENTE_ID: "11111111-2222-3333-4444-555555555555"', stack)
         self.assertIn('CP_CLIENTE_NOME: "Anapolis"', stack)
+        self.assertIn('CP_CLIENTE_CNPJ: "12.345.678/0001-90"', stack)
 
     @patch('registry.models.Cliente.objects.filter')
     @patch('registry.provisioning.CHECK_HTTP_HEALTH', False)
