@@ -9,3 +9,7 @@ staticfiles/
 *.log
 .DS_Store
 .claude/settings.local.json
+
+# Junctions locais p/ o Claude Code descobrir as skills compartilhadas
+# (nao versionar — recriar com scripts/dev/setup_claude_skills.ps1)
+.claude/skills/

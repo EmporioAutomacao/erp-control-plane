@@ -752,6 +752,39 @@
   💡 <strong>Diagnóstico rápido:</strong> se um domínio custom não responde, verifique em ordem: (1) o serviço está <strong>Running</strong> no Swarm (<code>docker service ps {slug}_web</code>); (2) as labels Traefik estão aplicadas (<code>docker service inspect {slug}_web</code>); (3) o tunnel tem o hostname no ingress (Cloudflare → Zero Trust → Tunnels → Public Hostnames); (4) o CNAME no DNS aponta para o tunnel.
 </div>
 
+<!-- ═══ VERSÃO ATUAL ═══ -->
+<p class="ajuda-section-title">Versão Atual (ERP / SyncAgent / PDV)</p>
+<div class="ajuda-grid">
+
+  <div class="ajuda-card">
+    <h3>🔎 O que a seção mostra</h3>
+    <p>Na página do cliente, a seção <strong>Versão Atual</strong> traz o que está <em>em execução agora</em>, lido direto da instância:</p>
+    <table class="ajuda-table" style="margin-top:8px;">
+      <tr><th>Linha</th><th>Origem</th></tr>
+      <tr><td><strong>ERP</strong></td><td>Versão em execução × <em>alvo</em> (a tag pedida no provisionamento). Divergência aparece em laranja.</td></tr>
+      <tr><td><strong>SyncAgent</strong></td><td>Versão instalada do <code>pdv-local</code>, por instalação (loja/máquina).</td></tr>
+      <tr><td><strong>PDV Local</strong></td><td>Mesmo número do SyncAgent — <code>pdv-local</code> é um artefato único.</td></tr>
+    </table>
+    <p style="margin-top:8px;">Abaixo, uma tabela lista <strong>todas as instalações</strong> com versão, quando foram vistas por último e um badge de conectividade (<span class="tag-ok">online</span> / <span class="tag-warn">instável</span> / <span class="tag-no">offline</span>).</p>
+  </div>
+
+  <div class="ajuda-card">
+    <h3>🔄 Como atualizar os dados</h3>
+    <div class="ajuda-step" style="margin-top:4px;">
+      <div class="ajuda-step-num">1</div>
+      <div class="ajuda-step-text">Uma task agendada coleta de todos os clientes ativos/trial periodicamente (mesmo esquema do health check).</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">2</div>
+      <div class="ajuda-step-text">Para verificar na hora, clique em <strong>🔄 Verificar versões agora</strong>. A página recarrega sozinha em ~5s.</div>
+    </div>
+    <div class="ajuda-alert-warn" style="margin-top:8px;margin-bottom:0;">
+      ⚠️ A versão do SyncAgent/PDV precisa do endpoint <code>/v1/cp/status</code> no ERP do cliente. Clientes com ERP antigo mostram só a versão do ERP (via <code>/health/</code>) e o aviso "ERP sem /v1/cp/status". Sem <strong>segredo de integração</strong> (⚙ Aplicar Configurações), idem.
+    </div>
+  </div>
+
+</div>
+
 <!-- ═══ SINCRONIZAÇÃO / SYNCAGENT ═══ -->
 <p class="ajuda-section-title">Sincronização — ativação do SyncAgent</p>
 <div class="ajuda-grid">
@@ -849,7 +882,7 @@
     </div>
     <div class="ajuda-step">
       <div class="ajuda-step-num">2</div>
-      <div class="ajuda-step-text"><strong>Permitir para o cliente</strong> — na página do <strong>Cliente</strong>, aba "Versões do SyncAgent/PDV", adicione a versão em <strong>"Versões permitidas"</strong> e salve. Isso dispara sozinho o envio pro ERP daquele cliente (ou clique em <strong>⇪ Sincronizar Versões com o ERP</strong> pra forçar na hora).</div>
+      <div class="ajuda-step-text"><strong>Permitir para o cliente</strong> — na página do <strong>Cliente</strong>, aba "Versões do SyncAgent/PDV", adicione a versão em <strong>"Versões permitidas"</strong> e salve. Isso dispara sozinho o envio pro ERP daquele cliente (ou clique em <strong>⇪ Sincronizar Versões com o ERP</strong> pra forçar na hora — o <strong>log do que está sendo feito</strong> aparece abaixo do botão e atualiza sozinho).</div>
     </div>
     <div class="ajuda-step">
       <div class="ajuda-step-num">3</div>

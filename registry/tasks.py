@@ -57,13 +57,18 @@ def task_atualizar_versao(self, cliente_id, versao_nova):
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def task_sincronizar_versoes_agente(self, cliente_id):
-    """Dispara SincronizadorVersoes.sincronizar() em background -- usado pelo
-    push automatico (registry.signals, quando a curadoria de um cliente ou o
-    catalogo mestre mudam) e reaproveitavel por qualquer outro chamador
-    assincrono futuro. O botao manual do admin ("Sincronizar Versoes com o
-    ERP") chama SincronizadorVersoes diretamente, sem passar por task --
-    quer feedback imediato na tela, nao retry em background."""
+def task_sincronizar_versoes_agente(self, cliente_id, iniciada_por_id=None, com_retry=True):
+    """Dispara SincronizadorVersoes.sincronizar() em background. Dois chamadores:
+
+    - push automatico (registry.signals, quando a curadoria de um cliente ou o
+      catalogo mestre mudam): `.delay(str(cliente_id))` -> com_retry=True,
+      iniciada_por_id=None. Retenta 3x em erro.
+    - botao manual do admin ("Sincronizar Versoes com o ERP"):
+      `.delay(str(pk), iniciada_por_id=request.user.id, com_retry=False)`.
+      Passa por task (nao mais sincrono) so pra gravar o log linha a linha e o
+      admin mostrar "ao vivo" via polling; NAO retenta (o operador ve o erro na
+      hora e reclica se quiser)."""
+    from django.contrib.auth import get_user_model
     from .cp_push import SincronizadorVersoes
     from .models import Cliente
 
@@ -72,8 +77,12 @@ def task_sincronizar_versoes_agente(self, cliente_id):
     except Cliente.DoesNotExist:
         return
 
-    registro = SincronizadorVersoes(cliente).sincronizar()
-    if registro.status == 'erro':
+    iniciada_por = None
+    if iniciada_por_id:
+        iniciada_por = get_user_model().objects.filter(pk=iniciada_por_id).first()
+
+    registro = SincronizadorVersoes(cliente, iniciada_por=iniciada_por).sincronizar()
+    if registro.status == 'erro' and com_retry:
         raise self.retry(exc=Exception(registro.mensagem_erro or 'Falha ao sincronizar versoes.'))
 
 
@@ -108,6 +117,31 @@ def task_verificar_saude_todas():
     clientes = Cliente.objects.filter(status__in=['ativo', 'trial'])
     for cliente in clientes:
         task_verificar_saude_cliente.delay(str(cliente.pk))
+
+
+@shared_task
+def task_coletar_versoes_cliente(cliente_id):
+    """Consulta o erp do cliente (GET /v1/cp/status, fallback /health/) e grava
+    a versão do ERP em execução + as instalações do SyncAgent/PDV.
+    Ver registry.cp_pull.ColetorVersoes. Alimenta o painel "Versão Atual"."""
+    from .cp_pull import ColetorVersoes
+    from .models import Cliente
+
+    try:
+        cliente = Cliente.objects.get(pk=cliente_id)
+    except Cliente.DoesNotExist:
+        return
+    ColetorVersoes(cliente).coletar()
+
+
+@shared_task
+def task_coletar_versoes_todas():
+    """Agendável no django-celery-beat (ex.: a cada 30 min) — mesmo padrão do
+    health check. Varre só clientes ativos/trial."""
+    from .models import Cliente
+
+    for cliente in Cliente.objects.filter(status__in=['ativo', 'trial']):
+        task_coletar_versoes_cliente.delay(str(cliente.pk))
 
 
 @shared_task
@@ -387,16 +421,26 @@ def task_restaurar_cliente(self, cliente_id, backup_id):
 @shared_task
 def task_verificar_saude_cliente(cliente_id):
     from .models import Cliente, VerificacaoSaude
+    import json
     import urllib.request
     import time
 
     cliente = Cliente.objects.get(pk=cliente_id)
     url = f'{cliente.url}/health/'
     inicio = time.monotonic()
+    versao_erp = None
     try:
         resp = urllib.request.urlopen(url, timeout=10)
         status_http = resp.status
         online = status_http == 200
+        # O corpo de /health/ é {"status":"ok","version":"X.Y.Z"} — de graça,
+        # já que a resposta está aqui. Mantém a versão do ERP fresca mesmo sem
+        # a coleta completa (task_coletar_versoes_*) agendada.
+        try:
+            corpo = json.loads(resp.read().decode('utf-8'))
+            versao_erp = str(corpo.get('version') or '') or None
+        except Exception:
+            pass
     except Exception:
         status_http = 0
         online = False
@@ -408,3 +452,5 @@ def task_verificar_saude_cliente(cliente_id):
         latencia_ms=latencia_ms,
         online=online,
     )
+    if versao_erp:
+        Cliente.objects.filter(pk=cliente_id).update(versao_erp_detectada=versao_erp[:20])

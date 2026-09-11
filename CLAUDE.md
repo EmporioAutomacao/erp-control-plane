@@ -80,6 +80,7 @@ Cada etapa de provisionamento é registrada em `ProvisionamentoLog` via `MotorPr
 | `VerificacaoSaude` | `registry_verificacao_saude` | Snapshots de health check |
 | `ConfiguracaoEmail` | `registry_configuracaoemail` | Singleton com credenciais SMTP (pk=1 sempre) |
 | `BackupCliente` | `registry_backupcliente` | Registro de cada backup por cliente (status, progresso, caminho do arquivo) |
+| `InstalacaoAgente` | `registry_instalacaoagente` | Cache das `SyncInstallation` do ERP de um cliente (uma por loja/máquina) — versão do SyncAgent/PDV instalada. Reconciliado por `registry.cp_pull.ColetorVersoes` |
 
 ### Módulos disponíveis (`registry/fixtures/initial_data.json`)
 
@@ -114,7 +115,9 @@ Todos os módulos têm `preco_mensal=0.00` — a cobrança é feita pelo plano. 
 | `task_suspender_cliente` | Escala `{slug}_web` para 0 réplicas |
 | `task_reativar_cliente` | Escala `{slug}_web` para 1 réplica |
 | `task_verificar_saude_todas` | Dispara health check em todos os clientes ativos/trial |
-| `task_verificar_saude_cliente` | Faz GET `/health/` e grava `VerificacaoSaude` |
+| `task_verificar_saude_cliente` | Faz GET `/health/`, grava `VerificacaoSaude` e — de graça, do corpo `{"version": ...}` — atualiza `Cliente.versao_erp_detectada` |
+| `task_coletar_versoes_cliente` | Consulta `GET /v1/cp/status` (fallback `/health/`) e grava a versão do ERP em execução + reconcilia `InstalacaoAgente`. Ver `registry.cp_pull.ColetorVersoes` |
+| `task_coletar_versoes_todas` | Dispara `task_coletar_versoes_cliente` em todos os clientes ativos/trial. Agendar no django-celery-beat (ex.: a cada 30 min), como o health check |
 | `task_enviar_email_boas_vindas` | Renderiza e envia o e-mail HTML de boas-vindas |
 | `task_backup_clientes` | Gera `.tar.gz` do `CLIENTES_BASE_PATH` e mantém N versões |
 | `task_backup_cliente` | Backup completo de um cliente: pg_dump + mídia (`/app/media`) + config. Salvo em `CP_BACKUP_DIR/clientes/{slug}/`. Mantém 3 backups por cliente. |
@@ -161,8 +164,9 @@ HTML puro com estilos inline (compatível com clientes de e-mail). Visual dark m
 - **`badge_isencao`** — badge visual de situação de cobrança
 - **`acoes_provisionamento`** — botões: ⚙ Aplicar Configurações, ☁ Configurar Cloudflare, Re-provisionar, Destruir (com confirm), ✉ Reenviar Boas-vindas
 - **`lista_backups`** — seção "Backups" com botão 💾 Novo Backup, tabela de histórico com barra de progresso em tempo real (polling JSON a cada 2s), links ⬇ Baixar e ↩ Restaurar
+- **`versao_atual`** — seção "Versão Atual": 3 linhas resumo (ERP em execução × alvo, SyncAgent, PDV Local) + tabela de todas as `InstalacaoAgente` (instalação, versão, visto por último, badge de conectividade) + botão 🔄 Verificar versões agora (`/<pk>/coletar-versoes/` → `task_coletar_versoes_cliente`, redireciona com `?coletando=1` e a página recarrega em ~5s). Dados vêm de `registry.cp_pull` — ver seção abaixo.
 - **Ações em lote:** `acao_reprovisionar`, `acao_destruir`
-- **URLs customizadas:** `/<pk>/reprovisionar/`, `/<pk>/destruir/`, `/<pk>/reenviar-boas-vindas/`, `/<pk>/backup/`, `/<pk>/backups/<id>/download/`, `/<pk>/backups/<id>/restaurar/`, `/<pk>/backups/<id>/status/`
+- **URLs customizadas:** `/<pk>/reprovisionar/`, `/<pk>/destruir/`, `/<pk>/reenviar-boas-vindas/`, `/<pk>/coletar-versoes/`, `/<pk>/backup/`, `/<pk>/backups/<id>/download/`, `/<pk>/backups/<id>/restaurar/`, `/<pk>/backups/<id>/status/`
 
 ### ConfiguracaoEmailAdmin
 
@@ -280,8 +284,19 @@ Guia completo: `docs/registry/release-curadoria-versoes-syncagent.md`. Resumo:
 - **`VersaoAgente`** (`registry/models.py`) — catálogo mestre global de versões do `pdv-local` (`versao`, `download_url`, `sha256`, `erp_minimo`, `ativo`). Populado pelo botão **"🔍 Verificar novas versões no GitHub"** (`registry/github_releases.py`) ou `python manage.py register_versao_agente`.
 - **`Cliente.versoes_permitidas`** (M2M) — curadoria manual: quais versões aquela loja pode escolher no "Atualizar App" do Tray.
 - **`Cliente.atualizacao_automatica_agente`** (bool) — quando ligado, **ignora** `versoes_permitidas` e manda o catálogo `ativo=True` inteiro pro ERP do cliente; releases novos entram sozinhos. O dono da loja continua confirmando no "Atualizar App" (a versão mais nova compatível vem pré-selecionada).
-- **Push CP → ERP:** `registry/cp_push.py::SincronizadorVersoes` faz `POST https://{host}/v1/cp/agent-packages:sync` (Bearer `Cliente.integracao_secret`), full-sync. Disparado por: `m2m_changed` em `versoes_permitidas`; `pre_save`/`post_save` no `Cliente` (toggle do modo automático); `post_save` em `VersaoAgente` (mudança no catálogo → clientes que curam essa versão + todos os automáticos). Task Celery `task_sincronizar_versoes_agente`. Botão manual "⇪ Sincronizar Versões com o ERP" na página do cliente.
+- **Push CP → ERP:** `registry/cp_push.py::SincronizadorVersoes` faz `POST https://{host}/v1/cp/agent-packages:sync` (Bearer `Cliente.integracao_secret`), full-sync. Disparado por: `m2m_changed` em `versoes_permitidas`; `pre_save`/`post_save` no `Cliente` (toggle do modo automático); `post_save` em `VersaoAgente` (mudança no catálogo → clientes que curam essa versão + todos os automáticos). Tudo (inclusive o botão manual) passa pela task Celery `task_sincronizar_versoes_agente(cliente_id, iniciada_por_id=None, com_retry=True)` — o botão manual chama com `com_retry=False` e `iniciada_por_id`.
+- **Log da sincronização:** `SincronizadorVersoes` grava `SincronizacaoVersoesAgente.log` linha a linha (`_log()` faz `.update()` a cada linha → "ao vivo"). O admin mostra o log da última sincronização abaixo do botão e faz polling em `registry_cliente_sincronizacao_status` (`_view_status_sincronizacao`) enquanto `status='enviando'`, recarregando ao terminar — mesmo padrão do `lista_backups`. Corpo da resposta do ERP (`synced`/`retired`/`skipped`) e erros HTTP viram linhas em pt-BR no log. Ver `docs/registry/release-log-sincronizacao-versoes.md`.
 - Lado ERP: `sync_api/cp_push.py` recebe e reflete em `SyncPackage.allowed`; `sync_api/services.py::get_available_packages` ordena por **semver** (não por `created_at`) e aplica as travas de downgrade/`erp_minimo`.
+
+### Coleta de versões CP ← ERP (`GET /v1/cp/status`) — "Versão Atual" do Cliente
+
+Doc: `docs/registry/versao-atual-clientes.md`. Contraparte de leitura do `cp_push` (que escreve).
+
+- **`registry/cp_pull.py::ColetorVersoes`** — `GET https://{host}/v1/cp/status?cliente_id={id}` (Bearer `Cliente.integracao_secret`, mesmo segredo do push). Grava em `Cliente.versao_erp_detectada` (≠ `versao_erp`, que é a tag alvo do provisionamento), `versoes_detectadas_em`, `deteccao_versoes_erro`, e **reconcilia** (full-sync) as `InstalacaoAgente` do cliente.
+- **Lado ERP:** `sync_api/cp_status.py::CpStatusAPIView` (repo `erp`) — devolve `erp_version` (`settings.VERSION`) + lista de `SyncInstallation` (`agent_version`, `last_seen_at`, `connectivity` leve por frescor). Rota fora do `/v1/sync/` (canal interno, não é o contrato produto).
+- **ERP antigo (sem a rota):** 404 → `ColetorVersoes` faz fallback pro `GET /health/` público, que só tem a versão do ERP; as instalações ficam indisponíveis até o ERP ser atualizado.
+- **SyncAgent × PDV:** o ERP conhece **um** número por instalação (`agent_version`). O painel mostra duas linhas (SyncAgent e PDV Local) com o mesmo valor — `pdv-local` é um artefato único. Uma versão separada do app PDV exigiria o agente reportá-la no heartbeat (mudança em `pdv-local` + `erp`).
+- **Disparo:** botão 🔄 no admin (`task_coletar_versoes_cliente`) + task agendada `task_coletar_versoes_todas`. **Criar o `PeriodicTask` no admin do django-celery-beat** (ex.: crontab a cada 30 min) — não há schedule em código, igual ao health check. `task_verificar_saude_cliente` também atualiza `versao_erp_detectada` de graça (lê o corpo de `/health/`).
 
 ### Empresa e Estoque iniciais (`CP_CLIENTE_CNPJ` + `seed_cliente_inicial`)
 

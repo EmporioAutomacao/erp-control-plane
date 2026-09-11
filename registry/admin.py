@@ -6,7 +6,7 @@ from django.urls import path
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.html import escape, format_html, mark_safe
 from unfold.admin import ModelAdmin
-from .models import Modulo, Plano, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare, BackupCliente, VersaoAgente, SincronizacaoVersoesAgente
+from .models import Modulo, Plano, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare, BackupCliente, VersaoAgente, SincronizacaoVersoesAgente, InstalacaoAgente
 
 
 @admin.register(Modulo)
@@ -47,6 +47,22 @@ _LOG_CORES = {
     'pendente':   ('#f5f5f5', '#757575'),
 }
 
+# Status de SincronizacaoVersoesAgente (enviando/concluida/erro) — chaves
+# proprias, nao batem com _LOG_CORES.
+_SYNC_CORES = {
+    'enviando':  ('#fff8e1', '#f57f17', 'Em andamento'),
+    'concluida': ('#e8f5e9', '#2e7d32', 'Concluída'),
+    'erro':      ('#ffebee', '#b71c1c', 'Erro'),
+}
+
+
+def _sync_badge(status):
+    bg, fg, label = _SYNC_CORES.get(status, ('#f5f5f5', '#333', status))
+    return (
+        f'<span style="background:{bg};color:{fg};padding:2px 8px;border-radius:12px;'
+        f'font-size:11px;font-weight:600;">{label}</span>'
+    )
+
 
 class ProvisionamentoLogInline(admin.TabularInline):  # noqa: keep django TabularInline (unfold doesn't override it)
     model = ProvisionamentoLog
@@ -75,11 +91,28 @@ class AtualizacaoVersaoInline(admin.TabularInline):
 class SincronizacaoVersoesAgenteInline(admin.TabularInline):
     model = SincronizacaoVersoesAgente
     extra = 0
-    readonly_fields = ['versoes_enviadas', 'status', 'resposta_http_status', 'iniciada_em', 'concluida_em', 'mensagem_erro']
+    fields = ['iniciada_em', 'status_badge', 'iniciada_por', 'versoes_fmt', 'resposta_http_status', 'log_fmt', 'concluida_em']
+    readonly_fields = fields
     can_delete = False
 
     def has_add_permission(self, request, obj=None):
         return False
+
+    def status_badge(self, obj):
+        return mark_safe(_sync_badge(obj.status))
+    status_badge.short_description = 'Status'
+
+    def versoes_fmt(self, obj):
+        return ', '.join(p.get('version', '?') for p in (obj.versoes_enviadas or [])) or '—'
+    versoes_fmt.short_description = 'Versões enviadas'
+
+    def log_fmt(self, obj):
+        return format_html(
+            '<pre style="white-space:pre-wrap;max-width:640px;max-height:200px;overflow:auto;'
+            'font-size:11px;margin:0;">{}</pre>',
+            obj.log or '—',
+        )
+    log_fmt.short_description = 'Log'
 
 
 @admin.register(VersaoAgente)
@@ -143,10 +176,10 @@ acao_destruir.short_description = 'Destruir cliente(s) — remove stack, volumes
 
 @admin.register(Cliente)
 class ClienteAdmin(ModelAdmin):
-    list_display = ['slug', 'nome', 'subdominio', 'plano', 'status_badge', 'isento_cobranca', 'versao_erp', 'criado_em']
+    list_display = ['slug', 'nome', 'subdominio', 'plano', 'status_badge', 'isento_cobranca', 'col_versao_erp', 'criado_em']
     list_filter = ['status', 'plano', 'host', 'isento_cobranca', 'atualizacao_automatica_agente']
     search_fields = ['slug', 'nome', 'cnpj', 'email_contato']
-    readonly_fields = ['id', 'criado_em', 'atualizado_em', 'status_badge', 'painel_acesso', 'acoes_provisionamento', 'badge_isencao', 'lista_backups', 'acoes_versoes']
+    readonly_fields = ['id', 'criado_em', 'atualizado_em', 'status_badge', 'painel_acesso', 'acoes_provisionamento', 'badge_isencao', 'lista_backups', 'acoes_versoes', 'versao_atual']
     filter_horizontal = ['modulos_ativos', 'versoes_permitidas']
     actions = [acao_reprovisionar, acao_destruir]
     inlines = [ProvisionamentoLogInline, AtualizacaoVersaoInline, SincronizacaoVersoesAgenteInline]
@@ -154,6 +187,7 @@ class ClienteAdmin(ModelAdmin):
         ('Identificação', {'fields': ['id', 'slug', 'nome', 'cnpj', 'email_contato', 'telefone']}),
         ('Acesso', {'fields': ['painel_acesso']}),
         ('Infraestrutura', {'fields': ['host', 'versao_erp', 'stack_path', 'subdominio', 'dominio_custom']}),
+        ('Versão Atual', {'fields': ['versao_atual']}),
         ('Plano', {'fields': ['plano', 'modulos_ativos', 'tema_site']}),
         ('Versões do SyncAgent/PDV', {'fields': ['atualizacao_automatica_agente', 'versoes_permitidas', 'acoes_versoes']}),
         ('Faturamento', {'fields': ['asaas_customer_id', 'asaas_subscription_id', 'badge_isencao', 'isento_cobranca', 'motivo_isencao']}),
@@ -172,6 +206,8 @@ class ClienteAdmin(ModelAdmin):
             path('<pk>/aplicar-modulos/', self.admin_site.admin_view(self._view_aplicar_modulos), name='registry_cliente_aplicar_modulos'),
             path('<pk>/configurar-cloudflare/', self.admin_site.admin_view(self._view_configurar_cloudflare), name='registry_cliente_configurar_cloudflare'),
             path('<pk>/sincronizar-versoes/', self.admin_site.admin_view(self._view_sincronizar_versoes), name='registry_cliente_sincronizar_versoes'),
+            path('<pk>/sincronizacoes/<int:sync_id>/status/', self.admin_site.admin_view(self._view_status_sincronizacao), name='registry_cliente_sincronizacao_status'),
+            path('<pk>/coletar-versoes/', self.admin_site.admin_view(self._view_coletar_versoes), name='registry_cliente_coletar_versoes'),
             path('<pk>/backup/', self.admin_site.admin_view(self._view_backup), name='registry_cliente_backup'),
             path('<pk>/backup/upload/', self.admin_site.admin_view(self._view_upload_backup), name='registry_cliente_backup_upload'),
             path('<pk>/backups/<int:backup_id>/download/', self.admin_site.admin_view(self._view_download_backup), name='registry_cliente_backup_download'),
@@ -333,7 +369,7 @@ class ClienteAdmin(ModelAdmin):
 
     def _view_sincronizar_versoes(self, request, pk):
         from django.contrib import messages
-        from .cp_push import SincronizadorVersoes
+        from .tasks import task_sincronizar_versoes_agente
 
         cliente = get_object_or_404(Cliente, pk=pk)
 
@@ -346,21 +382,39 @@ class ClienteAdmin(ModelAdmin):
             )
             return redirect('admin:registry_cliente_change', pk)
 
-        registro = SincronizadorVersoes(cliente).sincronizar()
-        if registro.status == 'concluida':
-            modo = 'catálogo automático' if cliente.atualizacao_automatica_agente else 'curadoria manual'
-            messages.success(
-                request,
-                f'Versões sincronizadas com sucesso ({modo}): {len(registro.versoes_enviadas)} '
-                f'versão(ões) enviada(s) para o ERP de "{cliente.slug}".',
-            )
-        else:
-            messages.error(
-                request,
-                f'Falha ao sincronizar versões com "{cliente.slug}": {registro.mensagem_erro}',
-            )
-
+        # Passa por task (nao mais sincrono) so pra gravar o log linha a linha e
+        # o admin mostrar "ao vivo" via polling. com_retry=False: disparo manual
+        # nao retenta em background.
+        task_sincronizar_versoes_agente.delay(
+            str(pk), iniciada_por_id=request.user.id, com_retry=False,
+        )
+        messages.info(
+            request,
+            f'Sincronização iniciada para "{cliente.slug}" — o log aparece abaixo do botão e atualiza sozinho.',
+        )
         return redirect('admin:registry_cliente_change', pk)
+
+    def _view_status_sincronizacao(self, request, pk, sync_id):
+        reg = get_object_or_404(SincronizacaoVersoesAgente, pk=sync_id, cliente__pk=pk)
+        return JsonResponse({
+            'status': reg.status,
+            'log': reg.log,
+            'ativo': reg.status == 'enviando',
+            'http': reg.resposta_http_status,
+        })
+
+    def _view_coletar_versoes(self, request, pk):
+        from django.contrib import messages
+        from django.urls import reverse
+        from .tasks import task_coletar_versoes_cliente
+
+        cliente = get_object_or_404(Cliente, pk=pk)
+        task_coletar_versoes_cliente.delay(str(pk))
+        messages.info(
+            request,
+            f'Coleta de versões disparada para "{cliente.slug}" — a página recarrega em alguns segundos.',
+        )
+        return redirect(reverse('admin:registry_cliente_change', args=[pk]) + '?coletando=1')
 
     def _view_configurar_cloudflare(self, request, pk):
         from django.contrib import messages
@@ -735,15 +789,178 @@ class ClienteAdmin(ModelAdmin):
                 '(<code>SyncPackage.allowed</code>) — não reinicia o serviço, é só uma chamada HTTPS.</p>'
             )
 
+        botao = (
+            f'<a href="{url_sync}" style="display:inline-block;padding:6px 14px;background:#2e7d32;color:#fff;'
+            f'border-radius:4px;text-decoration:none;font-size:13px;" '
+            f'onclick="return confirm(\'Salve o formulário antes (se mudou as versões permitidas ou o modo '
+            f'automático). Enviar a lista atual para o ERP deste cliente agora?\')">⇪ Sincronizar Versões com o ERP</a>'
+        )
+
+        bloco_log, script = self._bloco_log_sincronizacao(obj)
+
         return format_html(
-            '{}{}'
-            '<a href="{}" style="display:inline-block;padding:6px 14px;background:#2e7d32;color:#fff;'
-            'border-radius:4px;text-decoration:none;font-size:13px;" '
-            'onclick="return confirm(\'Salve o formulário antes (se mudou as versões permitidas ou o modo '
-            'automático). Enviar a lista atual para o ERP deste cliente agora?\')">⇪ Sincronizar Versões com o ERP</a>',
-            mark_safe(aviso_secret), mark_safe(banner), url_sync,
+            '{}{}{}{}{}',
+            mark_safe(aviso_secret), mark_safe(banner), mark_safe(botao),
+            mark_safe(bloco_log), mark_safe(script),
         )
     acoes_versoes.short_description = 'Sincronizar com o ERP'
+
+    def _bloco_log_sincronizacao(self, obj):
+        """Renderiza o log da ULTIMA sincronizacao deste cliente abaixo do
+        botao. Se ainda esta 'enviando', devolve tambem um <script> que faz
+        polling no endpoint de status e recarrega a pagina ao terminar
+        (mesmo padrao do lista_backups)."""
+        from django.urls import reverse
+        from django.utils import timezone
+
+        ultima = obj.sincronizacoes_versoes.first()
+        if ultima is None:
+            return '', ''
+
+        quem = ultima.iniciada_por.get_username() if ultima.iniciada_por else 'automático'
+        quando = timezone.localtime(ultima.iniciada_em).strftime('%d/%m/%Y %H:%M:%S')
+        cabecalho = (
+            f'<div style="margin-top:14px;font-size:12px;color:#555;">'
+            f'<strong>Última sincronização</strong> &nbsp; {_sync_badge(ultima.status)} '
+            f'&nbsp; <span style="color:#888;">{quando} · por {escape(quem)}</span></div>'
+        )
+        pre = (
+            f'<pre id="synclog-{ultima.pk}" style="white-space:pre-wrap;max-height:280px;overflow:auto;'
+            f'font-size:12px;line-height:1.5;background:#1e1e1e;color:#d4d4d4;padding:10px;'
+            f'border-radius:4px;margin-top:6px;">{escape(ultima.log or "(sem log)")}</pre>'
+        )
+
+        script = ''
+        if ultima.status == 'enviando':
+            url_status = reverse('admin:registry_cliente_sincronizacao_status', args=[obj.pk, ultima.pk])
+            idade = (timezone.now() - ultima.iniciada_em).total_seconds()
+            hint = (
+                'se o log não avançar, confirme que o worker Celery está rodando'
+                if idade > 30 else 'atualizando…'
+            )
+            cabecalho += f'<div style="font-size:11px;color:#999;margin-top:3px;">· {hint}</div>'
+            script = (
+                f'<script>(function(){{'
+                f'  var pre=document.getElementById("synclog-{ultima.pk}");'
+                f'  var iv=setInterval(function(){{'
+                f'    fetch("{url_status}").then(function(r){{return r.json();}}).then(function(d){{'
+                f'      if(pre){{pre.textContent=d.log||"(sem log)";}}'
+                f'      if(!d.ativo){{clearInterval(iv);setTimeout(function(){{location.reload();}},800);}}'
+                f'    }}).catch(function(){{clearInterval(iv);}});'
+                f'  }},1500);'
+                f'}})();</script>'
+            )
+
+        return cabecalho + pre, script
+
+    def col_versao_erp(self, obj):
+        det = obj.versao_erp_detectada or '?'
+        alvo = obj.versao_erp or '—'
+        if obj.versao_erp_detectada and obj.versao_erp and obj.versao_erp_detectada != obj.versao_erp:
+            return format_html('<span style="color:#e65100;">{} <small>(alvo {})</small></span>', det, alvo)
+        return format_html('{} <small style="color:#999;">(alvo {})</small>', det, alvo)
+    col_versao_erp.short_description = 'Versão ERP'
+
+    _CONN_CORES = {
+        'online':   ('#e8f5e9', '#2e7d32', 'online'),
+        'degraded': ('#fff8e1', '#f57f17', 'instável'),
+        'offline':  ('#ffebee', '#b71c1c', 'offline'),
+        'unknown':  ('#f5f5f5', '#757575', '—'),
+    }
+
+    def versao_atual(self, obj):
+        if not obj.pk:
+            return '—'
+        from django.urls import reverse
+        from django.utils import timezone
+
+        instalacoes = list(obj.instalacoes_agente.all())
+        versoes_agente = sorted({i.agent_version for i in instalacoes if i.agent_version})
+        resumo_agente = (
+            ', '.join(versoes_agente) if versoes_agente
+            else ('(nenhuma versão reportada)' if instalacoes else '(sem instalações)')
+        )
+        n = len(instalacoes)
+        sufixo_n = f' · {n} instalação(ões)' if n else ''
+
+        if obj.versoes_detectadas_em:
+            quando = timezone.localtime(obj.versoes_detectadas_em).strftime('%d/%m/%Y %H:%M:%S')
+            cab = f'<div style="font-size:12px;color:#555;">Verificado em <strong>{quando}</strong></div>'
+        else:
+            cab = '<div style="font-size:12px;color:#999;">Nunca verificado — clique no botão abaixo.</div>'
+
+        if obj.deteccao_versoes_erro:
+            cab += (
+                f'<p style="margin:6px 0 0;padding:8px 12px;background:#fff8e1;border-left:4px solid #f9a825;'
+                f'font-size:12px;color:#5d4037;">⚠ {escape(obj.deteccao_versoes_erro)}</p>'
+            )
+
+        erp_det = obj.versao_erp_detectada or '—'
+        erp_alvo = obj.versao_erp or '—'
+        erp_cor = '#e65100' if (obj.versao_erp_detectada and obj.versao_erp
+                                and obj.versao_erp_detectada != obj.versao_erp) else '#111'
+        resumo = (
+            '<table style="margin-top:10px;border-collapse:collapse;font-size:13px;">'
+            '<tr><td style="padding:4px 14px 4px 0;color:#666;">ERP</td>'
+            f'<td style="padding:4px 0;font-weight:600;color:{erp_cor};">{escape(erp_det)}</td>'
+            f'<td style="padding:4px 0 4px 14px;color:#999;">alvo: {escape(erp_alvo)}</td></tr>'
+            '<tr><td style="padding:4px 14px 4px 0;color:#666;">SyncAgent</td>'
+            f'<td style="padding:4px 0;font-weight:600;">{escape(resumo_agente)}</td>'
+            f'<td style="padding:4px 0 4px 14px;color:#999;">{escape(sufixo_n.lstrip(" ·"))}</td></tr>'
+            '<tr><td style="padding:4px 14px 4px 0;color:#666;">PDV Local</td>'
+            f'<td style="padding:4px 0;font-weight:600;">{escape(resumo_agente)}</td>'
+            '<td style="padding:4px 0 4px 14px;color:#999;">mesma release do SyncAgent (pdv-local)</td></tr>'
+            '</table>'
+        )
+
+        tabela = ''
+        if instalacoes:
+            linhas = ''
+            for i in instalacoes:
+                bg, fg, lbl = self._CONN_CORES.get(i.connectivity, self._CONN_CORES['unknown'])
+                visto = (timezone.localtime(i.last_seen_at).strftime('%d/%m %H:%M')
+                         if i.last_seen_at else '—')
+                ver = escape(i.agent_version or '?')
+                marca_inativa = '' if i.active else " <small style=\"color:#b71c1c;\">inativa</small>"
+                linhas += (
+                    '<tr>'
+                    f'<td style="padding:4px 10px;border-top:1px solid #eee;">{escape(i.installation_label or i.instance_id)}</td>'
+                    f'<td style="padding:4px 10px;border-top:1px solid #eee;">{ver}</td>'
+                    f'<td style="padding:4px 10px;border-top:1px solid #eee;">{ver}</td>'
+                    f'<td style="padding:4px 10px;border-top:1px solid #eee;color:#666;">{visto}</td>'
+                    f'<td style="padding:4px 10px;border-top:1px solid #eee;">'
+                    f'<span style="background:{bg};color:{fg};padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">{lbl}</span>'
+                    f'{marca_inativa}</td>'
+                    '</tr>'
+                )
+            tabela = (
+                '<table style="margin-top:12px;border-collapse:collapse;font-size:12px;min-width:520px;">'
+                '<tr style="text-align:left;color:#888;">'
+                '<th style="padding:4px 10px;">Instalação</th><th style="padding:4px 10px;">SyncAgent</th>'
+                '<th style="padding:4px 10px;">PDV Local</th><th style="padding:4px 10px;">Visto por último</th>'
+                '<th style="padding:4px 10px;">Conectividade</th></tr>'
+                f'{linhas}</table>'
+            )
+
+        url = reverse('admin:registry_cliente_coletar_versoes', args=[obj.pk])
+        botao = (
+            f'<a href="{url}" style="display:inline-block;margin-top:12px;padding:6px 14px;background:#417690;'
+            f'color:#fff;border-radius:4px;text-decoration:none;font-size:13px;">🔄 Verificar versões agora</a>'
+        )
+
+        # ?coletando=1 -> a task acabou de ser disparada; recarrega uma vez.
+        script = (
+            '<script>(function(){'
+            '  if(new URLSearchParams(location.search).get("coletando")!=="1")return;'
+            '  setTimeout(function(){'
+            '    var u=location.pathname;history.replaceState(null,"",u);location.href=u;'
+            '  },5000);'
+            '})();</script>'
+        )
+
+        return format_html('{}{}{}{}{}', mark_safe(cab), mark_safe(resumo),
+                           mark_safe(tabela), mark_safe(botao), mark_safe(script))
+    versao_atual.short_description = 'ERP / SyncAgent / PDV em execução'
 
     def lista_backups(self, obj):
         if not obj.pk:

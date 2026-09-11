@@ -1,0 +1,9 @@
+services:
+  erp_cliente_web:
+    environment:
+      CP_CLIENTE_ID: "00000000-0000-0000-0000-000000000001"
+      CP_CLIENTE_NOME: "Cliente Teste Integrado"
+      CP_SHARED_SECRET: "dev-test-shared-secret-123"
+  cp_web:
+    environment:
+      PDV_LOCAL_RELEASE_TOKEN: "dev-test-release-token-456"

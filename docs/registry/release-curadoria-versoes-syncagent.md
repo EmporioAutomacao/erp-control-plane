@@ -80,8 +80,10 @@ UX. O SyncAgent é a última linha de defesa.
    salvar (dispara o push sozinho) ou clicar em **"⇪ Sincronizar Versões com
    o ERP"** pra forçar na hora.
 3. **Ver o histórico de pushes**: inline "Sincronização de Versões (CP → ERP)"
-   na própria página do cliente — status, payload enviado, código HTTP,
-   mensagem de erro se houver.
+   na própria página do cliente — status, versões enviadas, código HTTP e o
+   **log passo a passo** de cada tentativa. Ao clicar em "⇪ Sincronizar Versões"
+   o log aparece abaixo do botão e **atualiza sozinho** enquanto roda (o botão
+   virou assíncrono via Celery — ver `release-log-sincronizacao-versoes.md`).
 
 Alternativa ao passo 2, quando o cliente deve sempre acompanhar a última
 versão: ligue **"Atualização automática"** (seção 3.2) e nunca mais cure

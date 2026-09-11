@@ -92,7 +92,25 @@ class Cliente(models.Model):
     telefone = models.CharField(max_length=20, blank=True)
 
     host = models.ForeignKey(HostInfraestrutura, null=True, blank=True, on_delete=models.SET_NULL)
-    versao_erp = models.CharField(max_length=20, blank=True)
+    versao_erp = models.CharField(
+        max_length=20, blank=True,
+        verbose_name='Versão ERP (alvo)',
+        help_text='Tag da imagem Docker pedida no provisionamento/atualização. '
+        'Não é necessariamente a versão em execução — veja "Versão Atual".',
+    )
+    versao_erp_detectada = models.CharField(
+        max_length=20, blank=True,
+        verbose_name='Versão ERP em execução',
+        help_text='Lida de GET /health/ (ou /v1/cp/status) da instância. Atualizada '
+        'pela verificação de saúde e pela coleta de versões.',
+    )
+    versoes_detectadas_em = models.DateTimeField(
+        null=True, blank=True, verbose_name='Versões verificadas em',
+    )
+    deteccao_versoes_erro = models.CharField(
+        max_length=300, blank=True,
+        verbose_name='Erro na última coleta de versões',
+    )
     stack_path = models.CharField(max_length=500, blank=True)
     subdominio = models.CharField(max_length=100, unique=True)
     dominio_custom = models.CharField(max_length=200, blank=True)
@@ -284,6 +302,16 @@ class SincronizacaoVersoesAgente(models.Model):
     concluida_em = models.DateTimeField(null=True, blank=True)
     resposta_http_status = models.PositiveIntegerField(null=True, blank=True)
     mensagem_erro = models.TextField(blank=True)
+    log = models.TextField(
+        blank=True, default='',
+        verbose_name='Log da sincronização',
+        help_text='Passo a passo do que foi feito — preenchido linha a linha enquanto roda.',
+    )
+    iniciada_por = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='+', verbose_name='Iniciada por',
+        help_text='Quem clicou em "Sincronizar Versões". Vazio = push automático (curadoria/catálogo mudou).',
+    )
 
     class Meta:
         verbose_name = 'Sincronização de Versões (CP → ERP)'
@@ -292,6 +320,31 @@ class SincronizacaoVersoesAgente(models.Model):
 
     def __str__(self):
         return f'{self.cliente.slug} — {self.status} em {self.iniciada_em:%d/%m/%Y %H:%M}'
+
+
+class InstalacaoAgente(models.Model):
+    """Cache no CP das SyncInstallation do erp de um cliente (uma por loja/
+    máquina). Reconciliado (full-sync) a cada coleta via GET /v1/cp/status —
+    ver registry.cp_pull.ColetorVersoes. Só leitura no admin."""
+
+    cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='instalacoes_agente')
+    instance_id = models.CharField(max_length=120)
+    installation_label = models.CharField(max_length=128, blank=True, verbose_name='Instalação')
+    agent_version = models.CharField(max_length=80, blank=True, verbose_name='Versão do SyncAgent/PDV')
+    last_seen_at = models.DateTimeField(null=True, blank=True, verbose_name='Visto por último')
+    active = models.BooleanField(default=True, verbose_name='Ativa')
+    connectivity = models.CharField(max_length=20, blank=True, verbose_name='Conectividade')
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Instalação do SyncAgent/PDV'
+        verbose_name_plural = 'Instalações do SyncAgent/PDV'
+        db_table = 'registry_instalacaoagente'
+        unique_together = [('cliente', 'instance_id')]
+        ordering = ['installation_label', 'instance_id']
+
+    def __str__(self):
+        return f'{self.cliente.slug} — {self.installation_label or self.instance_id} ({self.agent_version or "?"})'
 
 
 class ConfiguracaoEmail(models.Model):
