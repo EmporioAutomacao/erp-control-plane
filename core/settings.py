@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / '.env')
 
-VERSION = '0.0.38'
+VERSION = '0.0.39'
 
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-change-me')
 DEBUG = os.getenv('DEBUG', 'true').lower() in ('1', 'true', 'yes')

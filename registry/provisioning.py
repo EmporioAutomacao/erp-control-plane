@@ -1,3 +1,4 @@
+import logging
 import os
 import secrets
 import subprocess
@@ -7,6 +8,8 @@ from pathlib import Path
 
 import docker
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 CLIENTES_BASE = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes'))
 ERP_IMAGE = 'emporioautomacao/ararasuite-erp'
@@ -131,6 +134,19 @@ class MotorProvisionamento:
             integracao_secret=cp_shared_secret,
         )
         self.cliente.integracao_secret = cp_shared_secret
+        self.cliente.status = 'ativo'
+
+        # Push inicial do snapshot de plano -- garante que a instancia recem
+        # provisionada ja nasce com limites_plano real no erp, sem depender
+        # do proximo signal de mudanca de plano/status/modulos. Nao-fatal:
+        # falhar aqui nao pode derrubar o provisionamento.
+        try:
+            from .cp_push import SincronizadorPlano
+            SincronizadorPlano(self.cliente).sincronizar()
+        except Exception:
+            logger.warning(
+                'Falha ao enviar snapshot de plano inicial para %s', slug, exc_info=True,
+            )
 
     def atualizar_versao(self, versao_nova):
         slug = self.cliente.slug

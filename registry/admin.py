@@ -179,7 +179,7 @@ class ClienteAdmin(ModelAdmin):
     list_display = ['slug', 'nome', 'subdominio', 'plano', 'status_badge', 'isento_cobranca', 'col_versao_erp', 'criado_em']
     list_filter = ['status', 'plano', 'host', 'isento_cobranca', 'atualizacao_automatica_agente']
     search_fields = ['slug', 'nome', 'cnpj', 'email_contato']
-    readonly_fields = ['id', 'criado_em', 'atualizado_em', 'status_badge', 'painel_acesso', 'acoes_provisionamento', 'badge_isencao', 'lista_backups', 'acoes_versoes', 'versao_atual']
+    readonly_fields = ['id', 'criado_em', 'atualizado_em', 'status_badge', 'painel_acesso', 'acoes_provisionamento', 'badge_isencao', 'lista_backups', 'acoes_versoes', 'acoes_plano_sync', 'versao_atual']
     filter_horizontal = ['modulos_ativos', 'versoes_permitidas']
     actions = [acao_reprovisionar, acao_destruir]
     inlines = [ProvisionamentoLogInline, AtualizacaoVersaoInline, SincronizacaoVersoesAgenteInline]
@@ -188,7 +188,7 @@ class ClienteAdmin(ModelAdmin):
         ('Acesso', {'fields': ['painel_acesso']}),
         ('Infraestrutura', {'fields': ['host', 'versao_erp', 'stack_path', 'subdominio', 'dominio_custom']}),
         ('Versão Atual', {'fields': ['versao_atual']}),
-        ('Plano', {'fields': ['plano', 'modulos_ativos', 'tema_site']}),
+        ('Plano', {'fields': ['plano', 'modulos_ativos', 'tema_site', 'acoes_plano_sync']}),
         ('Versões do SyncAgent/PDV', {'fields': ['atualizacao_automatica_agente', 'versoes_permitidas', 'acoes_versoes']}),
         ('Faturamento', {'fields': ['asaas_customer_id', 'asaas_subscription_id', 'badge_isencao', 'isento_cobranca', 'motivo_isencao']}),
         ('Status', {'fields': ['status_badge', 'status', 'trial_ate', 'data_ativacao', 'data_suspensao', 'data_cancelamento']}),
@@ -206,6 +206,7 @@ class ClienteAdmin(ModelAdmin):
             path('<pk>/aplicar-modulos/', self.admin_site.admin_view(self._view_aplicar_modulos), name='registry_cliente_aplicar_modulos'),
             path('<pk>/configurar-cloudflare/', self.admin_site.admin_view(self._view_configurar_cloudflare), name='registry_cliente_configurar_cloudflare'),
             path('<pk>/sincronizar-versoes/', self.admin_site.admin_view(self._view_sincronizar_versoes), name='registry_cliente_sincronizar_versoes'),
+            path('<pk>/sincronizar-plano/', self.admin_site.admin_view(self._view_sincronizar_plano), name='registry_cliente_sincronizar_plano'),
             path('<pk>/sincronizacoes/<int:sync_id>/status/', self.admin_site.admin_view(self._view_status_sincronizacao), name='registry_cliente_sincronizacao_status'),
             path('<pk>/coletar-versoes/', self.admin_site.admin_view(self._view_coletar_versoes), name='registry_cliente_coletar_versoes'),
             path('<pk>/backup/', self.admin_site.admin_view(self._view_backup), name='registry_cliente_backup'),
@@ -392,6 +393,30 @@ class ClienteAdmin(ModelAdmin):
             request,
             f'Sincronização iniciada para "{cliente.slug}" — o log aparece abaixo do botão e atualiza sozinho.',
         )
+        return redirect('admin:registry_cliente_change', pk)
+
+    def _view_sincronizar_plano(self, request, pk):
+        from django.contrib import messages
+        from .cp_push import SincronizadorPlano
+
+        cliente = get_object_or_404(Cliente, pk=pk)
+
+        if not cliente.integracao_secret:
+            messages.warning(
+                request,
+                'Este cliente ainda não tem um segredo de integração gerado. '
+                'Clique em "⚙ Aplicar Configurações" primeiro (gera o segredo e o envia pro ERP), '
+                'depois tente sincronizar o plano de novo.',
+            )
+            return redirect('admin:registry_cliente_change', pk)
+
+        # Payload pequeno e rapido -- sincrono, sem passar por task (diferente
+        # de "Sincronizar Versoes", que so usa task pra ter log ao vivo).
+        resultado = SincronizadorPlano(cliente).sincronizar()
+        if resultado['sucesso']:
+            messages.success(request, f'Plano sincronizado com "{cliente.slug}".')
+        else:
+            messages.error(request, f'Falha ao sincronizar plano: {resultado["mensagem"]}')
         return redirect('admin:registry_cliente_change', pk)
 
     def _view_status_sincronizacao(self, request, pk, sync_id):
@@ -804,6 +829,25 @@ class ClienteAdmin(ModelAdmin):
             mark_safe(bloco_log), mark_safe(script),
         )
     acoes_versoes.short_description = 'Sincronizar com o ERP'
+
+    def acoes_plano_sync(self, obj):
+        if not obj.pk:
+            return '—'
+        from django.urls import reverse
+        url = reverse('admin:registry_cliente_sincronizar_plano', args=[obj.pk])
+        aviso_secret = ''
+        if not obj.integracao_secret:
+            aviso_secret = (
+                '<p style="margin:0 0 10px;padding:8px 12px;background:#fff8e1;border-left:4px solid #f9a825;'
+                'font-size:12px;color:#5d4037;">⚠️ Sem segredo de integração ainda — clique em '
+                '"⚙ Aplicar Configurações" (aba Ações) uma vez antes de sincronizar.</p>'
+            )
+        botao = (
+            f'<a href="{url}" style="display:inline-block;padding:6px 14px;background:#2e7d32;color:#fff;'
+            f'border-radius:4px;text-decoration:none;font-size:13px;">🔄 Sincronizar Plano com o ERP</a>'
+        )
+        return format_html('{}{}', mark_safe(aviso_secret), mark_safe(botao))
+    acoes_plano_sync.short_description = 'Enviar plano/limites pro ERP'
 
     def _bloco_log_sincronizacao(self, obj):
         """Renderiza o log da ULTIMA sincronizacao deste cliente abaixo do

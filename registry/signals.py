@@ -11,18 +11,23 @@ def cliente_criado(sender, instance, created, **kwargs):
 
 @receiver(pre_save, sender='registry.Cliente')
 def _cliente_captura_auto_update(sender, instance, **kwargs):
-    """Guarda o valor de `atualizacao_automatica_agente` que esta no banco
-    antes deste save, pra `_cliente_auto_update_alterado` saber se o toggle
-    mudou (post_save nao recebe o estado anterior)."""
+    """Guarda o valor de `atualizacao_automatica_agente`, `plano_id` e
+    `status` que estao no banco antes deste save, pra
+    `_cliente_auto_update_alterado`/`_cliente_plano_ou_status_alterado`
+    saberem o que mudou (post_save nao recebe o estado anterior)."""
     if not instance.pk:
         instance._auto_update_anterior = False
+        instance._plano_id_anterior = None
+        instance._status_anterior = None
         return
     anterior = (
         sender.objects.filter(pk=instance.pk)
-        .values_list('atualizacao_automatica_agente', flat=True)
+        .values('atualizacao_automatica_agente', 'plano_id', 'status')
         .first()
-    )
-    instance._auto_update_anterior = bool(anterior)
+    ) or {}
+    instance._auto_update_anterior = bool(anterior.get('atualizacao_automatica_agente'))
+    instance._plano_id_anterior = anterior.get('plano_id')
+    instance._status_anterior = anterior.get('status')
 
 
 @receiver(post_save, sender='registry.Cliente')
@@ -42,6 +47,29 @@ def _cliente_auto_update_alterado(sender, instance, created, **kwargs):
 
     from .tasks import task_sincronizar_versoes_agente
     task_sincronizar_versoes_agente.delay(str(instance.pk))
+
+
+@receiver(post_save, sender='registry.Cliente')
+def _cliente_plano_ou_status_alterado(sender, instance, created, **kwargs):
+    """Plano ou status da assinatura mudou (ex.: upgrade/downgrade de plano,
+    suspensao/reativacao) -> reenvia o snapshot pro erp do cliente
+    (SincronizadorPlano) em background, pra core.PlanoCliente la refletir os
+    novos limites/status o quanto antes.
+
+    So o save via admin dispara isto -- `Cliente.objects.filter().update()`
+    (provisionamento, tasks) nao aciona signals; o provisionamento tem seu
+    proprio push inicial sincrono (ver MotorProvisionamento.executar)."""
+    if created:
+        return
+    plano_mudou = getattr(instance, '_plano_id_anterior', None) != instance.plano_id
+    status_mudou = getattr(instance, '_status_anterior', None) != instance.status
+    if not (plano_mudou or status_mudou):
+        return
+    if not instance.integracao_secret:
+        return
+
+    from .tasks import task_sincronizar_plano_cliente
+    task_sincronizar_plano_cliente.delay(str(instance.pk))
 
 
 def versoes_permitidas_changed(sender, instance, action, **kwargs):
@@ -65,6 +93,26 @@ def versoes_permitidas_changed(sender, instance, action, **kwargs):
 
     from .tasks import task_sincronizar_versoes_agente
     task_sincronizar_versoes_agente.delay(str(instance.pk))
+
+
+def modulos_ativos_changed(sender, instance, action, **kwargs):
+    """Dispara o push automatico do snapshot de plano pro erp do cliente
+    sempre que Cliente.modulos_ativos muda (editado pelo admin via
+    filter_horizontal) -- modulos_assinados faz parte do mesmo payload que
+    SincronizadorPlano envia.
+
+    Conectado imperativamente em RegistryConfig.ready(), mesmo motivo de
+    versoes_permitidas_changed: o `sender` aqui e o through model
+    auto-gerado pelo ManyToManyField, sem nome estavel pra @receiver.
+    """
+    if action not in ('post_add', 'post_remove', 'post_clear'):
+        return
+
+    if not instance.integracao_secret:
+        return
+
+    from .tasks import task_sincronizar_plano_cliente
+    task_sincronizar_plano_cliente.delay(str(instance.pk))
 
 
 @receiver(post_save, sender='registry.VersaoAgente')

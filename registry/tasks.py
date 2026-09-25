@@ -86,6 +86,26 @@ def task_sincronizar_versoes_agente(self, cliente_id, iniciada_por_id=None, com_
         raise self.retry(exc=Exception(registro.mensagem_erro or 'Falha ao sincronizar versoes.'))
 
 
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def task_sincronizar_plano_cliente(self, cliente_id):
+    """Dispara SincronizadorPlano.sincronizar() em background. Chamada pelos
+    signals de registry.signals quando plano/status/modulos_ativos de um
+    Cliente mudam (ver SincronizadorPlano em cp_push.py). Retenta 3x em
+    erro -- ao contrario do botao manual (view sincrona, sem task), aqui
+    ninguem esta olhando a tela na hora."""
+    from .cp_push import SincronizadorPlano
+    from .models import Cliente
+
+    try:
+        cliente = Cliente.objects.get(pk=cliente_id)
+    except Cliente.DoesNotExist:
+        return
+
+    resultado = SincronizadorPlano(cliente).sincronizar()
+    if not resultado['sucesso']:
+        raise self.retry(exc=Exception(resultado['mensagem']))
+
+
 @shared_task
 def task_suspender_cliente(cliente_id):
     from .models import Cliente
