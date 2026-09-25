@@ -116,7 +116,6 @@ class Cliente(models.Model):
     dominio_custom = models.CharField(max_length=200, blank=True)
 
     TEMA_CHOICES = [
-        ('padrao', 'Padrão (e-commerce)'),
         ('dedetizadora', 'Dedetizadora (verde)'),
         ('dedetizadora2', 'Dedetizadora 2 (azul + animações)'),
         ('loja', 'Loja (claro premium)'),
@@ -127,7 +126,7 @@ class Cliente(models.Model):
     tema_site = models.CharField(
         max_length=50,
         choices=TEMA_CHOICES,
-        default='padrao',
+        default='loja',
         verbose_name='Tema do site',
         help_text='Template visual da landing page pública do cliente.',
     )

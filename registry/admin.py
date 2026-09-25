@@ -249,7 +249,7 @@ class ClienteAdmin(ModelAdmin):
         cliente = get_object_or_404(Cliente, pk=pk)
         slug = cliente.slug
         modulos = ','.join(m.slug for m in cliente.modulos_ativos.all()) or 'financeiro,tarefas'
-        tema = cliente.tema_site or 'padrao'
+        tema = cliente.tema_site or 'loja'
         dominio_custom = cliente.dominio_custom or ''
         subdominio = cliente.subdominio
 

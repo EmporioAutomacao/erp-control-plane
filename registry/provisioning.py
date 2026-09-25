@@ -45,7 +45,7 @@ class MotorProvisionamento:
         versao = self.cliente.versao_erp or 'latest'
         subdominio = self.cliente.subdominio
         modulos = ','.join(m.slug for m in self.cliente.modulos_ativos.all()) or 'financeiro,tarefas'
-        tema = self.cliente.tema_site or 'padrao'
+        tema = self.cliente.tema_site or 'loja'
         dominio_custom = self.cliente.dominio_custom or ''
 
         allowed_hosts = f'{subdominio},{dominio_custom}' if dominio_custom else subdominio
