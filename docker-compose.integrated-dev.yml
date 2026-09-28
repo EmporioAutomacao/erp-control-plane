@@ -114,12 +114,45 @@ services:
       DJANGO_SUPERUSER_USERNAME: ${ERP_CLIENTE_SUPERUSER_USERNAME:-admin}
       DJANGO_SUPERUSER_EMAIL: ${ERP_CLIENTE_SUPERUSER_EMAIL:-admin@localhost}
       DJANGO_SUPERUSER_PASSWORD: ${ERP_CLIENTE_SUPERUSER_PASSWORD:-admin123}
+      # Autenticacao dos canais /v1/cp/* (agent-packages:sync, status,
+      # plano:sync) -- sem isso todo POST/GET desses canais devolve 409
+      # not_linked_to_cp. Preencher no .env local depois de criar o Cliente
+      # dev no CP (registry.Cliente.integracao_secret / str(cliente.id)).
+      CP_SHARED_SECRET: ${ERP_CLIENTE_CP_SHARED_SECRET:-}
+      CP_CLIENTE_ID: ${ERP_CLIENTE_CP_CLIENTE_ID:-}
     ports:
       - "8002:8000"
     depends_on:
       erp_cliente_db:
         condition: service_healthy
       erp_cliente_redis:
+        condition: service_healthy
+
+  cp_celery:
+    build:
+      context: .
+    command: celery -A core worker --loglevel=info
+    environment:
+      SECRET_KEY: ${CP_SECRET_KEY:-dev-control-plane-secret-key}
+      DEBUG: "true"
+      ALLOWED_HOSTS: localhost,127.0.0.1,192.168.0.31,cp_web
+      SAAS_DOMAIN: localhost
+      POSTGRES_DB: erp_cp
+      POSTGRES_USER: erp_cp
+      POSTGRES_PASSWORD: ${CP_POSTGRES_PASSWORD:-erp_cp_dev}
+      POSTGRES_HOST: cp_db
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://cp_redis:6379/0
+      CLIENTES_BASE_PATH: /opt/clientes
+      ERP_LATEST_VERSION: dev
+      PROVISIONING_CHECK_HTTP: "false"
+    volumes:
+      - .:/app
+      - cp_tenants:/opt/clientes
+    depends_on:
+      cp_db:
+        condition: service_healthy
+      cp_redis:
         condition: service_healthy
 
 volumes:
