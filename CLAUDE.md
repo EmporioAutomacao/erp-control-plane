@@ -99,6 +99,7 @@ Cada etapa de provisionamento é registrada em `ProvisionamentoLog` via `MotorPr
 | `mercadolivre` | Mercado Livre | Integração com anúncios e pedidos do Mercado Livre |
 | `metas` | Metas Gamificadas | Definição e acompanhamento de metas com ranking |
 | `notificacoes` | Notificações | Alertas internos e disparo de mensagens aos clientes |
+| `ordens_servico` | Ordens de Serviço | Gestão de ordens de serviço genéricas, com fluxo simples ou por processo configurável |
 | `radar_empresarial` | Radar Empresarial | Painel de indicadores estratégicos do negócio |
 | `rh` | Recursos Humanos | Funcionários, folha de pagamento, benefícios e documentos de RH |
 | `tarefas` | Tarefas | Gestão de tarefas e checklist por equipe |

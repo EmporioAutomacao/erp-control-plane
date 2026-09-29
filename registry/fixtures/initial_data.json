@@ -131,6 +131,16 @@
 },
 {
   "model": "registry.modulo",
+  "pk": "ordens_servico",
+  "fields": {
+    "nome": "Ordens de Serviço",
+    "descricao": "",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
   "pk": "radar_empresarial",
   "fields": {
     "nome": "Radar Empresarial",
@@ -197,6 +207,7 @@
       "mercadolivre",
       "metas",
       "notificacoes",
+      "ordens_servico",
       "radar_empresarial",
       "rh",
       "tarefas",
