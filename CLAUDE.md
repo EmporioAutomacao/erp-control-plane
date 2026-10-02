@@ -121,8 +121,11 @@ Todos os módulos têm `preco_mensal=0.00` — a cobrança é feita pelo plano. 
 | `task_coletar_versoes_todas` | Dispara `task_coletar_versoes_cliente` em todos os clientes ativos/trial. Agendar no django-celery-beat (ex.: a cada 30 min), como o health check |
 | `task_enviar_email_boas_vindas` | Renderiza e envia o e-mail HTML de boas-vindas |
 | `task_backup_clientes` | Gera `.tar.gz` do `CLIENTES_BASE_PATH` e mantém N versões |
-| `task_backup_cliente` | Backup completo de um cliente: pg_dump + mídia (`/app/media`) + config. Salvo em `CP_BACKUP_DIR/clientes/{slug}/`. Mantém 3 backups por cliente. |
-| `task_restaurar_cliente` | Restaura um backup: escala web=0, restaura DB via psql, restaura mídia via container alpine, reinicia web=1. Sempre reinicia o web mesmo em caso de erro. |
+| `task_iniciar_backup_cliente` | Etapa do manager: lê o config do cliente e despacha `task_backup_cliente` para a fila do nó do cliente (`registry/nos.py`). É o que o botão do admin chama. |
+| `task_backup_cliente` | Roda **no nó do cliente** (fila `no.<hostname>`): pg_dump + mídia (`/app/media`) + config (recebido por argumento). Envia o `.tar.gz` ao bucket S3 (RustFS) e mantém 3 backups por cliente. |
+| `task_restaurar_cliente` | Etapa do manager: escala web=0 e despacha `task_restaurar_no` para a fila do nó. |
+| `task_restaurar_no` | Roda no nó: baixa o backup do bucket, restaura DB via psql e mídia via container alpine. Sempre aciona `task_finalizar_restauracao`, mesmo com erro. |
+| `task_finalizar_restauracao` | Etapa do manager: reinicia web=1 e libera o backup. |
 
 ### Infraestrutura por cliente
 
@@ -230,7 +233,17 @@ Em produção (Linux/Docker) o prefork padrão funciona normalmente — não adi
 
 ### Backup completo por cliente
 
-O `task_backup_cliente` cria um `.tar.gz` em `CP_BACKUP_DIR/clientes/{slug}/` contendo três entradas:
+**Multi-nó (Swarm):** `docker ps/exec/cp/run` só enxergam o daemon do nó local, e os serviços do cliente rodam em workers (`node.labels.region`), não no manager onde o Celery principal roda. Por isso o backup/restauração roda no **worker Celery do nó do cliente**:
+
+- `registry/nos.py::fila_do_cliente(slug)` descobre o nó via `docker service ps {slug}_db` e devolve a fila `no.<hostname>`; sem Swarm (dev) ou se o serviço não for achado, cai em `celery`.
+- `stack-prod.yml`: o serviço `agente-no` (`mode: global`, `node.role != manager`, entrypoint `entrypoint-agente.sh`, sem `migrate`) consome só `no.<hostname>`. O `celery` do manager consome `celery,no.<hostname-do-manager>`. Cada nó precisa do diretório `/opt/backups/cp` (bind, temporário — o caminho do host tem de ser o mesmo dentro do container por causa do `docker run -v`).
+- O `.env`/`stack.yml` do cliente só existem no manager: `task_iniciar_backup_cliente` os lê e passa em `config_files` (base64) para a task do nó.
+- **Bucket:** `registry/storage_backup.py` (boto3, path-style, config por `BACKUP_S3_*`). Com bucket, `BackupCliente.arquivo_path` guarda `s3://clientes/{slug}/arquivo.tar.gz` e o disco do nó é só temporário; sem `BACKUP_S3_*` (dev de nó único) o arquivo fica em disco local. Download no admin = redirect para link temporário (presigned; o endpoint precisa ser alcançável pelo navegador, ou defina `BACKUP_S3_PUBLIC_ENDPOINT`). Upload manual também vai ao bucket. Retenção apaga os objetos excedentes.
+- `BackupCliente.no` guarda o hostname do nó que gerou o backup.
+- Limitação: se o worker do nó não estiver rodando, a task fica na fila e (na restauração) o web do cliente permanece em 0 réplicas até o agente voltar.
+- Guia completo (deploy, verificação, troubleshooting): `docs/registry/backup-multi-no.md`.
+
+O `task_backup_cliente` cria um `.tar.gz` (em `CP_BACKUP_DIR/clientes/{slug}/` no nó, até o envio ao bucket) contendo três entradas:
 
 | Entrada no arquivo | Origem | Conteúdo |
 |---|---|---|
@@ -246,7 +259,7 @@ O `task_backup_cliente` cria um `.tar.gz` em `CP_BACKUP_DIR/clientes/{slug}/` co
 
 **Importar backup existente:** o botão "⬆ Importar Backup" (`_view_upload_backup`, `registry/admin.py`) permite enviar um `.tar.gz`/`.tgz` do PC do usuário. O arquivo é gravado via streaming (`request.FILES['arquivo'].chunks()`, sem storage/`FileField` do Django — o projeto não usa `MEDIA_ROOT`) em `CP_BACKUP_DIR/clientes/{slug}/manual_{slug}_{timestamp}.tar.gz`, e o `BackupCliente` criado com `origem='manual'`. A validação é só estrutural (`tarfile.is_tarfile` + checar se há `db.sql`/`media/` entre os membros) — não garante compatibilidade com a versão do ERP do cliente; ausências viram aviso em `mensagem`, sem bloquear o upload. Em produção, arquivos muito grandes podem esbarrar no timeout do gunicorn (`--timeout 120` em `entrypoint.sh`) — não tratado, é uma limitação conhecida.
 
-**Restauração:** `task_restaurar_cliente` escala `{slug}_web=0`, restaura o banco via `psql -v ON_ERROR_STOP=1` e a mídia via container alpine temporário com acesso direto ao volume `{slug}_media`, depois reinicia `{slug}_web=1`. O serviço web é sempre reiniciado mesmo em caso de erro parcial. Assim como no backup, cada etapa que não encontra o container ou cujo comando falha vira um aviso — gravado em `BackupCliente.mensagem_restauracao` (campo separado de `mensagem`, que é sobre a *criação* do backup) e exibido como um segundo ⚠ na lista do admin. Mensagem vazia = última restauração sem erros.
+**Restauração:** `task_restaurar_cliente` (manager) escala `{slug}_web=0` e `task_restaurar_no` (nó) restaura o banco via `psql -v ON_ERROR_STOP=1` e a mídia via container alpine temporário com acesso direto ao volume `{slug}_media`, depois `task_finalizar_restauracao` (manager) reinicia `{slug}_web=1`. O serviço web é sempre reiniciado mesmo em caso de erro parcial. Assim como no backup, cada etapa que não encontra o container ou cujo comando falha vira um aviso — gravado em `BackupCliente.mensagem_restauracao` (campo separado de `mensagem`, que é sobre a *criação* do backup) e exibido como um segundo ⚠ na lista do admin. Mensagem vazia = última restauração sem erros.
 
 **Caminhos absolutos nos comandos Docker (Windows):** `backup_base`/`restore_dir` são construídos com `.resolve()` sobre `Path(os.getenv('CP_BACKUP_DIR', '/opt/backups/cp'))`. Sem isso, no Windows, `Path('/opt/backups/cp')` produz um caminho "enraizado mas sem drive letter" (`\opt\backups\cp`, sem `D:`) — o Python consegue ler/escrever nele normalmente (resolve contra o drive do processo), mas `docker run -v <path>:...` rejeita esse formato com "not a valid Windows path". Isso já causou uma restauração de mídia silenciosamente quebrada em dev local (o `docker cp` do backup tolerou o caminho por sorte de CWD; o `docker run -v` da restauração, não).
 
@@ -328,3 +341,5 @@ O item "Ajuda" da sidebar (`registry/views.py::admin_ajuda`) é uma view de fun�
 | `ERP_LATEST_VERSION` | `0.0.22` | Versão do ERP para novos clientes (seed de Empresa/Estoque exige ≥ 0.0.104) |
 | `CP_BACKUP_DIR` | `/opt/backups/cp` | Destino dos backups do CLIENTES_BASE_PATH |
 | `CP_BACKUP_MANTER` | `7` | Quantos backups do CLIENTES_BASE_PATH retener (task_backup_clientes) |
+| `BACKUP_S3_ENDPOINT`/`_BUCKET`/`_ACCESS_KEY`/`_SECRET_KEY` | — | Bucket S3-compatível (RustFS) dos backups por cliente. Vazio = backup só em disco local (dev) |
+| `BACKUP_S3_REGION` / `BACKUP_S3_PUBLIC_ENDPOINT` | `us-east-1` / vazio | Região e endereço alcançável pelo navegador (links de download) |

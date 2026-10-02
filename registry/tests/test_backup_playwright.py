@@ -16,6 +16,9 @@ from registry.tests.playwright_base import PlaywrightAdminTestCase
 def _fake_run_sem_containers(cmd, *args, **kwargs):
     if cmd[:2] == ['docker', 'ps']:
         return SimpleNamespace(stdout='', stderr='', returncode=0)
+    if cmd[:3] == ['docker', 'service', 'ps']:
+        # sem Swarm: a descoberta do nó falha e o backup cai na fila padrão
+        return SimpleNamespace(stdout='', stderr='', returncode=1)
     raise AssertionError(f'comando docker inesperado no teste (sem containers do cliente): {cmd}')
 
 

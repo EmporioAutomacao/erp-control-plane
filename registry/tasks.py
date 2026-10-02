@@ -207,12 +207,57 @@ def task_enviar_email_boas_vindas(cliente_id):
         logger.error('Falha ao enviar e-mail de boas-vindas para %s: %s', cliente_id, exc)
 
 
+@shared_task
+def task_iniciar_backup_cliente(cliente_id, backup_id):
+    """Etapa do manager: lê o config do cliente e despacha o backup para o nó certo.
+
+    O `.env`/`stack.yml` do cliente só existem em /opt/clientes do manager; o dump e a
+    mídia só são visíveis no daemon Docker do nó que hospeda o cliente. Por isso o
+    config segue como argumento (pequeno) para a task que roda no nó.
+    """
+    import base64
+    from .models import Cliente, BackupCliente
+    from .nos import fila_do_cliente
+
+    cliente = Cliente.objects.get(pk=cliente_id)
+    cliente_dir = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes')) / cliente.slug
+
+    config_files = {}
+    if cliente_dir.exists():
+        for arq in cliente_dir.rglob('*'):
+            if arq.is_file() and arq.stat().st_size <= 1024 * 1024:
+                config_files[arq.relative_to(cliente_dir).as_posix()] = (
+                    base64.b64encode(arq.read_bytes()).decode('ascii')
+                )
+
+    fila = fila_do_cliente(cliente.slug)
+    logger.info('Backup de %s despachado para a fila %s', cliente.slug, fila)
+    try:
+        task_backup_cliente.apply_async(
+            args=[str(cliente_id), backup_id], kwargs={'config_files': config_files}, queue=fila,
+        )
+    except Exception as exc:
+        BackupCliente.objects.filter(pk=backup_id).update(
+            status='erro', progresso=100, mensagem=f'Falha ao despachar o backup para a fila {fila}: {exc}',
+        )
+        raise
+
+
 @shared_task(bind=True, max_retries=0)
-def task_backup_cliente(self, cliente_id, backup_id):
+def task_backup_cliente(self, cliente_id, backup_id, config_files=None):
+    """Executa o backup. Deve rodar no worker do nó que hospeda `{slug}_db`/`{slug}_web`.
+
+    `config_files` ({caminho_relativo: conteudo_base64}) vem de `task_iniciar_backup_cliente`;
+    quando None (chamada direta/dev), o config é lido do disco local.
+    """
+    import base64
     import io
     import shutil
+    import socket
     import subprocess
+    from . import storage_backup
     from .models import Cliente, BackupCliente
+    from .nos import container_local
 
     def _prog(pct):
         BackupCliente.objects.filter(pk=backup_id).update(progresso=pct)
@@ -234,11 +279,7 @@ def task_backup_cliente(self, cliente_id, backup_id):
         with tarfile.open(arquivo, 'w:gz') as tar:
             # 1. DB dump via container do banco
             _prog(10)
-            r = subprocess.run(
-                ['docker', 'ps', '-q', '-f', f'name={slug}_db'],
-                capture_output=True, text=True,
-            )
-            db_ctr = r.stdout.strip().splitlines()[0] if r.stdout.strip() else None
+            db_ctr = container_local(slug, 'db')
             if db_ctr:
                 dump = subprocess.run(
                     ['docker', 'exec', db_ctr,
@@ -259,11 +300,7 @@ def task_backup_cliente(self, cliente_id, backup_id):
             _prog(55)
 
             # 2. Arquivos de mídia via docker cp do container web
-            r2 = subprocess.run(
-                ['docker', 'ps', '-q', '-f', f'name={slug}_web'],
-                capture_output=True, text=True,
-            )
-            web_ctr = r2.stdout.strip().splitlines()[0] if r2.stdout.strip() else None
+            web_ctr = container_local(slug, 'web')
             if web_ctr:
                 media_tmp = backup_base / f'_media_tmp_{timestamp}'
                 media_tmp.mkdir(parents=True, exist_ok=True)
@@ -285,13 +322,23 @@ def task_backup_cliente(self, cliente_id, backup_id):
             _prog(80)
 
             # 3. Arquivos de configuração do cliente
-            clientes_base = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes'))
-            cliente_dir = clientes_base / slug
-            if cliente_dir.exists():
-                tar.add(str(cliente_dir), arcname='config')
+            if config_files is not None:
+                if config_files:
+                    for rel, conteudo in config_files.items():
+                        data = base64.b64decode(conteudo)
+                        info = tarfile.TarInfo(name=f'config/{rel}')
+                        info.size = len(data)
+                        tar.addfile(info, io.BytesIO(data))
+                else:
+                    avisos.append('Diretorio de configuracao do cliente nao encontrado.')
             else:
-                avisos.append('Diretorio de configuracao do cliente nao encontrado.')
-            _prog(95)
+                clientes_base = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes'))
+                cliente_dir = clientes_base / slug
+                if cliente_dir.exists():
+                    tar.add(str(cliente_dir), arcname='config')
+                else:
+                    avisos.append('Diretorio de configuracao do cliente nao encontrado.')
+            _prog(90)
 
             n_entries = len(tar.getmembers())
 
@@ -307,18 +354,29 @@ def task_backup_cliente(self, cliente_id, backup_id):
             return
 
         tamanho = arquivo.stat().st_size
+
+        # 4. Envia para o bucket (o disco do nó é só temporário) ou, sem bucket
+        # configurado (dev de nó único), mantém o arquivo local.
+        if storage_backup.configurado():
+            caminho = storage_backup.enviar(arquivo, f'clientes/{slug}/{arquivo.name}')
+            arquivo.unlink()
+        else:
+            caminho = str(arquivo)
+            logger.warning('BACKUP_S3_* nao configurado: backup de %s mantido apenas no disco do no.', slug)
+
         BackupCliente.objects.filter(pk=backup_id).update(
             status='concluido',
             progresso=100,
-            arquivo_path=str(arquivo),
+            arquivo_path=caminho,
             tamanho_bytes=tamanho,
             mensagem=' '.join(avisos),
+            no=os.getenv('NODE_HOSTNAME') or socket.gethostname(),
         )
-        logger.info('Backup concluido: %s (%.1f MB)', arquivo, tamanho / 1024 / 1024)
+        logger.info('Backup concluido: %s (%.1f MB)', caminho, tamanho / 1024 / 1024)
         if avisos:
             logger.warning('Backup de %s concluido com avisos: %s', slug, ' '.join(avisos))
 
-        # Manter apenas os 3 mais recentes (arquivos e registros)
+        # Manter apenas os 3 mais recentes (arquivos/objetos e registros)
         todos_arquivos = sorted(backup_base.glob(f'backup_{slug}_*.tar.gz'), key=lambda p: p.stat().st_mtime)
         for antigo in todos_arquivos[:-3]:
             antigo.unlink()
@@ -326,9 +384,16 @@ def task_backup_cliente(self, cliente_id, backup_id):
             BackupCliente.objects.filter(cliente=cliente, status='concluido', origem='automatico')
             .order_by('-criado_em').values_list('pk', flat=True)[:3]
         )
-        BackupCliente.objects.filter(
+        excedentes = BackupCliente.objects.filter(
             cliente=cliente, status='concluido', origem='automatico',
-        ).exclude(pk__in=ids_manter).delete()
+        ).exclude(pk__in=ids_manter)
+        for antigo in excedentes:
+            if storage_backup.eh_remoto(antigo.arquivo_path):
+                try:
+                    storage_backup.apagar(antigo.arquivo_path)
+                except Exception as exc:
+                    logger.warning('Nao foi possivel apagar %s do bucket: %s', antigo.arquivo_path, exc)
+        excedentes.delete()
 
     except Exception as exc:
         if arquivo.exists():
@@ -338,12 +403,51 @@ def task_backup_cliente(self, cliente_id, backup_id):
         raise
 
 
+def _scale_web(slug, replicas):
+    import subprocess
+    subprocess.run(['docker', 'service', 'scale', f'{slug}_web={replicas}'], capture_output=True, timeout=60)
+
+
 @shared_task(bind=True, max_retries=0)
 def task_restaurar_cliente(self, cliente_id, backup_id):
-    import shutil
-    import subprocess
+    """Etapa do manager: derruba o web e despacha a restauração para o nó do cliente.
+
+    `docker service scale` só funciona em nó manager, enquanto o `psql`/volume de
+    mídia só existem no nó do cliente — por isso a restauração é dividida em
+    manager (esta task) → nó (`task_restaurar_no`) → manager (`task_finalizar_restauracao`).
+    """
     import time
     from .models import Cliente, BackupCliente
+    from .nos import fila_do_cliente
+
+    cliente = Cliente.objects.get(pk=cliente_id)
+    slug = cliente.slug
+
+    BackupCliente.objects.filter(pk=backup_id).update(restaurando=True, progresso=0)
+    try:
+        BackupCliente.objects.filter(pk=backup_id).update(progresso=10)
+        _scale_web(slug, 0)
+        time.sleep(10)
+        fila = fila_do_cliente(slug)
+        logger.info('Restauracao de %s despachada para a fila %s', slug, fila)
+        task_restaurar_no.apply_async(args=[str(cliente_id), backup_id], queue=fila)
+    except Exception as exc:
+        # nada foi restaurado: religa o web e libera o backup
+        _scale_web(slug, 1)
+        BackupCliente.objects.filter(pk=backup_id).update(
+            restaurando=False, progresso=100, mensagem_restauracao=f'Erro inesperado: {exc}',
+        )
+        raise
+
+
+@shared_task(bind=True, max_retries=0)
+def task_restaurar_no(self, cliente_id, backup_id):
+    """Etapa do nó: baixa o backup e restaura banco e mídia. Sempre aciona a finalização."""
+    import shutil
+    import subprocess
+    from . import storage_backup
+    from .models import Cliente, BackupCliente
+    from .nos import container_local
 
     def _prog(pct):
         BackupCliente.objects.filter(pk=backup_id).update(progresso=pct)
@@ -351,12 +455,6 @@ def task_restaurar_cliente(self, cliente_id, backup_id):
     cliente = Cliente.objects.get(pk=cliente_id)
     backup = BackupCliente.objects.get(pk=backup_id)
     slug = cliente.slug
-    arquivo = Path(backup.arquivo_path)
-
-    if not arquivo.exists():
-        raise FileNotFoundError(f'Arquivo de backup não encontrado: {arquivo}')
-
-    BackupCliente.objects.filter(pk=backup_id).update(restaurando=True, progresso=0)
 
     # .resolve() garante um caminho absoluto com drive letter no Windows -
     # sem isso, 'docker run -v <path>:...' rejeita o caminho ("not a valid
@@ -367,10 +465,15 @@ def task_restaurar_cliente(self, cliente_id, backup_id):
     avisos = []
 
     try:
-        # 1. Para o serviço web do cliente
-        _prog(10)
-        subprocess.run(['docker', 'service', 'scale', f'{slug}_web=0'], capture_output=True, timeout=60)
-        time.sleep(10)
+        # 1. Obtém o arquivo (do bucket ou do disco local)
+        _prog(20)
+        if storage_backup.eh_remoto(backup.arquivo_path):
+            arquivo = restore_dir / '_backup.tar.gz'
+            storage_backup.baixar(backup.arquivo_path, arquivo)
+        else:
+            arquivo = Path(backup.arquivo_path)
+            if not arquivo.exists():
+                raise FileNotFoundError(f'Arquivo de backup não encontrado: {arquivo}')
 
         # 2. Extrai o backup
         _prog(25)
@@ -380,11 +483,7 @@ def task_restaurar_cliente(self, cliente_id, backup_id):
         # 3. Restaura o banco de dados
         _prog(40)
         db_sql = restore_dir / 'db.sql'
-        r = subprocess.run(
-            ['docker', 'ps', '-q', '-f', f'name={slug}_db'],
-            capture_output=True, text=True,
-        )
-        db_ctr = r.stdout.strip().splitlines()[0] if r.stdout.strip() else None
+        db_ctr = container_local(slug, 'db')
         if not db_sql.exists():
             avisos.append('Backup nao contem db.sql - banco nao foi restaurado.')
         elif not db_ctr:
@@ -428,14 +527,25 @@ def task_restaurar_cliente(self, cliente_id, backup_id):
         raise
     finally:
         shutil.rmtree(restore_dir, ignore_errors=True)
-        subprocess.run(['docker', 'service', 'scale', f'{slug}_web=1'], capture_output=True, timeout=60)
-        BackupCliente.objects.filter(pk=backup_id).update(
-            restaurando=False, progresso=100, mensagem_restauracao=' '.join(avisos),
-        )
+        BackupCliente.objects.filter(pk=backup_id).update(mensagem_restauracao=' '.join(avisos))
         if avisos:
             logger.warning('Restauracao de %s concluida com avisos: %s', slug, ' '.join(avisos))
+        # Religar o web é feito no manager, mesmo se a restauração falhou
+        task_finalizar_restauracao.apply_async(args=[str(cliente_id), backup_id])
 
-    logger.info('Restauração concluída para %s a partir de %s', slug, arquivo.name)
+    logger.info('Restauração concluída para %s a partir de %s', slug, backup.arquivo_path)
+
+
+@shared_task
+def task_finalizar_restauracao(cliente_id, backup_id):
+    """Etapa do manager: religa o web do cliente e libera o backup."""
+    from .models import Cliente, BackupCliente
+
+    cliente = Cliente.objects.get(pk=cliente_id)
+    try:
+        _scale_web(cliente.slug, 1)
+    finally:
+        BackupCliente.objects.filter(pk=backup_id).update(restaurando=False, progresso=100)
 
 
 @shared_task

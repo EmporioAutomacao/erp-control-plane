@@ -1,0 +1,32 @@
+# docker-compose.rustfs-dev.yml — armazenamento S3-compatível (RustFS) para testar backups em dev
+#
+# Uso:
+#   docker compose -f docker-compose.rustfs-dev.yml up -d
+#
+# S3:      http://localhost:9000   (BACKUP_S3_ENDPOINT)
+# Console: http://localhost:9001
+# Crie o bucket uma vez (veja "Teste local" em docs/registry/backup-multi-no.md) e aponte o .env:
+#   BACKUP_S3_ENDPOINT=http://localhost:9000
+#   BACKUP_S3_BUCKET=cp-backups
+#   BACKUP_S3_ACCESS_KEY=rustfsdev
+#   BACKUP_S3_SECRET_KEY=rustfsdev-secret
+
+name: rustfs-dev
+
+services:
+  rustfs:
+    image: rustfs/rustfs:latest
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-rustfsdev}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-rustfsdev-secret}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_CONSOLE_ENABLE: "true"
+    ports:
+      - "9000:9000"   # API S3
+      - "9001:9001"   # console web
+    volumes:
+      - rustfs_data:/data
+
+volumes:
+  rustfs_data:

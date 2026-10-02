@@ -11,7 +11,10 @@ from django.test import Client, SimpleTestCase, TestCase
 from django.urls import reverse
 
 from registry.models import BackupCliente, Cliente, Plano
-from registry.tasks import task_backup_cliente, task_restaurar_cliente
+from registry.tasks import (
+    task_backup_cliente, task_finalizar_restauracao, task_iniciar_backup_cliente,
+    task_restaurar_cliente, task_restaurar_no,
+)
 
 
 def _make_tar_bytes(members):
@@ -28,9 +31,9 @@ def _fake_run(cmd, *args, **kwargs):
     """Simula `docker ps` / `docker exec pg_dump` / `docker cp` conforme o comando recebido."""
     if cmd[:2] == ['docker', 'ps']:
         alvo = cmd[-1]
-        if alvo.endswith('_db') and getattr(_fake_run, 'db_ctr', None):
+        if '_db' in alvo and getattr(_fake_run, 'db_ctr', None):
             return SimpleNamespace(stdout=_fake_run.db_ctr, stderr='', returncode=0)
-        if alvo.endswith('_web') and getattr(_fake_run, 'web_ctr', None):
+        if '_web' in alvo and getattr(_fake_run, 'web_ctr', None):
             return SimpleNamespace(stdout=_fake_run.web_ctr, stderr='', returncode=0)
         return SimpleNamespace(stdout='', stderr='', returncode=0)
     if cmd[1] == 'exec' and 'pg_dump' in cmd:
@@ -147,7 +150,122 @@ class TaskBackupClienteTests(SimpleTestCase):
         self.assertEqual(len(self._backup_files()), 1)
 
 
-class TaskRestaurarClienteTests(SimpleTestCase):
+_ENV_BUCKET = {
+    'BACKUP_S3_ENDPOINT': 'http://rustfs:9000', 'BACKUP_S3_BUCKET': 'b',
+    'BACKUP_S3_ACCESS_KEY': 'k', 'BACKUP_S3_SECRET_KEY': 's',
+}
+
+
+class BackupMultiNoTests(SimpleTestCase):
+    """Config por argumento, envio ao bucket e despacho por fila."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+        self.cp_backup_dir = Path(self.tmpdir.name) / 'backups'
+        env = patch.dict('os.environ', {
+            'CP_BACKUP_DIR': str(self.cp_backup_dir),
+            'CLIENTES_BASE_PATH': str(Path(self.tmpdir.name) / 'clientes'),
+        })
+        env.start()
+        self.addCleanup(env.stop)
+        self.cliente = SimpleNamespace(pk='cliente-id', slug='acme')
+        p = patch('registry.models.Cliente.objects.get', return_value=self.cliente)
+        p.start()
+        self.addCleanup(p.stop)
+        self.filter_mock = MagicMock()
+        self.filter_mock.return_value.order_by.return_value.values_list.return_value = []
+        p = patch('registry.models.BackupCliente.objects.filter', self.filter_mock)
+        p.start()
+        self.addCleanup(p.stop)
+        _fake_run.db_ctr = 'db-ctr\n'
+        _fake_run.web_ctr = None
+        _fake_run.pg_dump_stdout = b'-- dump'
+        _fake_run.pg_dump_stderr = b''
+        _fake_run.pg_dump_returncode = 0
+        _fake_run.docker_cp_stderr = b''
+        _fake_run.docker_cp_returncode = 0
+        p = patch('subprocess.run', side_effect=_fake_run)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def _update_final(self):
+        return [
+            c.kwargs for c in self.filter_mock.return_value.update.call_args_list if 'status' in c.kwargs
+        ][-1]
+
+    def _tars_locais(self):
+        return list((self.cp_backup_dir / 'clientes' / 'acme').glob('*.tar.gz'))
+
+    def test_config_recebido_por_argumento_entra_no_tar_sem_ler_o_disco(self):
+        import base64
+        config = {'.env': base64.b64encode(b'FOO=bar').decode()}
+
+        task_backup_cliente('cliente-id', 'backup-id', config_files=config)
+
+        with tarfile.open(self._tars_locais()[0]) as tar:
+            self.assertIn('config/.env', tar.getnames())
+            self.assertIn('db.sql', tar.getnames())
+
+    def test_config_vazio_gera_aviso(self):
+        task_backup_cliente('cliente-id', 'backup-id', config_files={})
+        self.assertIn('configuracao', self._update_final()['mensagem'])
+
+    def test_com_bucket_envia_remove_arquivo_local_e_grava_chave(self):
+        with patch.dict('os.environ', _ENV_BUCKET), \
+                patch('registry.storage_backup.enviar', side_effect=lambda f, c: f's3://{c}') as enviar:
+            task_backup_cliente('cliente-id', 'backup-id', config_files={})
+
+        chave = enviar.call_args.args[1]
+        self.assertTrue(chave.startswith('clientes/acme/backup_acme_'))
+        self.assertEqual(self._update_final()['arquivo_path'], f's3://{chave}')
+        self.assertEqual(self._tars_locais(), [])
+
+    def test_falha_no_envio_marca_erro(self):
+        with patch.dict('os.environ', _ENV_BUCKET), \
+                patch('registry.storage_backup.enviar', side_effect=RuntimeError('bucket fora')):
+            with self.assertRaises(RuntimeError):
+                task_backup_cliente('cliente-id', 'backup-id', config_files={})
+
+        self.assertEqual(self._update_final()['status'], 'erro')
+        self.assertEqual(self._tars_locais(), [])
+
+    def test_iniciar_despacha_para_a_fila_do_no_com_o_config(self):
+        cfg = Path(self.tmpdir.name) / 'clientes' / 'acme'
+        cfg.mkdir(parents=True)
+        (cfg / '.env').write_text('X=1', encoding='utf-8')
+
+        with patch('registry.nos.hostname_do_no', return_value='worker-1'), \
+                patch('registry.tasks.task_backup_cliente.apply_async') as apply_async:
+            task_iniciar_backup_cliente('cliente-id', 'backup-id')
+
+        kwargs = apply_async.call_args.kwargs
+        self.assertEqual(kwargs['queue'], 'no.worker-1')
+        self.assertEqual(list(kwargs['kwargs']['config_files']), ['.env'])
+
+
+class NosTests(SimpleTestCase):
+    def test_hostname_do_no_le_a_primeira_linha(self):
+        from registry import nos
+        with patch('subprocess.run', return_value=SimpleNamespace(stdout='worker-3\n', returncode=0)):
+            self.assertEqual(nos.hostname_do_no('acme'), 'worker-3')
+            self.assertEqual(nos.fila_do_cliente('acme'), 'no.worker-3')
+
+    def test_sem_swarm_cai_na_fila_padrao(self):
+        from registry import nos
+        with patch('subprocess.run', return_value=SimpleNamespace(stdout='', returncode=1)):
+            self.assertEqual(nos.fila_do_cliente('acme'), 'celery')
+        with patch('subprocess.run', side_effect=FileNotFoundError):
+            self.assertEqual(nos.fila_do_cliente('acme'), 'celery')
+
+    def test_filtro_do_container_e_ancorado(self):
+        from registry import nos
+        with patch('subprocess.run', return_value=SimpleNamespace(stdout='abc\n', returncode=0)) as run:
+            self.assertEqual(nos.container_local('acme', 'db'), 'abc')
+        self.assertEqual(run.call_args.args[0][-1], 'name=^acme_db(\\.|$)')
+
+
+class TaskRestaurarNoTests(SimpleTestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmpdir.cleanup)
@@ -174,9 +292,9 @@ class TaskRestaurarClienteTests(SimpleTestCase):
         self.filter_patch.start()
         self.addCleanup(self.filter_patch.stop)
 
-        self.sleep_patch = patch('time.sleep')
-        self.sleep_patch.start()
-        self.addCleanup(self.sleep_patch.stop)
+        self.finalizar_patch = patch('registry.tasks.task_finalizar_restauracao.apply_async')
+        self.finalizar_mock = self.finalizar_patch.start()
+        self.addCleanup(self.finalizar_patch.stop)
 
         self.db_ctr = None
         self.web_ctr = None
@@ -190,7 +308,7 @@ class TaskRestaurarClienteTests(SimpleTestCase):
                 return SimpleNamespace(stdout='', stderr=b'', returncode=0)
             if cmd[:2] == ['docker', 'ps']:
                 alvo = cmd[-1]
-                if alvo.endswith('_db') and self.db_ctr:
+                if '_db' in alvo and self.db_ctr:
                     return SimpleNamespace(stdout=self.db_ctr, stderr='', returncode=0)
                 return SimpleNamespace(stdout='', stderr='', returncode=0)
             if cmd[1] == 'exec' and 'psql' in cmd:
@@ -220,7 +338,7 @@ class TaskRestaurarClienteTests(SimpleTestCase):
     def test_backup_sem_db_sql_e_sem_media_gera_avisos(self):
         self._escrever_backup({'config/.env': b'X=1'})
 
-        task_restaurar_cliente(cliente_id='cliente-id', backup_id='backup-id')
+        task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id')
 
         mensagem = self._mensagem_restauracao()
         self.assertIn('db.sql', mensagem)
@@ -229,7 +347,7 @@ class TaskRestaurarClienteTests(SimpleTestCase):
     def test_container_db_nao_encontrado_gera_aviso(self):
         self._escrever_backup({'db.sql': b'-- dump'})
 
-        task_restaurar_cliente(cliente_id='cliente-id', backup_id='backup-id')
+        task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id')
 
         mensagem = self._mensagem_restauracao()
         self.assertIn('acme_db', mensagem)
@@ -241,7 +359,7 @@ class TaskRestaurarClienteTests(SimpleTestCase):
         self.psql_stderr = b'ERROR:  relation "produtos" does not exist'
         self._escrever_backup({'db.sql': b'-- dump quebrado'})
 
-        task_restaurar_cliente(cliente_id='cliente-id', backup_id='backup-id')
+        task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id')
 
         mensagem = self._mensagem_restauracao()
         self.assertIn('relation "produtos" does not exist', mensagem)
@@ -250,7 +368,7 @@ class TaskRestaurarClienteTests(SimpleTestCase):
         self.db_ctr = 'db-ctr\n'
         self._escrever_backup({'db.sql': b'-- dump ok', 'media/foo.txt': b'x'})
 
-        task_restaurar_cliente(cliente_id='cliente-id', backup_id='backup-id')
+        task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id')
 
         self.assertEqual(self._mensagem_restauracao(), '')
 
@@ -258,7 +376,7 @@ class TaskRestaurarClienteTests(SimpleTestCase):
         self.db_ctr = 'db-ctr\n'
         self._escrever_backup({'db.sql': b'-- dump', 'media/foo.txt': b'x'})
 
-        task_restaurar_cliente(cliente_id='cliente-id', backup_id='backup-id')
+        task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id')
 
         docker_run_calls = [
             call for call in self.run_mock.call_args_list
@@ -270,6 +388,63 @@ class TaskRestaurarClienteTests(SimpleTestCase):
         # (drive letter do Windows), entao separamos pelos 2 ultimos ':'.
         host_path = volume_arg.rsplit(':', 2)[0]
         self.assertTrue(Path(host_path).is_absolute())
+
+    def test_finalizacao_e_sempre_acionada_mesmo_com_erro(self):
+        # arquivo de backup inexistente -> FileNotFoundError, mas o web precisa religar
+        with self.assertRaises(FileNotFoundError):
+            task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id')
+
+        self.finalizar_mock.assert_called_once()
+        self.assertIn('Erro inesperado', self._mensagem_restauracao())
+
+    def test_backup_remoto_e_baixado_do_bucket(self):
+        self.db_ctr = 'db-ctr\n'
+        self.backup.arquivo_path = 's3://clientes/acme/backup_acme_x.tar.gz'
+        tar_bytes = _make_tar_bytes({'db.sql': b'-- dump', 'media/foo.txt': b'x'})
+
+        def _baixar(caminho, destino):
+            Path(destino).write_bytes(tar_bytes)
+
+        with patch('registry.storage_backup.baixar', side_effect=_baixar) as baixar:
+            task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id')
+
+        baixar.assert_called_once()
+        self.assertEqual(self._mensagem_restauracao(), '')
+        self.finalizar_mock.assert_called_once()
+
+
+class TaskRestaurarClienteOrquestracaoTests(SimpleTestCase):
+    def setUp(self):
+        self.cliente = SimpleNamespace(pk='cliente-id', slug='acme')
+        for nome, alvo, kw in [
+            ('cliente_get', 'registry.models.Cliente.objects.get', {'return_value': self.cliente}),
+            ('filtro', 'registry.models.BackupCliente.objects.filter', {}),
+            ('sleep', 'time.sleep', {}),
+            ('scale_web', 'registry.tasks._scale_web', {}),
+        ]:
+            p = patch(alvo, **kw)
+            setattr(self, nome, p.start())
+            self.addCleanup(p.stop)
+
+    def test_despacha_para_a_fila_do_no_do_cliente(self):
+        with patch('registry.nos.hostname_do_no', return_value='worker-2'), \
+                patch('registry.tasks.task_restaurar_no.apply_async') as apply_async:
+            task_restaurar_cliente(cliente_id='cliente-id', backup_id='backup-id')
+
+        self.scale_web.assert_called_once_with('acme', 0)
+        apply_async.assert_called_once_with(args=['cliente-id', 'backup-id'], queue='no.worker-2')
+
+    def test_falha_no_despacho_religa_o_web(self):
+        with patch('registry.nos.hostname_do_no', return_value=None), \
+                patch('registry.tasks.task_restaurar_no.apply_async', side_effect=RuntimeError('redis fora')):
+            with self.assertRaises(RuntimeError):
+                task_restaurar_cliente(cliente_id='cliente-id', backup_id='backup-id')
+
+        self.assertEqual([c.args for c in self.scale_web.call_args_list], [('acme', 0), ('acme', 1)])
+
+    def test_finalizar_religa_o_web(self):
+        task_finalizar_restauracao('cliente-id', 'backup-id')
+        self.scale_web.assert_called_once_with('acme', 1)
 
 
 class UploadBackupViewTests(TestCase):

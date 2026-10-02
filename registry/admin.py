@@ -606,10 +606,10 @@ class ClienteAdmin(ModelAdmin):
 
     def _view_backup(self, request, pk):
         from django.contrib import messages
-        from .tasks import task_backup_cliente
+        from .tasks import task_iniciar_backup_cliente
         cliente = get_object_or_404(Cliente, pk=pk)
         backup = BackupCliente.objects.create(cliente=cliente)
-        task_backup_cliente.delay(str(cliente.pk), backup.pk)
+        task_iniciar_backup_cliente.delay(str(cliente.pk), backup.pk)
         messages.success(request, f'Backup iniciado para "{cliente.slug}". Recarregue a página para ver o status.')
         return redirect('admin:registry_cliente_change', pk)
 
@@ -618,6 +618,7 @@ class ClienteAdmin(ModelAdmin):
         from datetime import datetime
         from pathlib import Path
         from django.contrib import messages
+        from . import storage_backup
 
         cliente = get_object_or_404(Cliente, pk=pk)
 
@@ -649,12 +650,24 @@ class ClienteAdmin(ModelAdmin):
                 messages.error(request, 'Arquivo inválido: não é um .tar.gz legível.')
                 return redirect('admin:registry_cliente_backup_upload', pk)
 
+            tamanho = destino.stat().st_size
+            caminho = str(destino)
+            if storage_backup.configurado():
+                # o web roda no manager; o worker de outro nó só enxerga o bucket
+                try:
+                    caminho = storage_backup.enviar(destino, f'clientes/{cliente.slug}/{destino.name}')
+                except Exception as exc:
+                    messages.error(request, f'Falha ao enviar o backup para o armazenamento: {exc}')
+                    return redirect('admin:registry_cliente_backup_upload', pk)
+                finally:
+                    destino.unlink(missing_ok=True)
+
             BackupCliente.objects.create(
                 cliente=cliente,
                 status='concluido',
                 progresso=100,
-                arquivo_path=str(destino),
-                tamanho_bytes=destino.stat().st_size,
+                arquivo_path=caminho,
+                tamanho_bytes=tamanho,
                 origem='manual',
                 mensagem=' '.join(avisos),
             )
@@ -670,9 +683,13 @@ class ClienteAdmin(ModelAdmin):
 
     def _view_download_backup(self, request, pk, backup_id):
         from pathlib import Path
+        from . import storage_backup
         backup = get_object_or_404(BackupCliente, pk=backup_id, cliente__pk=pk)
         if backup.status != 'concluido' or not backup.arquivo_path:
             raise Http404
+        if storage_backup.eh_remoto(backup.arquivo_path):
+            nome = backup.arquivo_path.rsplit('/', 1)[-1]
+            return redirect(storage_backup.url_download(backup.arquivo_path, nome))
         arquivo = Path(backup.arquivo_path)
         if not arquivo.exists():
             raise Http404

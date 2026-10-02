@@ -414,6 +414,7 @@ class BackupCliente(models.Model):
     mensagem = models.TextField(blank=True)
     origem = models.CharField(max_length=20, choices=ORIGEM_CHOICES, default='automatico')
     mensagem_restauracao = models.TextField(blank=True)
+    no = models.CharField('nó do Swarm', max_length=100, blank=True)
 
     class Meta:
         verbose_name = 'Backup'
