@@ -1,0 +1,70 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Atualizar o CP para {{ versao }}{% endblock %}
+
+{% block content %}
+<style>
+  .atz-hero {
+    background: linear-gradient(135deg, #2563eb, #7c3aed);
+    border-radius: 16px;
+    padding: 28px 32px;
+    margin-bottom: 24px;
+    color: #fff;
+  }
+  .atz-hero h1 { margin: 0 0 6px; font-size: 22px; font-weight: 800; }
+  .atz-hero p  { margin: 0; opacity: .9; font-size: 14px; }
+  .atz-card {
+    border: 1px solid var(--color-base-200, #e2e8f0);
+    border-radius: 14px;
+    padding: 24px;
+    background: var(--color-base-50, #f8fafc);
+    max-width: 640px;
+  }
+  .dark .atz-card { border-color: oklch(30% .02 264); background: oklch(20% .025 264); }
+  .atz-warn {
+    background: rgba(234,179,8,.08);
+    border: 1px solid rgba(234,179,8,.35);
+    border-radius: 10px;
+    padding: 14px 18px;
+    font-size: 13px;
+    margin: 18px 0;
+    line-height: 1.6;
+  }
+  .atz-warn ul { margin: 8px 0 0 18px; padding: 0; }
+  .atz-botoes { display: flex; gap: 12px; align-items: center; margin-top: 8px; }
+  .atz-ok {
+    background: #2563eb; color: #fff; border: 0; border-radius: 8px;
+    padding: 10px 22px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .atz-cancelar { font-size: 14px; }
+</style>
+
+<div class="atz-hero">
+  <h1>Atualizar o CP</h1>
+  <p>{{ versao_atual }} &rarr; <strong>{{ versao }}</strong></p>
+</div>
+
+<div class="atz-card">
+  <p>O CP vai baixar a imagem <code>{{ repositorio }}:{{ versao }}</code> e atualizar os serviços
+     <strong>celery, beat, agente-no e web</strong> (nessa ordem). O banco e o Redis não são tocados.</p>
+
+  <div class="atz-warn">
+    <strong>Antes de confirmar:</strong>
+    <ul>
+      <li>O painel e as tarefas ficam indisponíveis por alguns instantes durante a troca; esta tela pode sair do ar.</li>
+      <li>As migrations da nova versão rodam automaticamente. Não há como voltar à versão anterior pelo painel.</li>
+      <li><strong>Depois, ajuste <code>CP_VERSION={{ versao }}</code> no stack do Portainer.</strong>
+          Sem isso, um redeploy do stack volta o CP para a versão antiga.</li>
+    </ul>
+  </div>
+
+  <form method="post">
+    {% csrf_token %}
+    <div class="atz-botoes">
+      <button type="submit" class="atz-ok">Confirmar atualização para {{ versao }}</button>
+      <a class="atz-cancelar" href="{{ voltar_url }}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

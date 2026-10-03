@@ -577,6 +577,18 @@ def task_verificar_armazenamento():
 
 
 @shared_task
+def task_verificar_atualizacao():
+    """Consulta o Docker Hub e atualiza a versão disponível do CP (Configurações > Verificar Atualizações).
+
+    Agendar no django-celery-beat (ex.: a cada 6 horas), como o health check.
+    """
+    from . import atualizacoes
+    resultado = atualizacoes.verificar_e_registrar()
+    logger.info('Verificacao de atualizacoes do CP: %s - %s', resultado['status'], resultado['mensagem'])
+    return resultado['status']
+
+
+@shared_task
 def task_verificar_saude_cliente(cliente_id):
     from .models import Cliente, VerificacaoSaude
     import json

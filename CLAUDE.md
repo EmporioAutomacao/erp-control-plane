@@ -79,6 +79,7 @@ Cada etapa de provisionamento é registrada em `ProvisionamentoLog` via `MotorPr
 | `AtualizacaoVersao` | `registry_atualizacaoversao` | Histórico de upgrades de versão |
 | `VerificacaoSaude` | `registry_verificacao_saude` | Snapshots de health check |
 | `ConfiguracaoEmail` | `registry_configuracaoemail` | Singleton com credenciais SMTP (pk=1 sempre) |
+| `ConfiguracaoAtualizacao` | `registry_configuracaoatualizacao` | Singleton (pk=1) da tela Verificar Atualizações: repositório Docker Hub do CP, usuário/token (criptografado, opcionais), status da conexão, versão disponível em cache e registro da última atualização iniciada pelo painel |
 | `ConfiguracaoArmazenamento` | `registry_configuracaoarmazenamento` | Singleton (pk=1) com a conexão S3/RustFS dos backups (endpoint, bucket, access key, secret key **criptografada**) e o sinalizador `status_conexao` |
 | `BackupCliente` | `registry_backupcliente` | Registro de cada backup por cliente (status, progresso, caminho do arquivo) |
 | `InstalacaoAgente` | `registry_instalacaoagente` | Cache das `SyncInstallation` do ERP de um cliente (uma por loja/máquina) — versão do SyncAgent/PDV instalada. Reconciliado por `registry.cp_pull.ColetorVersoes` |
@@ -127,6 +128,7 @@ Todos os módulos têm `preco_mensal=0.00` — a cobrança é feita pelo plano. 
 | `task_restaurar_cliente` | Etapa do manager: escala web=0 e despacha `task_restaurar_no` para a fila do nó. |
 | `task_restaurar_no` | Roda no nó: baixa o backup do bucket, restaura DB via psql e mídia via container alpine. Sempre aciona `task_finalizar_restauracao`, mesmo com erro. |
 | `task_verificar_armazenamento` | Testa a conexão com o bucket e atualiza o sinalizador de `ConfiguracaoArmazenamento`. Agendar no django-celery-beat (ex.: a cada 15 min), como o health check |
+| `task_verificar_atualizacao` | Consulta o Docker Hub e grava a versão disponível do CP (Configurações > Verificar Atualizações). Agendar no django-celery-beat (ex.: a cada 6 h) |
 | `task_finalizar_restauracao` | Etapa do manager: reinicia web=1 e libera o backup. |
 
 ### Infraestrutura por cliente
@@ -174,6 +176,14 @@ HTML puro com estilos inline (compatível com clientes de e-mail). Visual dark m
 - **Ações em lote:** `acao_reprovisionar`, `acao_destruir`
 - **URLs customizadas:** `/<pk>/reprovisionar/`, `/<pk>/destruir/`, `/<pk>/reenviar-boas-vindas/`, `/<pk>/coletar-versoes/`, `/<pk>/backup/`, `/<pk>/backups/<id>/download/`, `/<pk>/backups/<id>/restaurar/`, `/<pk>/backups/<id>/status/`
 
+### ConfiguracaoAtualizacaoAdmin (Configurações > Verificar Atualizações)
+
+- Singleton; o item da sidebar redireciona direto ao formulário. Mostra **versão atual** (`settings.VERSION`), **versão disponível** (maior tag `X.Y.Z` do repositório no Docker Hub, comparação numérica) e a situação (Atualizado / Atualização disponível / Não foi possível verificar / Não verificado), atualizadas ao vivo ao abrir a tela (`verificar/`, cache de 60 s; **Verificar agora** força).
+- A lista de tags de `emporioautomacao/ararasuite-cp` é **pública**: usuário/token do Docker Hub são opcionais (token criptografado, nunca reexibido).
+- **Botão Atualizar** (`atualizar/<versao>/`: GET confirma, POST executa; **só superusuário**): lógica em `registry/atualizacoes.py`. Um **container auxiliar destacado** (imagem atual do `web`, `docker.sock` + `/root/.docker`) roda `docker service update --with-registry-auth --update-failure-action rollback --detach=false --image <repo>:<versão>` em `celery` → `beat` → `agente-no` → `web` (web por último; `db`/`redis` nunca). Recusa downgrade/mesma versão, versão inexistente no Docker Hub, ambiente sem Swarm manager, stack não identificado e atualização em andamento. Em dev (sem Swarm) o botão não aparece.
+- O log fica no container auxiliar (`cp-atualizador-<versão>-<ts>`, sem `--rm`) e a tela mostra Em andamento / Concluída / Falhou com as últimas linhas.
+- **Depois de atualizar, ajustar `CP_VERSION` no stack do Portainer** — o painel altera os serviços direto no Swarm; um redeploy do stack com `CP_VERSION` antigo desfaria a atualização. Doc: `docs/registry/release-verificar-atualizacoes.md`.
+
 ### ConfiguracaoArmazenamentoAdmin (Configurações > Armazenamento)
 
 - Singleton (Add oculto se já existe; Delete desativado). Campos: endpoint de acesso, endpoint público, bucket, access key, secret key, região.
@@ -197,7 +207,7 @@ Definida em `core/settings.py` via `UNFOLD["SIDEBAR"]["navigation"]`. Grupos:
 |---|---|
 | Clientes | Clientes, Planos, Módulos, Hosts de Infraestrutura, Verificações de Saúde |
 | Agendamentos | Tarefas Periódicas, Intervalos, Crontabs |
-| Configurações | E-Mail, Cloudflare, Armazenamento, Ajuda |
+| Configurações | E-Mail, Cloudflare, Armazenamento, Verificar Atualizações, Ajuda |
 
 CSS customizado em `registry/static/registry/admin_custom.css` — melhora visibilidade de inputs no dark mode (bordas e fundo distintos do background).
 

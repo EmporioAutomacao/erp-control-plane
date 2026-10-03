@@ -6,7 +6,7 @@ from django.urls import path
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.html import escape, format_html, mark_safe
 from unfold.admin import ModelAdmin
-from .models import Modulo, Plano, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare, ConfiguracaoArmazenamento, BackupCliente, VersaoAgente, SincronizacaoVersoesAgente, InstalacaoAgente
+from .models import Modulo, Plano, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare, ConfiguracaoArmazenamento, ConfiguracaoAtualizacao, BackupCliente, VersaoAgente, SincronizacaoVersoesAgente, InstalacaoAgente
 
 
 @admin.register(Modulo)
@@ -1436,6 +1436,276 @@ class ConfiguracaoArmazenamentoAdmin(ModelAdmin):
 
     def has_add_permission(self, request):
         return not ConfiguracaoArmazenamento.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+_ATZ_SITUACAO_CORES = {
+    'atualizado': '#16a34a',
+    'disponivel': '#2563eb',
+    'indisponivel': '#dc2626',
+    'nao_verificado': '#6b7280',
+}
+_ATZ_SITUACAO_ROTULOS = {
+    'atualizado': 'Atualizado',
+    'disponivel': 'Atualização disponível',
+    'indisponivel': 'Não foi possível verificar',
+    'nao_verificado': 'Não verificado',
+}
+_ATZ_ESTADO_ROTULOS = {
+    'em_andamento': ('Em andamento', '#d97706'),
+    'concluida': ('Concluída', '#16a34a'),
+    'falhou': ('Falhou', '#dc2626'),
+    'desconhecido': ('Sem informação', '#6b7280'),
+}
+
+
+def _atz_pill(texto, cor, elemento_id=''):
+    return format_html(
+        '<span {} style="display:inline-block;padding:3px 12px;border-radius:12px;background:{};color:#fff;'
+        'font-size:12px;font-weight:600;">{}</span>',
+        mark_safe(f'id="{elemento_id}"') if elemento_id else '', cor, texto,
+    )
+
+
+class _ConfiguracaoAtualizacaoForm(forms.ModelForm):
+    dockerhub_token = forms.CharField(
+        label='Token do Docker Hub',
+        required=False,
+        widget=forms.PasswordInput(render_value=False, attrs={'autocomplete': 'new-password'}),
+    )
+
+    class Meta:
+        model = ConfiguracaoAtualizacao
+        fields = ['repositorio', 'dockerhub_usuario']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.dockerhub_token_cifrado:
+            self.fields['dockerhub_token'].help_text = '•••••••• mantido. Deixe em branco para não alterar.'
+        else:
+            self.fields['dockerhub_token'].help_text = (
+                'Personal Access Token do Docker Hub com permissão somente leitura. '
+                'Fica criptografado no banco e não é exibido depois de salvo.'
+            )
+
+    def clean_repositorio(self):
+        from . import atualizacoes
+        repo = (self.cleaned_data.get('repositorio') or '').strip().strip('/')
+        if not atualizacoes.repositorio_valido(repo):
+            raise forms.ValidationError('Use o formato usuario/repositorio (minúsculas), ex.: emporioautomacao/ararasuite-cp.')
+        return repo
+
+
+@admin.register(ConfiguracaoAtualizacao)
+class ConfiguracaoAtualizacaoAdmin(ModelAdmin):
+    form = _ConfiguracaoAtualizacaoForm
+
+    fieldsets = [
+        ('Versão', {'fields': ['painel_versao']}),
+        ('Docker Hub', {'fields': ['repositorio', 'dockerhub_usuario', 'dockerhub_token']}),
+        ('Status da conexão', {'fields': ['status_badge']}),
+        ('Última atualização iniciada pelo painel', {'fields': ['info_atualizacao']}),
+    ]
+    readonly_fields = ['painel_versao', 'status_badge', 'info_atualizacao']
+
+    def get_urls(self):
+        urls = super().get_urls()
+        return [
+            path('verificar/', self.admin_site.admin_view(self._view_verificar), name='registry_configuracaoatualizacao_verificar'),
+            path('verificar-agora/', self.admin_site.admin_view(self._view_verificar_agora), name='registry_configuracaoatualizacao_verificar_agora'),
+            path('atualizar/<str:versao>/', self.admin_site.admin_view(self._view_atualizar), name='registry_configuracaoatualizacao_atualizar'),
+        ] + urls
+
+    def changelist_view(self, request, extra_context=None):
+        # singleton: o item da sidebar leva direto ao formulário
+        if ConfiguracaoAtualizacao.obter():
+            return redirect('admin:registry_configuracaoatualizacao_change', 1)
+        return redirect('admin:registry_configuracaoatualizacao_add')
+
+    def _voltar(self):
+        if ConfiguracaoAtualizacao.obter():
+            return redirect('admin:registry_configuracaoatualizacao_change', 1)
+        return redirect('admin:registry_configuracaoatualizacao_add')
+
+    def save_model(self, request, obj, form, change):
+        from django.contrib import messages
+        from . import atualizacoes
+        novo = form.cleaned_data.get('dockerhub_token')
+        if novo:
+            obj.definir_token(novo)
+        super().save_model(request, obj, form, change)
+        resultado = atualizacoes.verificar_e_registrar()
+        nivel = messages.SUCCESS if resultado['status'] == 'conectado' else messages.ERROR
+        messages.add_message(request, nivel, f'Consulta ao Docker Hub após salvar: {resultado["mensagem"]}')
+
+    # ── views ────────────────────────────────────────────────────────────────
+
+    def _json(self, resultado):
+        from . import atualizacoes
+        cfg = ConfiguracaoAtualizacao.obter()
+        sit = atualizacoes.situacao(cfg) if cfg else 'nao_verificado'
+        return {
+            'status': resultado['status'], 'rotulo': _ARMAZ_ROTULOS.get(resultado['status'], resultado['status']),
+            'mensagem': resultado['mensagem'], 'disponivel': resultado['disponivel'],
+            'recentes': resultado['recentes'], 'situacao': sit, 'situacao_rotulo': _ATZ_SITUACAO_ROTULOS[sit],
+            'atual': atualizacoes.versao_atual(),
+        }
+
+    def _view_verificar(self, request):
+        """JSON usado pelo formulário para atualizar versão disponível e status ao abrir a tela."""
+        from . import atualizacoes
+        if not self.has_view_permission(request):
+            raise Http404
+        return JsonResponse(self._json(atualizacoes.verificar_e_registrar(usar_cache=True)))
+
+    def _view_verificar_agora(self, request):
+        from django.contrib import messages
+        from . import atualizacoes
+        if not self.has_change_permission(request):
+            raise Http404
+        resultado = atualizacoes.verificar_e_registrar()
+        nivel = messages.SUCCESS if resultado['status'] == 'conectado' else messages.ERROR
+        messages.add_message(request, nivel, resultado['mensagem'])
+        return self._voltar()
+
+    def _view_atualizar(self, request, versao):
+        from django.contrib import messages
+        from django.core.exceptions import PermissionDenied
+        from . import atualizacoes
+        if not request.user.is_superuser:
+            raise PermissionDenied
+        cfg = ConfiguracaoAtualizacao.obter()
+        if not cfg:
+            return self._voltar()
+        if not atualizacoes.ha_atualizacao(atualizacoes.versao_atual(), versao):
+            messages.error(request, f'A versão {versao} não é mais nova que a atual ({atualizacoes.versao_atual()}).')
+            return self._voltar()
+        if request.method == 'POST':
+            try:
+                atualizacoes.iniciar_atualizacao(cfg, versao, request.user)
+            except atualizacoes.ErroAtualizacao as exc:
+                messages.error(request, str(exc))
+            else:
+                messages.warning(
+                    request,
+                    f'Atualização para {versao} iniciada. O painel pode ficar indisponível por instantes. '
+                    f'Depois, ajuste CP_VERSION={versao} no stack do Portainer, senão um redeploy volta a versão antiga.',
+                )
+            return self._voltar()
+        from django.urls import reverse
+        context = {
+            **self.admin_site.each_context(request),
+            'title': f'Atualizar o CP para {versao}',
+            'versao': versao, 'versao_atual': atualizacoes.versao_atual(),
+            'repositorio': cfg.repositorio,
+            'voltar_url': reverse('admin:registry_configuracaoatualizacao_change', args=[1]),
+        }
+        return render(request, 'registry/admin_confirmar_atualizacao.html', context)
+
+    # ── campos somente leitura ───────────────────────────────────────────────
+
+    def painel_versao(self, obj):
+        if not obj or not obj.pk:
+            return 'Salve a configuração para verificar as atualizações.'
+        import json
+        from django.urls import reverse
+        from django.utils.timesince import timesince
+        from . import atualizacoes
+
+        sit = atualizacoes.situacao(obj)
+        swarm = atualizacoes.swarm_manager()
+        url_json = reverse('admin:registry_configuracaoatualizacao_verificar')
+        url_agora = reverse('admin:registry_configuracaoatualizacao_verificar_agora')
+        alvo = obj.versao_disponivel if sit == 'disponivel' else ''
+        base_atualizar = reverse('admin:registry_configuracaoatualizacao_atualizar', args=['9.9.9']).replace('9.9.9/', '')
+        url_atualizar = f'{base_atualizar}{alvo}/' if alvo else ''
+        recentes = ', '.join(obj.versoes_recentes[:6]) or '—'
+        estilo_btn = ('display:inline-block;padding:6px 14px;color:#fff;border-radius:4px;'
+                      'text-decoration:none;font-size:13px;margin-right:8px;')
+        if swarm:
+            botao_atualizar = format_html(
+                '<a id="atz-btn" href="{}" style="{}background:#2563eb;{}">⬆ Atualizar para <span id="atz-btn-versao">{}</span></a>',
+                url_atualizar, mark_safe(estilo_btn), mark_safe('' if alvo else 'display:none;'), alvo,
+            )
+            aviso_swarm = ''
+        else:
+            botao_atualizar = ''
+            aviso_swarm = mark_safe(
+                '<div style="margin-top:8px;color:#6b7280;font-size:12px;">Atualizar pelo painel só está disponível em um '
+                'Swarm manager (indisponível neste ambiente).</div>'
+            )
+        script = (
+            '(function(){'
+            'var cores=' + json.dumps(_ATZ_SITUACAO_CORES) + ';var cs=' + json.dumps(_ARMAZ_CORES) + ';'
+            'function $(i){return document.getElementById(i);}'
+            'if(!$("atz-situacao"))return;$("atz-quando").textContent="verificando agora…";'
+            'fetch(' + json.dumps(url_json) + ',{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){'
+            '$("atz-disponivel").textContent=d.disponivel||"—";'
+            '$("atz-recentes").textContent=(d.recentes||[]).slice(0,6).join(", ")||"—";'
+            '$("atz-situacao").style.background=cores[d.situacao]||"#6b7280";$("atz-situacao").textContent=d.situacao_rotulo;'
+            'var b=$("atz-btn");if(b){if(d.situacao==="disponivel"){'
+            'b.style.display="inline-block";$("atz-btn-versao").textContent=d.disponivel;'
+            'b.href=' + json.dumps(base_atualizar) + '+d.disponivel+"/";}else{b.style.display="none";}}'
+            'var s=$("armaz-badge");if(s){s.style.background=cs[d.status]||"#6b7280";s.textContent="● "+d.rotulo;}'
+            'if($("armaz-msg"))$("armaz-msg").textContent=d.mensagem;'
+            '$("atz-quando").textContent="verificado agora";'
+            '}).catch(function(){$("atz-quando").textContent="não foi possível verificar agora";});'
+            '})();'
+        )
+        return format_html(
+            '<table style="border-collapse:collapse;font-size:14px;">'
+            '<tr><td style="padding:4px 18px 4px 0;color:#6b7280;">Versão atual</td><td><strong>{}</strong></td></tr>'
+            '<tr><td style="padding:4px 18px 4px 0;color:#6b7280;">Versão disponível</td><td><strong id="atz-disponivel">{}</strong></td></tr>'
+            '<tr><td style="padding:4px 18px 4px 0;color:#6b7280;">Situação</td><td>{} <span id="atz-quando" style="margin-left:8px;color:#6b7280;font-size:12px;">{}</span></td></tr>'
+            '<tr><td style="padding:4px 18px 4px 0;color:#6b7280;">Versões recentes</td><td id="atz-recentes">{}</td></tr>'
+            '</table>'
+            '<div style="margin-top:12px;">{}<a href="{}" style="{}background:#417690;">🔄 Verificar agora</a></div>{}'
+            '<div style="margin-top:10px;font-size:12px;color:#92400e;">Ao atualizar pelo painel, ajuste também <code>CP_VERSION</code> '
+            'no stack do Portainer — senão um redeploy volta a versão antiga.</div>'
+            '<script>{}</script>',
+            atualizacoes.versao_atual(), obj.versao_disponivel or '—',
+            _atz_pill(_ATZ_SITUACAO_ROTULOS[sit], _ATZ_SITUACAO_CORES[sit], 'atz-situacao'),
+            f'verificado há {timesince(obj.verificado_em)}' if obj.verificado_em else 'ainda não verificado',
+            recentes, botao_atualizar, url_agora, mark_safe(estilo_btn), aviso_swarm, mark_safe(script),
+        )
+    painel_versao.short_description = 'Versões'
+
+    def status_badge(self, obj):
+        if not obj or not obj.pk:
+            return '—'
+        return format_html(
+            '{}<div id="armaz-msg" style="margin-top:6px;font-size:13px;">{}</div>',
+            _armaz_pill(obj.status_conexao, 'armaz-badge'), obj.status_mensagem or '',
+        )
+    status_badge.short_description = 'Docker Hub'
+
+    def info_atualizacao(self, obj):
+        from django.utils import timezone
+        from . import atualizacoes
+        if not obj or not obj.atualizacao_container:
+            return 'Nenhuma atualização foi iniciada pelo painel.'
+        estado = atualizacoes.estado_atualizacao(obj)
+        rotulo, cor = _ATZ_ESTADO_ROTULOS.get(estado['estado'], _ATZ_ESTADO_ROTULOS['desconhecido'])
+        quem = obj.atualizacao_iniciada_por.get_username() if obj.atualizacao_iniciada_por_id else '—'
+        quando = timezone.localtime(obj.atualizacao_iniciada_em).strftime('%d/%m/%Y %H:%M') if obj.atualizacao_iniciada_em else '—'
+        log = format_html(
+            '<pre style="margin-top:8px;max-height:220px;overflow:auto;background:#0f172a;color:#e2e8f0;padding:10px;'
+            'border-radius:6px;font-size:12px;white-space:pre-wrap;">{}</pre>', estado['log'],
+        ) if estado['log'] else ''
+        aviso = format_html(
+            '<div style="margin-top:6px;font-size:12px;color:#92400e;">Lembre-se de ajustar <code>CP_VERSION={}</code> no stack do Portainer.</div>',
+            obj.atualizacao_alvo,
+        ) if estado['estado'] in ('em_andamento', 'concluida') else ''
+        return format_html(
+            'Para a versão <strong>{}</strong>, iniciada em {} por {}: {}{}{}',
+            obj.atualizacao_alvo, quando, quem, _atz_pill(rotulo, cor), aviso, log,
+        )
+    info_atualizacao.short_description = 'Andamento'
+
+    def has_add_permission(self, request):
+        return not ConfiguracaoAtualizacao.objects.exists()
 
     def has_delete_permission(self, request, obj=None):
         return False

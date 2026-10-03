@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / '.env')
 
-VERSION = '0.0.43'
+VERSION = '0.0.44'
 
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-change-me')
 DEBUG = os.getenv('DEBUG', 'true').lower() in ('1', 'true', 'yes')
@@ -67,6 +67,7 @@ UNFOLD = {
                     {"title": "E-Mail", "icon": "mail", "link": reverse_lazy("admin:registry_configuracaoemail_changelist")},
                     {"title": "Cloudflare", "icon": "cloud", "link": reverse_lazy("admin:registry_configuracaocloudflare_changelist")},
                     {"title": "Armazenamento", "icon": "cloud_upload", "link": reverse_lazy("admin:registry_configuracaoarmazenamento_changelist")},
+                    {"title": "Verificar Atualizações", "icon": "system_update_alt", "link": reverse_lazy("admin:registry_configuracaoatualizacao_changelist")},
                     {"title": "Ajuda", "icon": "help", "link": reverse_lazy("admin_ajuda")},
                 ],
             },

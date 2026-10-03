@@ -453,6 +453,68 @@ class ConfiguracaoArmazenamento(models.Model):
         return bool(self.endpoint and self.bucket and self.access_key and self.secret_key_cifrada)
 
 
+class ConfiguracaoAtualizacao(models.Model):
+    """Verificação de atualizações do próprio CP pelo Docker Hub. Singleton (pk=1).
+
+    Configurada em Admin > Configurações > Verificar Atualizações. O token do Docker Hub é
+    guardado criptografado (`registry.cripto`). Também guarda o cache da última consulta e o
+    registro da última atualização iniciada pelo painel.
+    """
+    STATUS_CHOICES = [
+        ('nao_testado', 'Não verificado'),
+        ('conectado', 'Conectado'),
+        ('erro', 'Erro'),
+    ]
+    repositorio = models.CharField(
+        'Repositório no Docker Hub', max_length=200, default='emporioautomacao/ararasuite-cp',
+        help_text='Imagem do CP, no formato usuario/repositorio.',
+    )
+    dockerhub_usuario = models.CharField(
+        'Usuário do Docker Hub', max_length=200, blank=True,
+        help_text='Vazio = acesso anônimo (só funciona para repositório público).',
+    )
+    dockerhub_token_cifrado = models.TextField('Token do Docker Hub (cifrado)', blank=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    status_conexao = models.CharField('Status da conexão', max_length=20, choices=STATUS_CHOICES, default='nao_testado')
+    status_mensagem = models.TextField('Detalhe do status', blank=True)
+    verificado_em = models.DateTimeField('Verificado em', null=True, blank=True)
+    versao_disponivel = models.CharField('Versão disponível', max_length=30, blank=True)
+    versoes_recentes = models.JSONField('Versões recentes', default=list, blank=True)
+
+    atualizacao_alvo = models.CharField('Versão da última atualização', max_length=30, blank=True)
+    atualizacao_iniciada_em = models.DateTimeField('Atualização iniciada em', null=True, blank=True)
+    atualizacao_iniciada_por = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
+        verbose_name='Atualização iniciada por',
+    )
+    atualizacao_container = models.CharField('Container da atualização', max_length=100, blank=True)
+
+    class Meta:
+        verbose_name = 'Verificar Atualizações'
+        verbose_name_plural = 'Verificar Atualizações'
+
+    def __str__(self):
+        return f'Atualizações de {self.repositorio}'
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def obter(cls):
+        return cls.objects.filter(pk=1).first()
+
+    @property
+    def dockerhub_token(self):
+        from .cripto import decifrar
+        return decifrar(self.dockerhub_token_cifrado)
+
+    def definir_token(self, valor):
+        from .cripto import cifrar
+        self.dockerhub_token_cifrado = cifrar(valor)
+
+
 class BackupCliente(models.Model):
     STATUS_CHOICES = [
         ('em_andamento', 'Em andamento'),
