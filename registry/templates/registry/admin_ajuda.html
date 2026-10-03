@@ -707,7 +707,7 @@
         <td><code>.env</code> e <code>stack.yml</code> do cliente</td>
       </tr>
     </table>
-    <p style="margin-top:10px;">O arquivo é salvo em <code>CP_BACKUP_DIR/clientes/{slug}/backup_{slug}_{timestamp}.tar.gz</code>.<br><strong>Retenção:</strong> 3 backups por cliente. O mais antigo é removido automaticamente.<br><strong>Onde fica:</strong> o backup é gerado no servidor (nó) em que o cliente roda e enviado ao armazenamento de backups (bucket S3). O botão ⬇ Baixar gera um link temporário de download.</p>
+    <p style="margin-top:10px;">O arquivo é enviado ao bucket de backups como <code>clientes/{slug}/backup_{slug}_{timestamp}.tar.gz</code>.<br><strong>Retenção:</strong> 3 backups por cliente. O mais antigo é removido automaticamente.<br><strong>Onde fica:</strong> o backup é gerado no servidor (nó) em que o cliente roda e enviado ao armazenamento de backups (bucket S3). O botão ⬇ Baixar gera um link temporário de download.<br><strong>Conexão com o armazenamento:</strong> cadastrada em <em>Configurações → Armazenamento</em>. A tela mostra o status da conexão — <span class="tag-ok">Conectado</span> (tudo certo), <span class="tag-warn">Atenção</span> (o bucket funciona, mas o endereço público para download não responde) ou <span class="tag-no">Erro</span> (a mensagem explica o motivo). Sem essa configuração, o backup não é iniciado.</p>
   </div>
 
   <div class="ajuda-card">

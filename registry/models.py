@@ -394,6 +394,65 @@ class ConfiguracaoCloudflare(models.Model):
         return cls.objects.filter(pk=1).first()
 
 
+class ConfiguracaoArmazenamento(models.Model):
+    """Conexão S3 (RustFS) onde ficam os backups dos clientes. Singleton (pk=1).
+
+    Configurada em Admin > Configurações > Armazenamento. A chave secreta é guardada
+    criptografada (`registry.cripto`); `status_conexao` é o sinalizador mostrado no admin.
+    """
+    STATUS_CHOICES = [
+        ('nao_testado', 'Não testado'),
+        ('conectado', 'Conectado'),
+        ('atencao', 'Atenção'),
+        ('erro', 'Erro'),
+    ]
+    endpoint = models.CharField(
+        'Endpoint de acesso', max_length=300,
+        help_text='Endereço usado pelo CP e pelos nós para enviar/baixar os backups. Ex.: http://rustfs-s3:9000 (rede interna do Swarm).',
+    )
+    endpoint_publico = models.CharField(
+        'Endpoint público', max_length=300, blank=True,
+        help_text='Endereço alcançável pelo navegador, usado nos links de download. Ex.: https://s3.ararasuite.com.br. Vazio = usa o endpoint de acesso.',
+    )
+    bucket = models.CharField('Bucket', max_length=100, default='cp-backups')
+    access_key = models.CharField('Access key', max_length=200)
+    secret_key_cifrada = models.TextField('Secret key (cifrada)', blank=True)
+    regiao = models.CharField('Região', max_length=50, default='us-east-1')
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    status_conexao = models.CharField('Status da conexão', max_length=20, choices=STATUS_CHOICES, default='nao_testado')
+    status_mensagem = models.TextField('Detalhe do status', blank=True)
+    verificado_em = models.DateTimeField('Verificado em', null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Configuração de Armazenamento'
+        verbose_name_plural = 'Configuração de Armazenamento'
+
+    def __str__(self):
+        return f'{self.bucket} em {self.endpoint}'
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def obter(cls):
+        return cls.objects.filter(pk=1).first()
+
+    @property
+    def secret_key(self):
+        from .cripto import decifrar
+        return decifrar(self.secret_key_cifrada)
+
+    def definir_secret(self, valor):
+        from .cripto import cifrar
+        self.secret_key_cifrada = cifrar(valor)
+
+    @property
+    def completa(self):
+        return bool(self.endpoint and self.bucket and self.access_key and self.secret_key_cifrada)
+
+
 class BackupCliente(models.Model):
     STATUS_CHOICES = [
         ('em_andamento', 'Em andamento'),

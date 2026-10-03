@@ -79,6 +79,7 @@ Cada etapa de provisionamento é registrada em `ProvisionamentoLog` via `MotorPr
 | `AtualizacaoVersao` | `registry_atualizacaoversao` | Histórico de upgrades de versão |
 | `VerificacaoSaude` | `registry_verificacao_saude` | Snapshots de health check |
 | `ConfiguracaoEmail` | `registry_configuracaoemail` | Singleton com credenciais SMTP (pk=1 sempre) |
+| `ConfiguracaoArmazenamento` | `registry_configuracaoarmazenamento` | Singleton (pk=1) com a conexão S3/RustFS dos backups (endpoint, bucket, access key, secret key **criptografada**) e o sinalizador `status_conexao` |
 | `BackupCliente` | `registry_backupcliente` | Registro de cada backup por cliente (status, progresso, caminho do arquivo) |
 | `InstalacaoAgente` | `registry_instalacaoagente` | Cache das `SyncInstallation` do ERP de um cliente (uma por loja/máquina) — versão do SyncAgent/PDV instalada. Reconciliado por `registry.cp_pull.ColetorVersoes` |
 
@@ -125,6 +126,7 @@ Todos os módulos têm `preco_mensal=0.00` — a cobrança é feita pelo plano. 
 | `task_backup_cliente` | Roda **no nó do cliente** (fila `no.<hostname>`): pg_dump + mídia (`/app/media`) + config (recebido por argumento). Envia o `.tar.gz` ao bucket S3 (RustFS) e mantém 3 backups por cliente. |
 | `task_restaurar_cliente` | Etapa do manager: escala web=0 e despacha `task_restaurar_no` para a fila do nó. |
 | `task_restaurar_no` | Roda no nó: baixa o backup do bucket, restaura DB via psql e mídia via container alpine. Sempre aciona `task_finalizar_restauracao`, mesmo com erro. |
+| `task_verificar_armazenamento` | Testa a conexão com o bucket e atualiza o sinalizador de `ConfiguracaoArmazenamento`. Agendar no django-celery-beat (ex.: a cada 15 min), como o health check |
 | `task_finalizar_restauracao` | Etapa do manager: reinicia web=1 e libera o backup. |
 
 ### Infraestrutura por cliente
@@ -172,6 +174,14 @@ HTML puro com estilos inline (compatível com clientes de e-mail). Visual dark m
 - **Ações em lote:** `acao_reprovisionar`, `acao_destruir`
 - **URLs customizadas:** `/<pk>/reprovisionar/`, `/<pk>/destruir/`, `/<pk>/reenviar-boas-vindas/`, `/<pk>/coletar-versoes/`, `/<pk>/backup/`, `/<pk>/backups/<id>/download/`, `/<pk>/backups/<id>/restaurar/`, `/<pk>/backups/<id>/status/`
 
+### ConfiguracaoArmazenamentoAdmin (Configurações > Armazenamento)
+
+- Singleton (Add oculto se já existe; Delete desativado). Campos: endpoint de acesso, endpoint público, bucket, access key, secret key, região.
+- **Secret key criptografada** (`registry/cripto.py`: Fernet derivado de `SECRET_KEY`); o campo nunca reexibe o valor e, vazio, mantém o atual. Trocar a `SECRET_KEY` do CP exige salvar a secret de novo.
+- **Sinalizador de status** (pill 🟢 Conectado / 🟡 Atenção / 🔴 Erro / ⚪ Não testado + mensagem): o change form consulta `verificar/` (JSON) ao abrir e atualiza ao vivo; também no `list_display`. Salvar roda o teste; botão **🔌 Testar conexão agora** (`testar-conexao/`).
+- Teste (`storage_backup.testar_conexao`): `head_bucket` → grava/lê/apaga um objeto em `_cp-healthcheck/` → `GET <endpoint público>/health` (falha aqui = *Atenção*, não *Erro*). Envio de backup bem-sucedido chama `registrar_envio_ok` (não apaga um *Atenção*); falha de envio vira *Erro*.
+- URLs: `/testar-conexao/`, `/verificar/`.
+
 ### ConfiguracaoEmailAdmin
 
 - Singleton — botão "Add" oculto se já existe registro; Delete desativado
@@ -187,7 +197,7 @@ Definida em `core/settings.py` via `UNFOLD["SIDEBAR"]["navigation"]`. Grupos:
 |---|---|
 | Clientes | Clientes, Planos, Módulos, Hosts de Infraestrutura, Verificações de Saúde |
 | Agendamentos | Tarefas Periódicas, Intervalos, Crontabs |
-| Configurações | E-Mail, Ajuda |
+| Configurações | E-Mail, Cloudflare, Armazenamento, Ajuda |
 
 CSS customizado em `registry/static/registry/admin_custom.css` — melhora visibilidade de inputs no dark mode (bordas e fundo distintos do background).
 
@@ -238,8 +248,8 @@ Em produção (Linux/Docker) o prefork padrão funciona normalmente — não adi
 - `registry/nos.py::fila_do_cliente(slug)` descobre o nó via `docker service ps {slug}_db` e devolve a fila `no.<hostname>`; sem Swarm (dev) ou se o serviço não for achado, cai em `celery`.
 - `stack-prod.yml`: o serviço `agente-no` (`mode: global`, `node.role != manager`, entrypoint `entrypoint-agente.sh`, sem `migrate`) consome só `no.<hostname>`. O `celery` do manager consome `celery,no.<hostname-do-manager>`. Cada nó precisa do diretório `/opt/backups/cp` (bind, temporário — o caminho do host tem de ser o mesmo dentro do container por causa do `docker run -v`).
 - O `.env`/`stack.yml` do cliente só existem no manager: `task_iniciar_backup_cliente` os lê e passa em `config_files` (base64) para a task do nó.
-- **Bucket:** `registry/storage_backup.py` (boto3, path-style, config por `BACKUP_S3_*`). Com bucket, `BackupCliente.arquivo_path` guarda `s3://clientes/{slug}/arquivo.tar.gz` e o disco do nó é só temporário; sem `BACKUP_S3_*` (dev de nó único) o arquivo fica em disco local. Download no admin = redirect para link temporário (presigned; o endpoint precisa ser alcançável pelo navegador, ou defina `BACKUP_S3_PUBLIC_ENDPOINT`). Upload manual também vai ao bucket. Retenção apaga os objetos excedentes.
-- **RustFS em produção:** `stack-rustfs.yml` (colar no Portainer; serviço fixo em `servidorubuntuanptruenas`, volume local, Traefik `web`). Os nós falam com ele pela rede overlay externa `storage-net` (`BACKUP_S3_ENDPOINT=http://rustfs-s3:9000`, padrão no `stack-prod.yml`); o navegador usa `BACKUP_S3_PUBLIC_ENDPOINT=https://<S3_DOMAIN>`. Detalhes na seção 10 do guia.
+- **Bucket:** `registry/storage_backup.py` (boto3, path-style) lê a conexão de `ConfiguracaoArmazenamento` (Admin > Configurações > Armazenamento) — **não há variáveis de ambiente nem fallback**; sem cadastro completo, o backup falha cedo com "Armazenamento de backups não configurado". `BackupCliente.arquivo_path` guarda `s3://clientes/{slug}/arquivo.tar.gz` e o disco do nó é só temporário (backups antigos com caminho local continuam sendo baixados/restaurados). Download no admin = redirect para link temporário (presigned, usando o endpoint público). Upload manual também vai ao bucket. Retenção apaga os objetos excedentes.
+- **RustFS em produção:** `stack-rustfs.yml` (colar no Portainer; serviço fixo em `servidorubuntuanptruenas`, volume local, Traefik `web`). O stack cria a rede overlay `storage-net`, que o `stack-prod.yml` anexa a `web`, `celery` e `agente-no`; na tela de Armazenamento use o endpoint de acesso `http://rustfs-s3:9000` e o endpoint público `https://<S3_DOMAIN>`. Detalhes na seção 10 do guia.
 - `BackupCliente.no` guarda o hostname do nó que gerou o backup.
 - Limitação: se o worker do nó não estiver rodando, a task fica na fila e (na restauração) o web do cliente permanece em 0 réplicas até o agente voltar.
 - Guia completo (deploy, verificação, troubleshooting): `docs/registry/backup-multi-no.md`.
@@ -342,5 +352,3 @@ O item "Ajuda" da sidebar (`registry/views.py::admin_ajuda`) é uma view de fun�
 | `ERP_LATEST_VERSION` | `0.0.22` | Versão do ERP para novos clientes (seed de Empresa/Estoque exige ≥ 0.0.104) |
 | `CP_BACKUP_DIR` | `/opt/backups/cp` | Destino dos backups do CLIENTES_BASE_PATH |
 | `CP_BACKUP_MANTER` | `7` | Quantos backups do CLIENTES_BASE_PATH retener (task_backup_clientes) |
-| `BACKUP_S3_ENDPOINT`/`_BUCKET`/`_ACCESS_KEY`/`_SECRET_KEY` | — | Bucket S3-compatível (RustFS) dos backups por cliente. Vazio = backup só em disco local (dev) |
-| `BACKUP_S3_REGION` / `BACKUP_S3_PUBLIC_ENDPOINT` | `us-east-1` / vazio | Região e endereço alcançável pelo navegador (links de download) |

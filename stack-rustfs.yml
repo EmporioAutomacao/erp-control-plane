@@ -17,11 +17,12 @@
 #   RUSTFS_VERSION      opcional     tag da imagem (padrão: latest — prefira fixar uma versão)
 #
 # Como o CP usa este serviço:
-#   - Upload/restauração dos nós vão pela rede interna:  BACKUP_S3_ENDPOINT=http://rustfs-s3:9000
-#     (não passam pelo Cloudflare, que limita o corpo das requisições e cobraria banda).
-#   - O navegador baixa pelo domínio público:            BACKUP_S3_PUBLIC_ENDPOINT=https://<S3_DOMAIN>
+#   Cadastre a conexão em Admin > Configurações > Armazenamento:
+#   - Endpoint de acesso (nós e CP, rede interna):  http://rustfs-s3:9000
+#     (não passa pelo Cloudflare, que limita o corpo das requisições e cobraria banda).
+#   - Endpoint público (links de download):         https://<S3_DOMAIN>
 #   Depois do deploy: entre no console, crie o bucket "cp-backups" e uma access key dedicada para o CP
-#   (não use a conta root nos BACKUP_S3_ACCESS_KEY/SECRET_KEY).
+#   (não use a conta root na tela de Armazenamento). A tela mostra o status da conexão.
 
 version: "3.8"
 

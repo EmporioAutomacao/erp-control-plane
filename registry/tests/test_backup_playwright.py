@@ -10,6 +10,7 @@ from django.test.utils import override_settings
 from django.urls import reverse
 
 from registry.models import BackupCliente, Cliente, Plano
+from registry.tests.helpers_storage import instalar_fake_bucket
 from registry.tests.playwright_base import PlaywrightAdminTestCase
 
 
@@ -64,6 +65,9 @@ class BackupClientePlaywrightTests(PlaywrightAdminTestCase):
         })
         self.env_patch.start()
         self.addCleanup(self.env_patch.stop)
+
+        # o backup grava no bucket (configurado em Admin > Configurações); aqui, um bucket falso
+        self.bucket = instalar_fake_bucket(self)
 
     def _disparar_backup(self):
         url_change = f'{self.live_server_url}{reverse("admin:registry_cliente_change", args=[self.cliente.pk])}'

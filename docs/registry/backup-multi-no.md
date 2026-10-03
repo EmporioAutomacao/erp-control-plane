@@ -3,7 +3,7 @@
 - data: 2026-10-02
 - responsavel: James Flavio
 - status: implementado e validado localmente com RustFS (sem Swarm) — pendente de deploy e de validação em Swarm real
-- versao CP: `0.0.42`
+- versao CP: `0.0.43`
 - app: `registry`
 - repo: `erp-control-plane` (nada muda no `erp`)
 - plano: `vamoz-fazer-a-op-o-sunny-lollipop.md`
@@ -92,34 +92,54 @@ o arquivo se a task cair no nó que o tem** — na prática, no manager.
 Mantém 3 backups `origem='automatico'` por cliente. Os excedentes têm o registro
 removido e o objeto apagado do bucket. Backups `origem='manual'` nunca entram na contagem.
 
-## 4. Configuração
+## 4. Configuração (Admin > Configurações > Armazenamento)
 
-Variáveis de ambiente (`.env` do CP, repassadas pelo `stack-prod.yml` ao `web`,
-`celery` e `agente-no`):
+A conexão com o bucket é cadastrada no admin, **não** em variáveis de ambiente
+(`ConfiguracaoArmazenamento`, singleton, `registry/storage_backup.py`). Os nós leem a mesma
+configuração do banco do CP.
 
-| Variável | Padrão | Descrição |
+| Campo | Exemplo | Descrição |
 |---|---|---|
-| `BACKUP_S3_ENDPOINT` | — | URL do RustFS (alcançável **pelos nós**), ex.: `http://rustfs:9000` |
-| `BACKUP_S3_BUCKET` | — | Nome do bucket (precisa existir) |
-| `BACKUP_S3_ACCESS_KEY` / `BACKUP_S3_SECRET_KEY` | — | Credenciais com leitura, escrita e exclusão no bucket |
-| `BACKUP_S3_REGION` | `us-east-1` | Região (RustFS aceita qualquer valor) |
-| `BACKUP_S3_PUBLIC_ENDPOINT` | vazio | Endereço do bucket **alcançável pelo navegador**, usado só nos links de download. Vazio = usa `BACKUP_S3_ENDPOINT` |
+| Endpoint de acesso | `http://rustfs-s3:9000` | Usado pelo CP e pelos nós (upload/download dos backups). Deve ser alcançável **pelos nós** |
+| Endpoint público | `https://s3.ararasuite.com.br` | Alcançável **pelo navegador**; só para os links de ⬇ Baixar. Vazio = usa o endpoint de acesso |
+| Bucket | `cp-backups` | Precisa existir |
+| Access key / Secret key | — | Chave dedicada com leitura, escrita e exclusão no bucket (não use a root) |
+| Região | `us-east-1` | O RustFS aceita qualquer valor |
 
-Se qualquer uma das quatro primeiras estiver vazia, o backup fica no disco do nó
-(`logger.warning` no worker). Isso só serve em dev de nó único: o painel não alcança o
-disco de um worker remoto.
+- **A secret key é criptografada** no banco (Fernet derivado da `SECRET_KEY`, `registry/cripto.py`) e nunca
+  é reexibida; deixar o campo em branco ao editar mantém a atual. Se a `SECRET_KEY` do CP for trocada, a chave
+  fica ilegível: o status mostra *Erro* e basta informar a secret key de novo.
+- **Sem cadastro completo, o backup falha cedo** (antes do dump) com *"Armazenamento de backups não
+  configurado. Acesse Admin → Configurações → Armazenamento"*. Não há mais modo "disco do nó" para backups
+  novos; backups antigos com caminho local continuam podendo ser baixados e restaurados.
+
+### Sinalizador de status
+
+A tela mostra uma pill com o estado da conexão, atualizada **ao abrir a página** (consulta ao vivo) e a cada
+salvamento, a cada clique em **🔌 Testar conexão agora**, a cada envio de backup e pela task agendável
+`task_verificar_armazenamento`.
+
+| Status | Significado |
+|---|---|
+| 🟢 Conectado | Bucket acessível; um objeto de teste foi gravado, lido e apagado (`_cp-healthcheck/`) |
+| 🟡 Atenção | O bucket funciona, mas o **endpoint público** não respondeu (`GET <público>/health`): backups ok, ⬇ Baixar pode falhar no navegador |
+| 🔴 Erro | Endpoint inacessível, bucket inexistente, credenciais recusadas ou sem permissão — a mensagem diz qual |
+| ⚪ Não testado | Configuração incompleta ou ainda não verificada |
+
+Para manter o status fresco sem ninguém abrir a tela, crie em Admin > Agendamentos > Tarefas Periódicas um
+`PeriodicTask` para `registry.tasks.task_verificar_armazenamento` (ex.: a cada 15 min), como o health check.
 
 ## 5. Deploy
 
-1. **Bucket:** criar o bucket no RustFS e as credenciais. Testar do manager e de um worker
-   (a porta do RustFS precisa estar acessível pela VPN).
+1. **Bucket:** criar o bucket no RustFS e a access key (veja a seção 10). A porta do RustFS precisa estar
+   acessível pelos nós.
 2. **Cada worker do Swarm:** `mkdir -p /opt/backups/cp`. O diretório é bind com o **mesmo
    caminho** no host e no container, porque a restauração de mídia usa
    `docker run -v <caminho>:...` e o daemon interpreta o caminho do host.
-3. **`.env` do CP:** preencher `BACKUP_S3_*`.
-4. **Imagem:** rebuild e push (inclui `boto3` e `entrypoint-agente.sh`).
-5. **Redeploy do stack** do CP (`docker stack deploy --with-registry-auth ...`). A
-   migration `0019` roda no `entrypoint-worker.sh` do `celery`.
+3. **Imagem:** rebuild e push (inclui `boto3`, `cryptography` e `entrypoint-agente.sh`).
+4. **Redeploy do stack** do CP (`docker stack deploy --with-registry-auth ...`). As
+   migrations (`0019`, `0020`) rodam no `entrypoint-worker.sh` do `celery`.
+5. **Admin > Configurações > Armazenamento:** cadastrar a conexão e conferir o status 🟢 Conectado.
 
 ### Verificação pós-deploy
 
@@ -142,8 +162,11 @@ Depois: **💾 Novo Backup** num cliente que roda em um worker. Esperado: status
 | Restauração travada e o ERP do cliente fora do ar | Agente do nó caiu entre o `scale web=0` e a restauração | Subir o agente (a task roda e religa o web). Emergência: `docker service scale {slug}_web=1` no manager |
 | Aviso "Container {slug}_db nao encontrado" | A task rodou em nó errado (ex.: serviço migrou de nó depois do despacho) | Repetir o backup; conferir `docker service ps {slug}_db` |
 | `Falha ao despachar o backup para a fila ...` | Redis do CP inacessível | Verificar o serviço `redis` e a rede `cp-internal` |
-| Erro no envio ao bucket | Endpoint/credenciais/bucket errados, ou porta bloqueada na VPN | Testar `aws s3 ls --endpoint-url ...` no nó; revisar `BACKUP_S3_*` |
-| ⬇ Baixar abre link que não carrega | Endpoint do bucket não é alcançável pelo navegador | Definir `BACKUP_S3_PUBLIC_ENDPOINT` |
+| Status 🔴 Erro na tela de Armazenamento | Endpoint/credenciais/bucket errados, ou porta bloqueada | Ler a mensagem do status; corrigir o cadastro e clicar em **Testar conexão agora** |
+| Status 🟡 Atenção | Endpoint público fora (DNS/Cloudflare/Traefik) | Conferir `curl -I https://<S3_DOMAIN>/health`; os backups seguem funcionando |
+| Backup falha com "Armazenamento de backups não configurado" | Nada cadastrado em Configurações > Armazenamento | Cadastrar a conexão |
+| ⬇ Baixar abre link que não carrega | Endpoint público ausente ou inacessível pelo navegador | Preencher o **Endpoint público** |
+| Status "Erro: não foi possível decifrar a chave secreta" | A `SECRET_KEY` do CP mudou depois de salvar a conexão | Informar a secret key de novo e salvar |
 | Disco do nó enchendo em `/opt/backups/cp` | Task morreu no meio e deixou temporários (`_media_tmp_*`, `_restore_*`, `.tar.gz`) | Apagar os resíduos; o fluxo normal remove tudo ao final |
 
 ## 7. Limitações conhecidas
@@ -176,11 +199,9 @@ Valida bucket, backup, download por link, restauração e retenção. **Não** v
 1. Subir o RustFS: `docker compose -f docker-compose.rustfs-dev.yml up -d`
    (S3 em `http://localhost:9000`, console em `http://localhost:9001`, credenciais de dev
    `rustfsdev` / `rustfsdev-secret`).
-2. Criar o bucket `cp-backups` (uma vez), com o mesmo cliente que o CP usa:
-   `storage_backup._cliente().create_bucket(Bucket='cp-backups')` num `manage.py shell`
-   com as variáveis do passo 3 definidas.
-3. No `.env` local: `BACKUP_S3_ENDPOINT=http://localhost:9000`, `BACKUP_S3_BUCKET=cp-backups`,
-   `BACKUP_S3_ACCESS_KEY`, `BACKUP_S3_SECRET_KEY`, `BACKUP_S3_REGION=us-east-1`.
+2. Criar o bucket `cp-backups` (uma vez) pelo console em `http://localhost:9001`.
+3. Em Admin > Configurações > Armazenamento: endpoint `http://localhost:9000`, bucket `cp-backups`,
+   access key `rustfsdev`, secret key `rustfsdev-secret`. O status deve ficar 🟢 Conectado.
 4. Subir `runserver` e o worker (`celery -A core worker --pool=solo`, no Windows). Sem Swarm,
    `docker service ps` falha e o backup cai na fila `celery` — esperado.
 5. O CP localiza os containers por nome (`{slug}_db`, `{slug}_web`) e faz
@@ -214,8 +235,8 @@ fixo no nó `servidorubuntuanptruenas`, dados no volume nomeado local `rustfs_da
 
 | Quem | Endereço | Caminho |
 |---|---|---|
-| Nós do Swarm (upload no backup, download na restauração) | `BACKUP_S3_ENDPOINT=http://rustfs-s3:9000` | rede overlay `storage-net` (criada pelo stack do RustFS), direto ao RustFS |
-| Navegador (⬇ Baixar) | `BACKUP_S3_PUBLIC_ENDPOINT=https://<S3_DOMAIN>` | Cloudflare → Traefik (`web`) → RustFS |
+| Nós do Swarm (upload no backup, download na restauração) | **Endpoint de acesso** `http://rustfs-s3:9000` | rede overlay `storage-net` (criada pelo stack do RustFS), direto ao RustFS |
+| Navegador (⬇ Baixar) | **Endpoint público** `https://<S3_DOMAIN>` | Cloudflare → Traefik (`web`) → RustFS |
 | Você (console) | `https://<CONSOLE_DOMAIN>` | Cloudflare → Traefik (`web`) → RustFS:9001 |
 
 As labels seguem o padrão do Traefik do Swarm (`traefik.swarm.network=traefik-public`, entrypoint `web`, sem certresolver).
@@ -232,9 +253,9 @@ SigV4 vale porque o Traefik preserva o `Host` recebido.
    domínios, `S3_DOMAIN`/`CONSOLE_DOMAIN`; opcionalmente `RUSTFS_VERSION` (fixe uma tag em vez de `latest`).
    Este stack **cria a rede overlay `storage-net`** — faça o deploy dele antes do CP.
 3. Abrir o console, criar o bucket `cp-backups` e uma **access key dedicada** ao CP (não use a conta root).
-4. No `.env` do CP: `BACKUP_S3_BUCKET=cp-backups`, `BACKUP_S3_ACCESS_KEY`/`BACKUP_S3_SECRET_KEY` (a chave
-   dedicada) e `BACKUP_S3_PUBLIC_ENDPOINT=https://<S3_DOMAIN>`. `BACKUP_S3_ENDPOINT` já vem como
-   `http://rustfs-s3:9000` no `stack-prod.yml`.
+4. No CP, em **Admin > Configurações > Armazenamento**: endpoint de acesso `http://rustfs-s3:9000`, endpoint
+   público `https://<S3_DOMAIN>`, bucket `cp-backups` e a chave dedicada. Ao salvar, o CP testa a conexão e o
+   status deve ficar 🟢 Conectado.
 5. Redeploy do stack do CP (o `stack-prod.yml` agora anexa `web`, `celery` e `agente-no` à `storage-net`).
 
 ### Verificação
@@ -243,11 +264,10 @@ SigV4 vale porque o Traefik preserva o `Host` recebido.
 docker service ps rustfs_rustfs                    # deve estar Running em servidorubuntuanptruenas
 curl -I https://<S3_DOMAIN>/health                 # 200 pelo Traefik/Cloudflare
 # de dentro da rede interna (qualquer nó), para validar o endpoint usado pelos agentes:
-docker run --rm --network storage-net curlimages/curl -s -o /dev/null -w "%{http_code}
-" http://rustfs-s3:9000/health
+docker run --rm --network storage-net curlimages/curl -s -o /dev/null -w "%{http_code}\n" http://rustfs-s3:9000/health
 ```
 
-Depois, **💾 Novo Backup** num cliente: o registro deve apontar para `s3://clientes/{slug}/...` e o objeto
+Depois do status 🟢, **💾 Novo Backup** num cliente: o registro deve apontar para `s3://clientes/{slug}/...` e o objeto
 aparecer no bucket; ⬇ Baixar deve abrir o link no domínio público.
 
 ### Observações

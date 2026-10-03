@@ -216,8 +216,16 @@ def task_iniciar_backup_cliente(cliente_id, backup_id):
     config segue como argumento (pequeno) para a task que roda no nó.
     """
     import base64
+    from . import storage_backup
     from .models import Cliente, BackupCliente
     from .nos import fila_do_cliente
+
+    if not storage_backup.configurado():
+        BackupCliente.objects.filter(pk=backup_id).update(
+            status='erro', progresso=100, mensagem=storage_backup.MSG_NAO_CONFIGURADO,
+        )
+        logger.error('Backup %s abortado: %s', backup_id, storage_backup.MSG_NAO_CONFIGURADO)
+        return
 
     cliente = Cliente.objects.get(pk=cliente_id)
     cliente_dir = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes')) / cliente.slug
@@ -261,6 +269,13 @@ def task_backup_cliente(self, cliente_id, backup_id, config_files=None):
 
     def _prog(pct):
         BackupCliente.objects.filter(pk=backup_id).update(progresso=pct)
+
+    if not storage_backup.configurado():
+        BackupCliente.objects.filter(pk=backup_id).update(
+            status='erro', progresso=100, mensagem=storage_backup.MSG_NAO_CONFIGURADO,
+        )
+        logger.error('Backup %s abortado: %s', backup_id, storage_backup.MSG_NAO_CONFIGURADO)
+        return
 
     cliente = Cliente.objects.get(pk=cliente_id)
     slug = cliente.slug
@@ -355,14 +370,15 @@ def task_backup_cliente(self, cliente_id, backup_id, config_files=None):
 
         tamanho = arquivo.stat().st_size
 
-        # 4. Envia para o bucket (o disco do nó é só temporário) ou, sem bucket
-        # configurado (dev de nó único), mantém o arquivo local.
-        if storage_backup.configurado():
+        # 4. Envia para o bucket (o disco do nó é só temporário) e atualiza o sinalizador
+        try:
             caminho = storage_backup.enviar(arquivo, f'clientes/{slug}/{arquivo.name}')
-            arquivo.unlink()
-        else:
-            caminho = str(arquivo)
-            logger.warning('BACKUP_S3_* nao configurado: backup de %s mantido apenas no disco do no.', slug)
+        except Exception as exc:
+            motivo = storage_backup._traduzir_erro(exc)
+            storage_backup.registrar_status('erro', f'Falha ao enviar um backup: {motivo}')
+            raise RuntimeError(f'Falha ao enviar o backup para o armazenamento: {motivo}') from exc
+        arquivo.unlink()
+        storage_backup.registrar_envio_ok(slug)
 
         BackupCliente.objects.filter(pk=backup_id).update(
             status='concluido',
@@ -546,6 +562,18 @@ def task_finalizar_restauracao(cliente_id, backup_id):
         _scale_web(cliente.slug, 1)
     finally:
         BackupCliente.objects.filter(pk=backup_id).update(restaurando=False, progresso=100)
+
+
+@shared_task
+def task_verificar_armazenamento():
+    """Testa a conexão com o bucket e atualiza o sinalizador do admin.
+
+    Agendar no django-celery-beat (ex.: a cada 15 min), como o health check.
+    """
+    from . import storage_backup
+    status, mensagem = storage_backup.verificar_e_registrar()
+    logger.info('Verificacao do armazenamento de backups: %s - %s', status, mensagem)
+    return status
 
 
 @shared_task

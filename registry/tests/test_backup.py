@@ -11,6 +11,7 @@ from django.test import Client, SimpleTestCase, TestCase
 from django.urls import reverse
 
 from registry.models import BackupCliente, Cliente, Plano
+from registry.tests.helpers_storage import instalar_fake_bucket
 from registry.tasks import (
     task_backup_cliente, task_finalizar_restauracao, task_iniciar_backup_cliente,
     task_restaurar_cliente, task_restaurar_no,
@@ -86,6 +87,8 @@ class TaskBackupClienteTests(SimpleTestCase):
         self.run_patch.start()
         self.addCleanup(self.run_patch.stop)
 
+        self.bucket = instalar_fake_bucket(self)
+
     def _status_updates(self):
         return [
             call.kwargs for call in self.filter_mock.return_value.update.call_args_list
@@ -93,7 +96,7 @@ class TaskBackupClienteTests(SimpleTestCase):
         ]
 
     def _backup_files(self):
-        return list((self.cp_backup_dir / 'clientes' / 'acme').glob('backup_acme_*.tar.gz'))
+        return self.bucket.arquivos('clientes/acme', 'backup_acme_*.tar.gz')
 
     def test_sem_containers_e_sem_config_marca_erro(self):
         task_backup_cliente(cliente_id='cliente-id', backup_id='backup-id')
@@ -150,12 +153,6 @@ class TaskBackupClienteTests(SimpleTestCase):
         self.assertEqual(len(self._backup_files()), 1)
 
 
-_ENV_BUCKET = {
-    'BACKUP_S3_ENDPOINT': 'http://rustfs:9000', 'BACKUP_S3_BUCKET': 'b',
-    'BACKUP_S3_ACCESS_KEY': 'k', 'BACKUP_S3_SECRET_KEY': 's',
-}
-
-
 class BackupMultiNoTests(SimpleTestCase):
     """Config por argumento, envio ao bucket e despacho por fila."""
 
@@ -188,6 +185,7 @@ class BackupMultiNoTests(SimpleTestCase):
         p = patch('subprocess.run', side_effect=_fake_run)
         p.start()
         self.addCleanup(p.stop)
+        self.bucket = instalar_fake_bucket(self)
 
     def _update_final(self):
         return [
@@ -203,7 +201,7 @@ class BackupMultiNoTests(SimpleTestCase):
 
         task_backup_cliente('cliente-id', 'backup-id', config_files=config)
 
-        with tarfile.open(self._tars_locais()[0]) as tar:
+        with tarfile.open(self.bucket.arquivos('clientes/acme', 'backup_acme_*.tar.gz')[0]) as tar:
             self.assertIn('config/.env', tar.getnames())
             self.assertIn('db.sql', tar.getnames())
 
@@ -211,24 +209,40 @@ class BackupMultiNoTests(SimpleTestCase):
         task_backup_cliente('cliente-id', 'backup-id', config_files={})
         self.assertIn('configuracao', self._update_final()['mensagem'])
 
-    def test_com_bucket_envia_remove_arquivo_local_e_grava_chave(self):
-        with patch.dict('os.environ', _ENV_BUCKET), \
-                patch('registry.storage_backup.enviar', side_effect=lambda f, c: f's3://{c}') as enviar:
-            task_backup_cliente('cliente-id', 'backup-id', config_files={})
+    def test_envia_ao_bucket_remove_arquivo_local_e_grava_chave(self):
+        task_backup_cliente('cliente-id', 'backup-id', config_files={})
 
-        chave = enviar.call_args.args[1]
-        self.assertTrue(chave.startswith('clientes/acme/backup_acme_'))
-        self.assertEqual(self._update_final()['arquivo_path'], f's3://{chave}')
+        objetos = self.bucket.arquivos('clientes/acme', 'backup_acme_*.tar.gz')
+        self.assertEqual(len(objetos), 1)
+        self.assertEqual(self._update_final()['arquivo_path'], f's3://clientes/acme/{objetos[0].name}')
         self.assertEqual(self._tars_locais(), [])
+        self.bucket.registrar_envio_ok.assert_called_once_with('acme')
 
-    def test_falha_no_envio_marca_erro(self):
-        with patch.dict('os.environ', _ENV_BUCKET), \
-                patch('registry.storage_backup.enviar', side_effect=RuntimeError('bucket fora')):
+    def test_falha_no_envio_marca_erro_e_sinaliza_no_status(self):
+        with patch('registry.storage_backup.enviar', side_effect=RuntimeError('bucket fora')):
             with self.assertRaises(RuntimeError):
                 task_backup_cliente('cliente-id', 'backup-id', config_files={})
 
         self.assertEqual(self._update_final()['status'], 'erro')
         self.assertEqual(self._tars_locais(), [])
+        self.assertEqual(self.bucket.registrar_status.call_args.args[0], 'erro')
+
+    def test_sem_configuracao_aborta_antes_do_dump(self):
+        with patch('registry.storage_backup.configurado', return_value=False):
+            task_backup_cliente('cliente-id', 'backup-id', config_files={})
+
+        update = self._update_final()
+        self.assertEqual(update['status'], 'erro')
+        self.assertIn('Configurações → Armazenamento', update['mensagem'])
+        self.assertEqual(self._tars_locais(), [])
+
+    def test_iniciar_sem_configuracao_nao_despacha(self):
+        with patch('registry.storage_backup.configurado', return_value=False), \
+                patch('registry.tasks.task_backup_cliente.apply_async') as apply_async:
+            task_iniciar_backup_cliente('cliente-id', 'backup-id')
+
+        apply_async.assert_not_called()
+        self.assertEqual(self._update_final()['status'], 'erro')
 
     def test_iniciar_despacha_para_a_fila_do_no_com_o_config(self):
         cfg = Path(self.tmpdir.name) / 'clientes' / 'acme'
@@ -466,6 +480,8 @@ class UploadBackupViewTests(TestCase):
         self.env_patch.start()
         self.addCleanup(self.env_patch.stop)
 
+        self.bucket = instalar_fake_bucket(self)
+
         self.django_client = Client()
         self.django_client.force_login(self.user)
         self.url = reverse('admin:registry_cliente_backup_upload', args=[self.cliente.pk])
@@ -482,8 +498,10 @@ class UploadBackupViewTests(TestCase):
         self.assertEqual(backup.status, 'concluido')
         self.assertEqual(backup.mensagem, '')
         self.assertGreater(backup.tamanho_bytes, 0)
-        self.assertTrue(Path(backup.arquivo_path).name.startswith('manual_cliente-upload_'))
-        self.assertTrue(Path(backup.arquivo_path).exists())
+        self.assertTrue(backup.arquivo_path.startswith('s3://clientes/cliente-upload/manual_cliente-upload_'))
+        self.assertTrue(self.bucket.existe(backup.arquivo_path))
+        # o arquivo recebido no web é temporário: não sobra nada no disco
+        self.assertEqual(list(Path(self.tmpdir.name).rglob('*.tar.gz')), [])
 
     def test_upload_sem_media_gera_aviso_mas_ainda_conclui(self):
         tar_bytes = _make_tar_bytes({'db.sql': b'-- dump'})
@@ -552,6 +570,8 @@ class RetencaoBackupProtegeManuaisTests(TestCase):
         )
         self.run_patch.start()
         self.addCleanup(self.run_patch.stop)
+
+        self.bucket = instalar_fake_bucket(self)
 
     def test_novo_backup_automatico_nao_apaga_backup_manual(self):
         novo = BackupCliente.objects.create(cliente=self.cliente)

@@ -6,7 +6,7 @@ from django.urls import path
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.html import escape, format_html, mark_safe
 from unfold.admin import ModelAdmin
-from .models import Modulo, Plano, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare, BackupCliente, VersaoAgente, SincronizacaoVersoesAgente, InstalacaoAgente
+from .models import Modulo, Plano, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare, ConfiguracaoArmazenamento, BackupCliente, VersaoAgente, SincronizacaoVersoesAgente, InstalacaoAgente
 
 
 @admin.register(Modulo)
@@ -651,16 +651,17 @@ class ClienteAdmin(ModelAdmin):
                 return redirect('admin:registry_cliente_backup_upload', pk)
 
             tamanho = destino.stat().st_size
-            caminho = str(destino)
-            if storage_backup.configurado():
-                # o web roda no manager; o worker de outro nó só enxerga o bucket
-                try:
-                    caminho = storage_backup.enviar(destino, f'clientes/{cliente.slug}/{destino.name}')
-                except Exception as exc:
-                    messages.error(request, f'Falha ao enviar o backup para o armazenamento: {exc}')
-                    return redirect('admin:registry_cliente_backup_upload', pk)
-                finally:
-                    destino.unlink(missing_ok=True)
+            # o web roda no manager; o worker de outro nó só enxerga o bucket
+            try:
+                caminho = storage_backup.enviar(destino, f'clientes/{cliente.slug}/{destino.name}')
+            except storage_backup.ArmazenamentoNaoConfigurado:
+                messages.error(request, storage_backup.MSG_NAO_CONFIGURADO)
+                return redirect('admin:registry_cliente_backup_upload', pk)
+            except Exception as exc:
+                messages.error(request, f'Falha ao enviar o backup para o armazenamento: {storage_backup._traduzir_erro(exc)}')
+                return redirect('admin:registry_cliente_backup_upload', pk)
+            finally:
+                destino.unlink(missing_ok=True)
 
             BackupCliente.objects.create(
                 cliente=cliente,
@@ -688,8 +689,13 @@ class ClienteAdmin(ModelAdmin):
         if backup.status != 'concluido' or not backup.arquivo_path:
             raise Http404
         if storage_backup.eh_remoto(backup.arquivo_path):
+            from django.contrib import messages
             nome = backup.arquivo_path.rsplit('/', 1)[-1]
-            return redirect(storage_backup.url_download(backup.arquivo_path, nome))
+            try:
+                return redirect(storage_backup.url_download(backup.arquivo_path, nome))
+            except storage_backup.ArmazenamentoNaoConfigurado:
+                messages.error(request, storage_backup.MSG_NAO_CONFIGURADO)
+                return redirect('admin:registry_cliente_change', pk)
         arquivo = Path(backup.arquivo_path)
         if not arquivo.exists():
             raise Http404
@@ -1285,6 +1291,151 @@ class ConfiguracaoCloudflareAdmin(ModelAdmin):
 
     def has_add_permission(self, request):
         return not ConfiguracaoCloudflare.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+_ARMAZ_CORES = {
+    'conectado': '#16a34a',
+    'atencao': '#d97706',
+    'erro': '#dc2626',
+    'nao_testado': '#6b7280',
+}
+_ARMAZ_ROTULOS = dict(ConfiguracaoArmazenamento.STATUS_CHOICES)
+
+
+def _armaz_pill(status, elemento_id=''):
+    cor = _ARMAZ_CORES.get(status, '#6b7280')
+    return format_html(
+        '<span {} style="display:inline-block;padding:3px 12px;border-radius:12px;background:{};color:#fff;'
+        'font-size:12px;font-weight:600;">● {}</span>',
+        mark_safe(f'id="{elemento_id}"') if elemento_id else '', cor, _ARMAZ_ROTULOS.get(status, status),
+    )
+
+
+class _ConfiguracaoArmazenamentoForm(forms.ModelForm):
+    secret_key = forms.CharField(
+        label='Secret key',
+        required=False,
+        widget=forms.PasswordInput(render_value=False, attrs={'autocomplete': 'new-password'}),
+    )
+
+    class Meta:
+        model = ConfiguracaoArmazenamento
+        fields = ['endpoint', 'endpoint_publico', 'bucket', 'access_key', 'regiao']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.secret_key_cifrada:
+            self.fields['secret_key'].help_text = '•••••••• mantida. Deixe em branco para não alterar.'
+        else:
+            self.fields['secret_key'].help_text = 'Chave secreta da access key. Fica criptografada no banco e não é exibida depois de salva.'
+
+    def clean(self):
+        dados = super().clean()
+        if not dados.get('secret_key') and not (self.instance and self.instance.secret_key_cifrada):
+            self.add_error('secret_key', 'Informe a secret key.')
+        return dados
+
+
+@admin.register(ConfiguracaoArmazenamento)
+class ConfiguracaoArmazenamentoAdmin(ModelAdmin):
+    form = _ConfiguracaoArmazenamentoForm
+    list_display = ['__str__', 'status_badge_lista', 'verificado_em']
+
+    fieldsets = [
+        ('Conexão', {'fields': ['endpoint', 'bucket', 'access_key', 'secret_key', 'regiao']}),
+        ('Endereço público (downloads)', {'fields': ['endpoint_publico']}),
+        ('Status da conexão', {'fields': ['status_badge', 'botao_testar']}),
+    ]
+    readonly_fields = ['status_badge', 'botao_testar']
+
+    def get_changeform_initial_data(self, request):
+        return {'endpoint': 'http://rustfs-s3:9000', 'bucket': 'cp-backups', 'regiao': 'us-east-1'}
+
+    def get_urls(self):
+        urls = super().get_urls()
+        return [
+            path('testar-conexao/', self.admin_site.admin_view(self._view_testar), name='registry_configuracaoarmazenamento_testar'),
+            path('verificar/', self.admin_site.admin_view(self._view_verificar), name='registry_configuracaoarmazenamento_verificar'),
+        ] + urls
+
+    def save_model(self, request, obj, form, change):
+        from django.contrib import messages
+        from . import storage_backup
+        nova = form.cleaned_data.get('secret_key')
+        if nova:
+            obj.definir_secret(nova)
+        super().save_model(request, obj, form, change)
+        status, mensagem = storage_backup.verificar_e_registrar()
+        nivel = {'conectado': messages.SUCCESS, 'atencao': messages.WARNING}.get(status, messages.ERROR)
+        messages.add_message(request, nivel, f'Conexão testada após salvar: {mensagem}')
+
+    def _view_testar(self, request):
+        from django.contrib import messages
+        from . import storage_backup
+        if not self.has_change_permission(request):
+            raise Http404
+        status, mensagem = storage_backup.verificar_e_registrar()
+        nivel = {'conectado': messages.SUCCESS, 'atencao': messages.WARNING}.get(status, messages.ERROR)
+        messages.add_message(request, nivel, mensagem)
+        if ConfiguracaoArmazenamento.obter():
+            return redirect('admin:registry_configuracaoarmazenamento_change', 1)
+        return redirect('admin:registry_configuracaoarmazenamento_changelist')
+
+    def _view_verificar(self, request):
+        """JSON usado pelo change form para atualizar o sinalizador ao abrir a tela."""
+        from . import storage_backup
+        if not self.has_view_permission(request):
+            raise Http404
+        status, mensagem = storage_backup.verificar_e_registrar()
+        return JsonResponse({'status': status, 'rotulo': _ARMAZ_ROTULOS.get(status, status), 'mensagem': mensagem})
+
+    def status_badge_lista(self, obj):
+        return _armaz_pill(obj.status_conexao)
+    status_badge_lista.short_description = 'Status'
+
+    def status_badge(self, obj):
+        if not obj or not obj.pk:
+            return '—'
+        import json
+        from django.urls import reverse
+        from django.utils.timesince import timesince
+        quando = f'verificado há {timesince(obj.verificado_em)}' if obj.verificado_em else 'ainda não verificado'
+        url = reverse('admin:registry_configuracaoarmazenamento_verificar')
+        script = (
+            '(function(){'
+            'var cores=' + json.dumps(_ARMAZ_CORES) + ';'
+            'var rot=document.getElementById("armaz-badge");'
+            'var msg=document.getElementById("armaz-msg");var q=document.getElementById("armaz-quando");'
+            'if(!rot)return;q.textContent="verificando agora…";'
+            'fetch(' + json.dumps(url) + ',{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){'
+            'rot.style.background=cores[d.status]||"#6b7280";rot.textContent="● "+d.rotulo;'
+            'msg.textContent=d.mensagem;q.textContent="verificado agora";'
+            '}).catch(function(){q.textContent="não foi possível verificar agora";});'
+            '})();'
+        )
+        return format_html(
+            '{} <span id="armaz-quando" style="margin-left:8px;color:#6b7280;font-size:12px;">{}</span>'
+            '<div id="armaz-msg" style="margin-top:6px;font-size:13px;">{}</div><script>{}</script>',
+            _armaz_pill(obj.status_conexao, 'armaz-badge'), quando, obj.status_mensagem or '', mark_safe(script),
+        )
+    status_badge.short_description = 'Status'
+
+    def botao_testar(self, obj):
+        if not obj or not obj.pk:
+            return '—'
+        from django.urls import reverse
+        return format_html(
+            '<a href="{}" style="display:inline-block;padding:6px 14px;background:#417690;color:#fff;'
+            'border-radius:4px;text-decoration:none;font-size:13px;">🔌 Testar conexão agora</a>',
+            reverse('admin:registry_configuracaoarmazenamento_testar'),
+        )
+    botao_testar.short_description = 'Testar'
+
+    def has_add_permission(self, request):
+        return not ConfiguracaoArmazenamento.objects.exists()
 
     def has_delete_permission(self, request, obj=None):
         return False
