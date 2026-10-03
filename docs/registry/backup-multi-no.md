@@ -3,7 +3,7 @@
 - data: 2026-10-02
 - responsavel: James Flavio
 - status: implementado e validado localmente com RustFS (sem Swarm) — pendente de deploy e de validação em Swarm real
-- versao CP: `0.0.41`
+- versao CP: `0.0.42`
 - app: `registry`
 - repo: `erp-control-plane` (nada muda no `erp`)
 - plano: `vamoz-fazer-a-op-o-sunny-lollipop.md`
@@ -205,3 +205,54 @@ Observação: o `pg_dump --clean --if-exists` recria os objetos que estão no du
 tabelas criadas depois do backup. Restaurar traz de volta o estado do que foi dumpado; não zera
 o banco.
 
+## 10. RustFS em produção (Portainer / Swarm)
+
+Stack pronto para colar no Portainer: [`stack-rustfs.yml`](../../stack-rustfs.yml). Serviço único `rustfs`,
+fixo no nó `servidorubuntuanptruenas`, dados no volume nomeado local `rustfs_data`, exposto pelo Traefik.
+
+### Como o tráfego passa
+
+| Quem | Endereço | Caminho |
+|---|---|---|
+| Nós do Swarm (upload no backup, download na restauração) | `BACKUP_S3_ENDPOINT=http://rustfs-s3:9000` | rede overlay `storage-net` (criada pelo stack do RustFS), direto ao RustFS |
+| Navegador (⬇ Baixar) | `BACKUP_S3_PUBLIC_ENDPOINT=https://<S3_DOMAIN>` | Cloudflare → Traefik (`web`) → RustFS |
+| Você (console) | `https://<CONSOLE_DOMAIN>` | Cloudflare → Traefik (`web`) → RustFS:9001 |
+
+As labels seguem o padrão do Traefik do Swarm (`traefik.swarm.network=traefik-public`, entrypoint `web`, sem certresolver).
+O upload **não** passa pelo Cloudflare de propósito: o proxy limita o tamanho do corpo das requisições e o
+backup faria um desvio pela internet. O link assinado de download usa o domínio público, e a assinatura
+SigV4 vale porque o Traefik preserva o `Host` recebido.
+
+### Passo a passo
+
+1. Cloudflare: criar os registros DNS (proxied) de `S3_DOMAIN` e `CONSOLE_DOMAIN` (padrões
+   `s3.ararasuite.com.br` e `rustfs.ararasuite.com.br`), como os demais subdomínios.
+2. Portainer → Stacks → Add stack → colar o `stack-rustfs.yml` e definir as variáveis:
+   `RUSTFS_ACCESS_KEY`, `RUSTFS_SECRET_KEY` (mín. 8 caracteres, não use `rustfsadmin`) e, se quiser outros
+   domínios, `S3_DOMAIN`/`CONSOLE_DOMAIN`; opcionalmente `RUSTFS_VERSION` (fixe uma tag em vez de `latest`).
+   Este stack **cria a rede overlay `storage-net`** — faça o deploy dele antes do CP.
+3. Abrir o console, criar o bucket `cp-backups` e uma **access key dedicada** ao CP (não use a conta root).
+4. No `.env` do CP: `BACKUP_S3_BUCKET=cp-backups`, `BACKUP_S3_ACCESS_KEY`/`BACKUP_S3_SECRET_KEY` (a chave
+   dedicada) e `BACKUP_S3_PUBLIC_ENDPOINT=https://<S3_DOMAIN>`. `BACKUP_S3_ENDPOINT` já vem como
+   `http://rustfs-s3:9000` no `stack-prod.yml`.
+5. Redeploy do stack do CP (o `stack-prod.yml` agora anexa `web`, `celery` e `agente-no` à `storage-net`).
+
+### Verificação
+
+```bash
+docker service ps rustfs_rustfs                    # deve estar Running em servidorubuntuanptruenas
+curl -I https://<S3_DOMAIN>/health                 # 200 pelo Traefik/Cloudflare
+# de dentro da rede interna (qualquer nó), para validar o endpoint usado pelos agentes:
+docker run --rm --network storage-net curlimages/curl -s -o /dev/null -w "%{http_code}
+" http://rustfs-s3:9000/health
+```
+
+Depois, **💾 Novo Backup** num cliente: o registro deve apontar para `s3://clientes/{slug}/...` e o objeto
+aparecer no bucket; ⬇ Baixar deve abrir o link no domínio público.
+
+### Observações
+
+- O volume é local ao nó: se o `servidorubuntuanptruenas` for perdido, os backups vão junto. Faça cópia do
+  volume `rustfs_data` (ou replicação do bucket) para outro lugar.
+- A constraint `node.hostname == servidorubuntuanptruenas` impede o Swarm de mover o serviço para um nó sem os dados.
+- `RUSTFS_VERSION=latest` pode mudar a versão a cada redeploy; fixe uma tag testada.
