@@ -1,5 +1,7 @@
 import io
 import os
+import re
+from datetime import timedelta
 import tarfile
 import tempfile
 from types import SimpleNamespace
@@ -7,6 +9,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test.utils import override_settings
+from django.utils import timezone
 from django.urls import reverse
 
 from registry.models import BackupCliente, Cliente, Plano
@@ -69,18 +72,40 @@ class BackupClientePlaywrightTests(PlaywrightAdminTestCase):
         # o backup grava no bucket (configurado em Admin > Configurações); aqui, um bucket falso
         self.bucket = instalar_fake_bucket(self)
 
+    def _url_change(self):
+        return f'{self.live_server_url}{reverse("admin:registry_cliente_change", args=[self.cliente.pk])}'
+
+    def _abrir_aba(self, nome):
+        # a página do Cliente é dividida em abas (Unfold); os <a> do menu de abas não têm href
+        self.page.locator('nav a', has_text=nome).first.click()
+
     def _disparar_backup(self):
-        url_change = f'{self.live_server_url}{reverse("admin:registry_cliente_change", args=[self.cliente.pk])}'
+        url_change = self._url_change()
         self.page.goto(url_change)
+        self._abrir_aba('Backups')
         self.page.once('dialog', lambda dialog: dialog.accept())
         self.page.get_by_role('link', name='Novo Backup').click()
-        self.page.wait_for_url(url_change)
+        # o redirect leva ao console ao vivo: ?acompanhar=<id>
+        self.page.wait_for_url(re.compile(r'/change/\?acompanhar=\d+'))
 
     def test_backup_sem_containers_do_cliente_mostra_badge_de_erro_com_motivo(self):
         self.autenticar_admin(self.user)
 
         with patch('subprocess.run', side_effect=_fake_run_sem_containers):
             self._disparar_backup()
+
+        # o console ao vivo abre sozinho na aba Backups e mostra as etapas executadas
+        console = self.page.locator('#bk-console')
+        console.wait_for()
+        self.page.wait_for_function("document.getElementById('bk-log').textContent.includes('CONCLU') || document.getElementById('bk-log').textContent.includes('ERRO')")
+        log = self.page.locator('#bk-log').inner_text()
+        self.assertIn('Backup solicitado', log)
+        self.assertIn('Worker', log)
+        self.assertIn('[1/4] Banco de dados', log)
+        self.assertIn('AVISO: container pw-backup-teste_db não encontrado', log)
+        self.assertIn('ERRO: nenhum conteúdo foi capturado', log)
+        self.assertIn('Erro', self.page.locator('#bk-estado').inner_text())
+        self.assertTrue(self.page.locator('#bk-atualizar').is_visible())
 
         linha_backup = self.page.locator('tr', has_text='pw-backup-teste_db')
         linha_backup.wait_for()
@@ -132,6 +157,7 @@ class BackupClientePlaywrightTests(PlaywrightAdminTestCase):
         tar_bytes = _make_tar_bytes({'db.sql': b'-- dump', 'media/foo.txt': b'conteudo'})
 
         self.page.goto(url_change)
+        self._abrir_aba('Backups')
         self.page.get_by_role('link', name='Importar Backup').click()
         self.page.locator('input[type="file"][name="arquivo"]').set_input_files({
             'name': 'meu_backup.tar.gz',
@@ -140,6 +166,7 @@ class BackupClientePlaywrightTests(PlaywrightAdminTestCase):
         })
         self.page.get_by_role('button', name='Enviar backup').click()
         self.page.wait_for_url(url_change)
+        self._abrir_aba('Backups')
 
         linha_backup = self.page.locator('tr', has_text='manual')
         linha_backup.wait_for()
@@ -151,3 +178,54 @@ class BackupClientePlaywrightTests(PlaywrightAdminTestCase):
         self.assertEqual(backup.origem, 'manual')
         self.assertEqual(backup.status, 'concluido')
         self.assertEqual(backup.mensagem, '')
+
+    def test_pagina_do_cliente_e_dividida_em_abas(self):
+        self.autenticar_admin(self.user)
+        self.page.goto(self._url_change())
+        nav = self.page.locator('nav a')
+        nav.first.wait_for()
+        rotulos = [t.strip() for t in nav.all_inner_texts()]
+        for esperado in ('Cadastro', 'Acesso e Infraestrutura', 'Plano e Faturamento', 'Versões', 'Status e Ações', 'Backups'):
+            self.assertIn(esperado, rotulos)
+        # trocar de aba mostra o conteúdo daquela aba e esconde o da anterior
+        def campo(texto):
+            return self.page.locator('label', has_text=texto).first
+
+        campo('Cnpj').wait_for(state='visible')  # aba inicial: Cadastro
+        self._abrir_aba('Acesso e Infraestrutura')
+        campo('Subdominio').wait_for(state='visible')
+        campo('Cnpj').wait_for(state='hidden')
+        self._abrir_aba('Cadastro')
+        campo('Cnpj').wait_for(state='visible')
+        campo('Subdominio').wait_for(state='hidden')
+
+    def test_operacao_parada_mostra_alerta_e_interromper_encerra(self):
+        self.autenticar_admin(self.user)
+        backup = BackupCliente.objects.create(cliente=self.cliente)  # em_andamento
+        BackupCliente.objects.filter(pk=backup.pk).update(
+            log='[10:00:00] Backup solicitado.\n[10:00:01] Tarefa enviada à fila "no.worker-9". Aguardando um worker do nó iniciar…\n',
+            atividade_em=timezone.now() - timedelta(seconds=200),
+            criado_em=timezone.now() - timedelta(seconds=210),
+        )
+        self.page.goto(self._url_change())  # operação em andamento: o console abre sozinho na aba Backups
+        estado = self.page.locator('#bk-estado')
+        estado.wait_for()
+        self.page.wait_for_function("document.getElementById('bk-estado').textContent.includes('travado')")
+        self.assertIn('Sem atividade', estado.inner_text())
+        self.assertIn('Aguardando um worker', self.page.locator('#bk-log').inner_text())
+        self.assertIn('agente-no', self.page.locator('#bk-aviso').inner_text())
+
+        botao = self.page.locator('#bk-int')
+        self.assertTrue(botao.is_visible())
+        self.page.once('dialog', lambda dialog: dialog.accept())
+        botao.click()
+        self.page.wait_for_function("document.getElementById('bk-estado').textContent.includes('Erro')")
+        # a lista se atualiza sozinha (sem recarregar a página): a linha deixa de ser "Em andamento"
+        self.page.wait_for_function("!document.getElementById('bk-tabela').textContent.includes('Em andamento')")
+        self.assertIn('Erro', self.page.locator('#bk-tabela tr').nth(1).inner_text())
+        self.assertIn('Interrompida manualmente', self.page.locator('#bk-log').inner_text())
+
+        backup.refresh_from_db()
+        self.assertEqual(backup.status, 'erro')
+        self.assertIn('Interrompida manualmente', backup.mensagem)
+        self.assertIn('Interrompida manualmente', backup.log)

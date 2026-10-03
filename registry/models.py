@@ -536,6 +536,13 @@ class BackupCliente(models.Model):
     origem = models.CharField(max_length=20, choices=ORIGEM_CHOICES, default='automatico')
     mensagem_restauracao = models.TextField(blank=True)
     no = models.CharField('nó do Swarm', max_length=100, blank=True)
+    log = models.TextField('log do backup', blank=True)
+    log_restauracao = models.TextField('log da restauração', blank=True)
+    restauracao_iniciada_em = models.DateTimeField('restauração iniciada em', null=True, blank=True)
+    atividade_em = models.DateTimeField(
+        'última atividade', null=True, blank=True,
+        help_text='Heartbeat: renovado a cada linha de log e a cada pulso de um comando longo.',
+    )
 
     class Meta:
         verbose_name = 'Backup'

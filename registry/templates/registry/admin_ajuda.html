@@ -739,6 +739,18 @@
   </div>
 
   <div class="ajuda-card">
+    <h3>📟 Acompanhar o backup em tempo real</h3>
+    <p>Ao clicar em <strong>💾 Novo Backup</strong> (ou <strong>↩ Restaurar</strong>) a página abre na aba <em>Backups</em> com um <strong>console</strong> que mostra, linha a linha, o que está sendo executado: banco, mídia, configuração, envio ao armazenamento e retenção. Os comandos longos registram "em execução há Ns" a cada poucos segundos, então dá para ver que o processo está vivo.</p>
+    <table class="ajuda-table" style="margin-top:8px;">
+      <tr><th>Indicador</th><th>Significado</th></tr>
+      <tr><td><span class="tag-ok">● Executando</span></td><td>Houve atividade nos últimos 30 segundos.</td></tr>
+      <tr><td><span class="tag-warn">⚠ Possível travamento</span></td><td>30 segundos ou mais sem atividade. Se o aviso disser que nenhum worker pegou a tarefa, confira se os serviços <code>celery</code> / <code>agente-no</code> estão rodando.</td></tr>
+      <tr><td><span class="tag-no">✖ Provavelmente travado</span></td><td>2 minutos ou mais sem atividade. Aparece o botão <strong>Interromper</strong>, que encerra o registro como erro (na restauração, também religa o ERP do cliente).</td></tr>
+    </table>
+    <p style="margin-top:8px;">Ao terminar, a lista de backups se atualiza sozinha e o log fica visível. Cada backup antigo tem um link <strong>📜 Log</strong> para consultar o que aconteceu.</p>
+  </div>
+
+  <div class="ajuda-card">
     <h3>⬆ Importar backup manualmente</h3>
     <p>Clique em <strong>⬆ Importar Backup</strong> (ao lado de "Novo Backup") para enviar um <code>.tar.gz</code>/<code>.tgz</code> já existente do seu PC — útil para backups migrados de outro ambiente ou feitos antes desta funcionalidade existir.</p>
     <p style="margin-top:8px;">O arquivo é gravado como <code>manual_{slug}_{timestamp}.tar.gz</code> e o backup entra na lista com a tag <span style="background:#eceff1;color:#455a64;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">manual</span> ao lado do badge de status. Backups manuais <strong>não contam</strong> para o limite de retenção de 3 e nunca são apagados automaticamente.</p>

@@ -217,10 +217,14 @@ def task_iniciar_backup_cliente(cliente_id, backup_id):
     """
     import base64
     from . import storage_backup
+    from .log_operacao import LogOperacao
     from .models import Cliente, BackupCliente
     from .nos import fila_do_cliente
 
+    log = LogOperacao(backup_id)
+    log.linha('Backup solicitado. Verificando a configuração do armazenamento…')
     if not storage_backup.configurado():
+        log.linha(f'ERRO: {storage_backup.MSG_NAO_CONFIGURADO}')
         BackupCliente.objects.filter(pk=backup_id).update(
             status='erro', progresso=100, mensagem=storage_backup.MSG_NAO_CONFIGURADO,
         )
@@ -229,6 +233,7 @@ def task_iniciar_backup_cliente(cliente_id, backup_id):
 
     cliente = Cliente.objects.get(pk=cliente_id)
     cliente_dir = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes')) / cliente.slug
+    log.linha(f'Cliente "{cliente.slug}": lendo o .env e o stack.yml…')
 
     config_files = {}
     if cliente_dir.exists():
@@ -238,13 +243,16 @@ def task_iniciar_backup_cliente(cliente_id, backup_id):
                     base64.b64encode(arq.read_bytes()).decode('ascii')
                 )
 
+    log.linha(f'Configuração lida ({len(config_files)} arquivo(s)). Descobrindo o nó do cliente…')
     fila = fila_do_cliente(cliente.slug)
     logger.info('Backup de %s despachado para a fila %s', cliente.slug, fila)
     try:
         task_backup_cliente.apply_async(
             args=[str(cliente_id), backup_id], kwargs={'config_files': config_files}, queue=fila,
         )
+        log.linha(f'Tarefa enviada à fila "{fila}". Aguardando um worker do nó iniciar…')
     except Exception as exc:
+        log.linha(f'ERRO: falha ao despachar o backup para a fila {fila}: {exc}')
         BackupCliente.objects.filter(pk=backup_id).update(
             status='erro', progresso=100, mensagem=f'Falha ao despachar o backup para a fila {fila}: {exc}',
         )
@@ -263,14 +271,21 @@ def task_backup_cliente(self, cliente_id, backup_id, config_files=None):
     import shutil
     import socket
     import subprocess
+    import time
     from . import storage_backup
+    from .log_operacao import LogOperacao, Progresso, fmt_bytes, rodar_com_pulso, tamanho_pasta
     from .models import Cliente, BackupCliente
     from .nos import container_local
 
     def _prog(pct):
         BackupCliente.objects.filter(pk=backup_id).update(progresso=pct)
 
+    log = LogOperacao(backup_id)
+    no_host = os.getenv('NODE_HOSTNAME') or socket.gethostname()
+    log.linha(f'Worker "{no_host}" iniciou o backup.')
+
     if not storage_backup.configurado():
+        log.linha(f'ERRO: {storage_backup.MSG_NAO_CONFIGURADO}')
         BackupCliente.objects.filter(pk=backup_id).update(
             status='erro', progresso=100, mensagem=storage_backup.MSG_NAO_CONFIGURADO,
         )
@@ -279,6 +294,7 @@ def task_backup_cliente(self, cliente_id, backup_id, config_files=None):
 
     cliente = Cliente.objects.get(pk=cliente_id)
     slug = cliente.slug
+    inicio_total = time.monotonic()
     # .resolve() garante um caminho absoluto com drive letter no Windows -
     # necessario para os argumentos '-v'/paths passados a comandos docker.
     backup_base = (Path(os.getenv('CP_BACKUP_DIR', '/opt/backups/cp')) / 'clientes' / slug).resolve()
@@ -291,52 +307,69 @@ def task_backup_cliente(self, cliente_id, backup_id, config_files=None):
 
     try:
         _prog(5)
-        with tarfile.open(arquivo, 'w:gz') as tar:
+        with tarfile.open(arquivo, 'w:gz', compresslevel=6) as tar:
             # 1. DB dump via container do banco
             _prog(10)
+            log.linha(f'[1/4] Banco de dados: procurando o container {slug}_db…')
             db_ctr = container_local(slug, 'db')
             if db_ctr:
-                dump = subprocess.run(
+                log.linha(f'Container do banco encontrado ({str(db_ctr)[:12]}). Executando pg_dump…')
+                t0 = time.monotonic()
+                dump = rodar_com_pulso(
+                    log, 'pg_dump', subprocess.run,
                     ['docker', 'exec', db_ctr,
                      'pg_dump', '--clean', '--if-exists', '-U', f'erp_{slug}', f'erp_{slug}'],
                     capture_output=True, timeout=300,
                 )
                 if dump.returncode == 0:
-                    info = tarfile.TarInfo(name='db.sql')
                     data = dump.stdout
+                    log.linha(f'pg_dump concluído: {fmt_bytes(len(data))} em {int(time.monotonic() - t0)}s. Compactando db.sql…')
+                    info = tarfile.TarInfo(name='db.sql')
                     info.size = len(data)
-                    tar.addfile(info, io.BytesIO(data))
+                    t1 = time.monotonic()
+                    rodar_com_pulso(log, 'Compactação do dump', tar.addfile, info, io.BytesIO(data))
+                    log.linha(f'db.sql compactado em {int(time.monotonic() - t1)}s.')
                 else:
                     stderr = dump.stderr.decode(errors='replace').strip()
                     logger.error('pg_dump falhou para %s (codigo %s): %s', slug, dump.returncode, stderr)
                     avisos.append(f'pg_dump falhou (codigo {dump.returncode}): {stderr[:300]}')
+                    log.linha(f'AVISO: pg_dump falhou (código {dump.returncode}): {stderr[:200]}')
             else:
                 avisos.append(f'Container {slug}_db nao encontrado - dump do banco nao incluido.')
+                log.linha(f'AVISO: container {slug}_db não encontrado neste nó — dump do banco não incluído.')
             _prog(55)
 
             # 2. Arquivos de mídia via docker cp do container web
+            log.linha(f'[2/4] Mídia: procurando o container {slug}_web…')
             web_ctr = container_local(slug, 'web')
             if web_ctr:
                 media_tmp = backup_base / f'_media_tmp_{timestamp}'
                 media_tmp.mkdir(parents=True, exist_ok=True)
+                log.linha('Copiando /app/media (docker cp)…')
                 try:
-                    cp = subprocess.run(
+                    cp = rodar_com_pulso(
+                        log, 'docker cp da mídia', subprocess.run,
                         ['docker', 'cp', f'{web_ctr}:/app/media/.', str(media_tmp)],
+                        medir=lambda: f'{fmt_bytes(tamanho_pasta(media_tmp))} copiados',
                         capture_output=True, timeout=120,
                     )
                     if cp.returncode == 0:
-                        tar.add(str(media_tmp), arcname='media')
+                        log.linha(f'Mídia copiada: {fmt_bytes(tamanho_pasta(media_tmp))}. Compactando…')
+                        rodar_com_pulso(log, 'Compactação da mídia', tar.add, str(media_tmp), arcname='media')
                     else:
                         stderr = cp.stderr.decode(errors='replace').strip()
                         logger.error('docker cp da midia falhou para %s: %s', slug, stderr)
                         avisos.append(f'docker cp da midia falhou: {stderr[:300]}')
+                        log.linha(f'AVISO: docker cp da mídia falhou: {stderr[:200]}')
                 finally:
                     shutil.rmtree(media_tmp, ignore_errors=True)
             else:
                 avisos.append(f'Container {slug}_web nao encontrado - midia nao incluida.')
+                log.linha(f'AVISO: container {slug}_web não encontrado neste nó — mídia não incluída.')
             _prog(80)
 
             # 3. Arquivos de configuração do cliente
+            log.linha('[3/4] Configuração do cliente (.env e stack.yml)…')
             if config_files is not None:
                 if config_files:
                     for rel, conteudo in config_files.items():
@@ -344,22 +377,28 @@ def task_backup_cliente(self, cliente_id, backup_id, config_files=None):
                         info = tarfile.TarInfo(name=f'config/{rel}')
                         info.size = len(data)
                         tar.addfile(info, io.BytesIO(data))
+                    log.linha(f'Configuração adicionada ({len(config_files)} arquivo(s)).')
                 else:
                     avisos.append('Diretorio de configuracao do cliente nao encontrado.')
+                    log.linha('AVISO: diretório de configuração do cliente não encontrado.')
             else:
                 clientes_base = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes'))
                 cliente_dir = clientes_base / slug
                 if cliente_dir.exists():
                     tar.add(str(cliente_dir), arcname='config')
+                    log.linha('Configuração adicionada.')
                 else:
                     avisos.append('Diretorio de configuracao do cliente nao encontrado.')
+                    log.linha('AVISO: diretório de configuração do cliente não encontrado.')
             _prog(90)
+            log.linha('Finalizando o arquivo (tar.gz)…')
 
             n_entries = len(tar.getmembers())
 
         if n_entries == 0:
             arquivo.unlink()
             mensagem = ' '.join(avisos) if avisos else 'Nenhum conteudo foi capturado para o backup.'
+            log.linha(f'ERRO: nenhum conteúdo foi capturado — o backup foi descartado. {mensagem}'[:600])
             BackupCliente.objects.filter(pk=backup_id).update(
                 status='erro',
                 progresso=100,
@@ -369,16 +408,30 @@ def task_backup_cliente(self, cliente_id, backup_id, config_files=None):
             return
 
         tamanho = arquivo.stat().st_size
+        log.linha(f'Arquivo pronto: {fmt_bytes(tamanho)}.')
 
         # 4. Envia para o bucket (o disco do nó é só temporário) e atualiza o sinalizador
+        cfg = storage_backup.exigir_configuracao()  # resolvido aqui: a thread do envio não acessa o banco
+        log.linha(f'[4/4] Enviando ao armazenamento (bucket "{cfg.bucket}")…')
+        progresso = Progresso(tamanho)
+        t_envio = time.monotonic()
         try:
-            caminho = storage_backup.enviar(arquivo, f'clientes/{slug}/{arquivo.name}')
+            caminho = rodar_com_pulso(
+                log, 'Envio ao armazenamento', storage_backup.enviar,
+                arquivo, f'clientes/{slug}/{arquivo.name}', progresso=progresso, cfg=cfg,
+                medir=progresso.texto,
+            )
         except Exception as exc:
             motivo = storage_backup._traduzir_erro(exc)
             storage_backup.registrar_status('erro', f'Falha ao enviar um backup: {motivo}')
             raise RuntimeError(f'Falha ao enviar o backup para o armazenamento: {motivo}') from exc
         arquivo.unlink()
         storage_backup.registrar_envio_ok(slug)
+        log.linha(f'Envio concluído em {int(time.monotonic() - t_envio)}s.')
+        log.linha(
+            f'CONCLUÍDO: {fmt_bytes(tamanho)} em {int(time.monotonic() - inicio_total)}s'
+            f'{" (com avisos)" if avisos else ""}.'
+        )
 
         BackupCliente.objects.filter(pk=backup_id).update(
             status='concluido',
@@ -403,17 +456,22 @@ def task_backup_cliente(self, cliente_id, backup_id, config_files=None):
         excedentes = BackupCliente.objects.filter(
             cliente=cliente, status='concluido', origem='automatico',
         ).exclude(pk__in=ids_manter)
+        removidos = 0
         for antigo in excedentes:
+            removidos += 1
             if storage_backup.eh_remoto(antigo.arquivo_path):
                 try:
                     storage_backup.apagar(antigo.arquivo_path)
                 except Exception as exc:
                     logger.warning('Nao foi possivel apagar %s do bucket: %s', antigo.arquivo_path, exc)
         excedentes.delete()
+        if removidos:
+            log.linha(f'Retenção: {removidos} backup(s) antigo(s) removido(s).')
 
     except Exception as exc:
         if arquivo.exists():
             arquivo.unlink()
+        log.linha(f'ERRO: {exc}')
         BackupCliente.objects.filter(pk=backup_id).update(status='erro', mensagem=str(exc))
         logger.error('Erro no backup de %s: %s', slug, exc)
         raise
@@ -433,22 +491,29 @@ def task_restaurar_cliente(self, cliente_id, backup_id):
     manager (esta task) → nó (`task_restaurar_no`) → manager (`task_finalizar_restauracao`).
     """
     import time
+    from .log_operacao import LogOperacao
     from .models import Cliente, BackupCliente
     from .nos import fila_do_cliente
 
     cliente = Cliente.objects.get(pk=cliente_id)
     slug = cliente.slug
 
+    log = LogOperacao(backup_id, 'log_restauracao')
+    log.reiniciar()
     BackupCliente.objects.filter(pk=backup_id).update(restaurando=True, progresso=0)
     try:
+        log.linha(f'Restauração solicitada. Parando o serviço {slug}_web…')
         BackupCliente.objects.filter(pk=backup_id).update(progresso=10)
         _scale_web(slug, 0)
+        log.linha('Aguardando 10s para o web encerrar…')
         time.sleep(10)
         fila = fila_do_cliente(slug)
         logger.info('Restauracao de %s despachada para a fila %s', slug, fila)
         task_restaurar_no.apply_async(args=[str(cliente_id), backup_id], queue=fila)
+        log.linha(f'Tarefa enviada à fila "{fila}". Aguardando um worker do nó iniciar…')
     except Exception as exc:
         # nada foi restaurado: religa o web e libera o backup
+        log.linha(f'ERRO: {exc}. Religando o web…')
         _scale_web(slug, 1)
         BackupCliente.objects.filter(pk=backup_id).update(
             restaurando=False, progresso=100, mensagem_restauracao=f'Erro inesperado: {exc}',
@@ -460,8 +525,11 @@ def task_restaurar_cliente(self, cliente_id, backup_id):
 def task_restaurar_no(self, cliente_id, backup_id):
     """Etapa do nó: baixa o backup e restaura banco e mídia. Sempre aciona a finalização."""
     import shutil
+    import socket
     import subprocess
+    import time
     from . import storage_backup
+    from .log_operacao import LogOperacao, Progresso, fmt_bytes, rodar_com_pulso
     from .models import Cliente, BackupCliente
     from .nos import container_local
 
@@ -471,6 +539,8 @@ def task_restaurar_no(self, cliente_id, backup_id):
     cliente = Cliente.objects.get(pk=cliente_id)
     backup = BackupCliente.objects.get(pk=backup_id)
     slug = cliente.slug
+    log = LogOperacao(backup_id, 'log_restauracao')
+    log.linha(f'Worker "{os.getenv("NODE_HOSTNAME") or socket.gethostname()}" iniciou a restauração.')
 
     # .resolve() garante um caminho absoluto com drive letter no Windows -
     # sem isso, 'docker run -v <path>:...' rejeita o caminho ("not a valid
@@ -485,27 +555,42 @@ def task_restaurar_no(self, cliente_id, backup_id):
         _prog(20)
         if storage_backup.eh_remoto(backup.arquivo_path):
             arquivo = restore_dir / '_backup.tar.gz'
-            storage_backup.baixar(backup.arquivo_path, arquivo)
+            cfg = storage_backup.exigir_configuracao()  # resolvido aqui: a thread não acessa o banco
+            progresso = Progresso()
+            log.linha('[1/4] Baixando o backup do armazenamento…')
+            rodar_com_pulso(
+                log, 'Download do backup', storage_backup.baixar,
+                backup.arquivo_path, arquivo, progresso=progresso, cfg=cfg, medir=progresso.texto,
+            )
+            log.linha(f'Download concluído: {fmt_bytes(progresso.feito)}.')
         else:
             arquivo = Path(backup.arquivo_path)
             if not arquivo.exists():
                 raise FileNotFoundError(f'Arquivo de backup não encontrado: {arquivo}')
+            log.linha('[1/4] Backup local encontrado no disco do nó.')
 
         # 2. Extrai o backup
         _prog(25)
+        log.linha('[2/4] Extraindo o backup…')
         with tarfile.open(arquivo, 'r:gz') as tar:
             tar.extractall(restore_dir)
 
         # 3. Restaura o banco de dados
         _prog(40)
+        log.linha('[3/4] Restaurando o banco de dados…')
         db_sql = restore_dir / 'db.sql'
         db_ctr = container_local(slug, 'db')
         if not db_sql.exists():
             avisos.append('Backup nao contem db.sql - banco nao foi restaurado.')
+            log.linha('AVISO: o backup não contém db.sql — banco não restaurado.')
         elif not db_ctr:
             avisos.append(f'Container {slug}_db nao encontrado - banco nao foi restaurado.')
+            log.linha(f'AVISO: container {slug}_db não encontrado neste nó — banco não restaurado.')
         else:
-            psql = subprocess.run(
+            log.linha(f'Executando psql no container do banco ({fmt_bytes(db_sql.stat().st_size)} de SQL)…')
+            t0 = time.monotonic()
+            psql = rodar_com_pulso(
+                log, 'psql', subprocess.run,
                 ['docker', 'exec', '-i', db_ctr,
                  'psql', '-v', 'ON_ERROR_STOP=1', '-U', f'erp_{slug}', '-d', f'erp_{slug}'],
                 input=db_sql.read_bytes(),
@@ -515,14 +600,20 @@ def task_restaurar_no(self, cliente_id, backup_id):
                 stderr = psql.stderr.decode(errors='replace').strip()
                 logger.error('Restauracao do banco falhou para %s: %s', slug, stderr)
                 avisos.append(f'Restauracao do banco falhou: {stderr[:300]}')
+                log.linha(f'AVISO: restauração do banco falhou: {stderr[:200]}')
+            else:
+                log.linha(f'Banco restaurado em {int(time.monotonic() - t0)}s.')
         _prog(75)
 
         # 4. Restaura a mídia via container alpine temporário com acesso ao volume
+        log.linha('[4/4] Restaurando a mídia…')
         media_dir = restore_dir / 'media'
         if not media_dir.exists():
             avisos.append('Backup nao contem media/ - arquivos de midia nao foram restaurados.')
+            log.linha('AVISO: o backup não contém media/ — mídia não restaurada.')
         else:
-            docker_run = subprocess.run(
+            docker_run = rodar_com_pulso(
+                log, 'Restauração da mídia', subprocess.run,
                 [
                     'docker', 'run', '--rm',
                     '-v', f'{slug}_media:/app/media',
@@ -536,14 +627,19 @@ def task_restaurar_no(self, cliente_id, backup_id):
                 stderr = docker_run.stderr.decode(errors='replace').strip()
                 logger.error('Restauracao da midia falhou para %s: %s', slug, stderr)
                 avisos.append(f'Restauracao da midia falhou: {stderr[:300]}')
+                log.linha(f'AVISO: restauração da mídia falhou: {stderr[:200]}')
+            else:
+                log.linha('Mídia restaurada.')
         _prog(90)
 
     except Exception as exc:
         avisos.append(f'Erro inesperado: {exc}')
+        log.linha(f'ERRO: {exc}')
         raise
     finally:
         shutil.rmtree(restore_dir, ignore_errors=True)
         BackupCliente.objects.filter(pk=backup_id).update(mensagem_restauracao=' '.join(avisos))
+        log.linha('Restauração no nó terminada. Pedindo ao manager para religar o web…')
         if avisos:
             logger.warning('Restauracao de %s concluida com avisos: %s', slug, ' '.join(avisos))
         # Religar o web é feito no manager, mesmo se a restauração falhou
@@ -555,12 +651,16 @@ def task_restaurar_no(self, cliente_id, backup_id):
 @shared_task
 def task_finalizar_restauracao(cliente_id, backup_id):
     """Etapa do manager: religa o web do cliente e libera o backup."""
+    from .log_operacao import LogOperacao
     from .models import Cliente, BackupCliente
 
     cliente = Cliente.objects.get(pk=cliente_id)
+    log = LogOperacao(backup_id, 'log_restauracao')
     try:
+        log.linha(f'Religando o serviço {cliente.slug}_web…')
         _scale_web(cliente.slug, 1)
     finally:
+        log.linha('CONCLUÍDO: restauração finalizada.')
         BackupCliente.objects.filter(pk=backup_id).update(restaurando=False, progresso=100)
 
 

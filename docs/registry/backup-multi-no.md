@@ -156,9 +156,14 @@ Depois: **💾 Novo Backup** num cliente que roda em um worker. Esperado: status
 
 ## 6. Operação e solução de problemas
 
+O primeiro lugar para olhar é o **console ao vivo** da aba Backups (ou o **📜 Log** do backup): ele mostra a última etapa e se ainda há atividade. Detalhes em `docs/registry/release-console-backup-ao-vivo.md`.
+
 | Sintoma | Causa provável | O que fazer |
 |---|---|---|
-| Backup fica "Em andamento" com 0% | Não há worker consumindo a fila do nó (agente parado ou nó sem agente) | `docker service ps <stack>_agente-no`; ver logs; a task executa quando o agente voltar |
+| Console: "Sem atividade… Nenhuma tarefa começou ainda" (log vazio) | Nenhum worker `celery` pegou o pedido do manager | `docker service ps <stack>_celery`; subir o serviço. Se não voltar, **Interromper** (aparece após 2 min) |
+| Console: "Nenhum worker do nó iniciou a tarefa" | O log parou em "Aguardando um worker do nó iniciar…": agente do nó parado ou nó sem agente | `docker service ps <stack>_agente-no`; ver logs; a task executa quando o agente voltar |
+| Console: "provavelmente travado" no meio de uma etapa | Worker/comando morreu depois de começar (o último pulso mostra onde) | Ver o último "em execução há…"; **Interromper** libera o registro (na restauração religa o web). Confira o container e o nó |
+| Backup fica "Em andamento" com 0% (versões anteriores à 0.0.45) | Não há worker consumindo a fila do nó (agente parado ou nó sem agente) | `docker service ps <stack>_agente-no`; ver logs; a task executa quando o agente voltar |
 | Restauração travada e o ERP do cliente fora do ar | Agente do nó caiu entre o `scale web=0` e a restauração | Subir o agente (a task roda e religa o web). Emergência: `docker service scale {slug}_web=1` no manager |
 | Aviso "Container {slug}_db nao encontrado" | A task rodou em nó errado (ex.: serviço migrou de nó depois do despacho) | Repetir o backup; conferir `docker service ps {slug}_db` |
 | `Falha ao despachar o backup para a fila ...` | Redis do CP inacessível | Verificar o serviço `redis` e a rede `cp-internal` |

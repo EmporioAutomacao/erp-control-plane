@@ -9,6 +9,7 @@ Um `BackupCliente.arquivo_path` que começa com `s3://` aponta para um objeto
 criados antes do bucket existir — continuam podendo ser baixados e restaurados).
 """
 import logging
+import os
 import time
 import uuid
 
@@ -69,16 +70,34 @@ def _cliente(cfg, endpoint=None, curto=False):
     )
 
 
-def enviar(arquivo_local, chave):
-    """Envia o arquivo para o bucket (multipart automático) e devolve o `s3://chave`."""
-    cfg = exigir_configuracao()
-    _cliente(cfg).upload_file(str(arquivo_local), cfg.bucket, chave)
+def enviar(arquivo_local, chave, progresso=None, cfg=None):
+    """Envia o arquivo para o bucket (multipart automático) e devolve o `s3://chave`.
+
+    `progresso` (opcional) é um `log_operacao.Progresso`, alimentado pelo callback do boto3.
+    `cfg` permite resolver a configuração fora da thread (acesso ao banco só na principal).
+    """
+    cfg = cfg or exigir_configuracao()
+    if progresso is not None and not progresso.total:
+        progresso.total = os.path.getsize(arquivo_local)
+    _cliente(cfg).upload_file(
+        str(arquivo_local), cfg.bucket, chave,
+        Callback=progresso.somar if progresso is not None else None,
+    )
     return f'{PREFIXO}{chave}'
 
 
-def baixar(caminho, destino):
-    cfg = exigir_configuracao()
-    _cliente(cfg).download_file(cfg.bucket, _chave(caminho), str(destino))
+def baixar(caminho, destino, progresso=None, cfg=None):
+    cfg = cfg or exigir_configuracao()
+    cliente = _cliente(cfg)
+    if progresso is not None and not progresso.total:
+        try:
+            progresso.total = cliente.head_object(Bucket=cfg.bucket, Key=_chave(caminho))['ContentLength']
+        except Exception:  # só informativo
+            pass
+    cliente.download_file(
+        cfg.bucket, _chave(caminho), str(destino),
+        Callback=progresso.somar if progresso is not None else None,
+    )
 
 
 def apagar(caminho):

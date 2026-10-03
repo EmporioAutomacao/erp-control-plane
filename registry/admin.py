@@ -65,6 +65,7 @@ def _sync_badge(status):
 
 
 class ProvisionamentoLogInline(admin.TabularInline):  # noqa: keep django TabularInline (unfold doesn't override it)
+    tab = True
     model = ProvisionamentoLog
     extra = 0
     readonly_fields = ['etapa', 'status_colorido', 'mensagem', 'iniciado_em', 'concluido_em']
@@ -82,6 +83,7 @@ class ProvisionamentoLogInline(admin.TabularInline):  # noqa: keep django Tabula
 
 
 class AtualizacaoVersaoInline(admin.TabularInline):
+    tab = True
     model = AtualizacaoVersao
     extra = 0
     readonly_fields = ['versao_anterior', 'versao_nova', 'status', 'iniciada_em', 'concluida_em']
@@ -89,6 +91,7 @@ class AtualizacaoVersaoInline(admin.TabularInline):
 
 
 class SincronizacaoVersoesAgenteInline(admin.TabularInline):
+    tab = True
     model = SincronizacaoVersoesAgente
     extra = 0
     fields = ['iniciada_em', 'status_badge', 'iniciada_por', 'versoes_fmt', 'resposta_http_status', 'log_fmt', 'concluida_em']
@@ -174,6 +177,27 @@ def acao_destruir(modeladmin, request, queryset):
 acao_destruir.short_description = 'Destruir cliente(s) — remove stack, volumes e arquivos'
 
 
+def _detalhes_log(b):
+    """📜 Log expansível de um backup (e da última restauração), para diagnosticar falhas passadas."""
+    partes = []
+    if b.log:
+        partes.append(('Log do backup', b.log))
+    if b.log_restauracao:
+        partes.append(('Log da última restauração', b.log_restauracao))
+    if not partes:
+        return ''
+    corpo = ''.join(
+        f'<div style="font-size:11px;color:#666;margin-top:6px;">{titulo}</div>'
+        f'<pre style="margin:2px 0 0;padding:8px 10px;max-height:220px;overflow:auto;background:#0b1220;color:#cbd5e1;'
+        f'border-radius:6px;font-size:11px;line-height:1.5;white-space:pre-wrap;">{escape(texto)}</pre>'
+        for titulo, texto in partes
+    )
+    return (
+        '<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:12px;color:#455a64;">📜 Log</summary>'
+        f'{corpo}</details>'
+    )
+
+
 @admin.register(Cliente)
 class ClienteAdmin(ModelAdmin):
     list_display = ['slug', 'nome', 'subdominio', 'plano', 'status_badge', 'isento_cobranca', 'col_versao_erp', 'criado_em']
@@ -183,19 +207,30 @@ class ClienteAdmin(ModelAdmin):
     filter_horizontal = ['modulos_ativos', 'versoes_permitidas']
     actions = [acao_reprovisionar, acao_destruir]
     inlines = [ProvisionamentoLogInline, AtualizacaoVersaoInline, SincronizacaoVersoesAgenteInline]
+    # Página dividida em abas (steps) pelo Unfold: cada fieldset com classes=['tab'] vira uma aba.
     fieldsets = [
-        ('Identificação', {'fields': ['id', 'slug', 'nome', 'cnpj', 'email_contato', 'telefone']}),
-        ('Acesso', {'fields': ['painel_acesso']}),
-        ('Infraestrutura', {'fields': ['host', 'versao_erp', 'stack_path', 'subdominio', 'dominio_custom']}),
-        ('Versão Atual', {'fields': ['versao_atual']}),
-        ('Plano', {'fields': ['plano', 'modulos_ativos', 'tema_site', 'acoes_plano_sync']}),
-        ('Versões do SyncAgent/PDV', {'fields': ['atualizacao_automatica_agente', 'versoes_permitidas', 'acoes_versoes']}),
-        ('Faturamento', {'fields': ['asaas_customer_id', 'asaas_subscription_id', 'badge_isencao', 'isento_cobranca', 'motivo_isencao']}),
-        ('Status', {'fields': ['status_badge', 'status', 'trial_ate', 'data_ativacao', 'data_suspensao', 'data_cancelamento']}),
-        ('Ações', {'fields': ['acoes_provisionamento']}),
-        ('Backups', {'fields': ['lista_backups']}),
-        ('Observações', {'fields': ['observacoes', 'criado_em', 'atualizado_em']}),
+        ('Cadastro', {'classes': ['tab'], 'fields': [
+            'id', 'slug', 'nome', 'cnpj', 'email_contato', 'telefone', 'observacoes', 'criado_em', 'atualizado_em',
+        ]}),
+        ('Acesso e Infraestrutura', {'classes': ['tab'], 'fields': [
+            'painel_acesso', 'host', 'versao_erp', 'stack_path', 'subdominio', 'dominio_custom',
+        ]}),
+        ('Plano e Faturamento', {'classes': ['tab'], 'fields': [
+            'plano', 'modulos_ativos', 'tema_site', 'acoes_plano_sync',
+            'asaas_customer_id', 'asaas_subscription_id', 'badge_isencao', 'isento_cobranca', 'motivo_isencao',
+        ]}),
+        ('Versões', {'classes': ['tab'], 'fields': [
+            'versao_atual', 'atualizacao_automatica_agente', 'versoes_permitidas', 'acoes_versoes',
+        ]}),
+        ('Status e Ações', {'classes': ['tab'], 'fields': [
+            'status_badge', 'status', 'trial_ate', 'data_ativacao', 'data_suspensao', 'data_cancelamento',
+            'acoes_provisionamento',
+        ]}),
+        ('Backups', {'classes': ['tab'], 'fields': ['lista_backups']}),
     ]
+
+    class Media:
+        js = ('registry/abas_cliente.js',)
 
     def get_urls(self):
         urls = super().get_urls()
@@ -214,6 +249,7 @@ class ClienteAdmin(ModelAdmin):
             path('<pk>/backups/<int:backup_id>/download/', self.admin_site.admin_view(self._view_download_backup), name='registry_cliente_backup_download'),
             path('<pk>/backups/<int:backup_id>/restaurar/', self.admin_site.admin_view(self._view_restaurar), name='registry_cliente_restaurar'),
             path('<pk>/backups/<int:backup_id>/status/', self.admin_site.admin_view(self._view_status_backup), name='registry_cliente_backup_status'),
+            path('<pk>/backups/<int:backup_id>/interromper/', self.admin_site.admin_view(self._view_interromper_backup), name='registry_cliente_backup_interromper'),
         ] + urls
 
     def _view_reprovisionar(self, request, pk):
@@ -610,8 +646,9 @@ class ClienteAdmin(ModelAdmin):
         cliente = get_object_or_404(Cliente, pk=pk)
         backup = BackupCliente.objects.create(cliente=cliente)
         task_iniciar_backup_cliente.delay(str(cliente.pk), backup.pk)
-        messages.success(request, f'Backup iniciado para "{cliente.slug}". Recarregue a página para ver o status.')
-        return redirect('admin:registry_cliente_change', pk)
+        messages.success(request, f'Backup iniciado para "{cliente.slug}". Acompanhe o console abaixo.')
+        from django.urls import reverse
+        return redirect(f"{reverse('admin:registry_cliente_change', args=[pk])}?acompanhar={backup.pk}")
 
     def _view_upload_backup(self, request, pk):
         import tarfile
@@ -713,20 +750,64 @@ class ClienteAdmin(ModelAdmin):
         messages.warning(
             request,
             f'Restauração iniciada para "{cliente.slug}". O ERP ficará indisponível por alguns minutos. '
-            f'Acompanhe o progresso na seção Backups abaixo.',
+            f'Acompanhe o console abaixo.',
         )
-        return redirect('admin:registry_cliente_change', pk)
+        from django.urls import reverse
+        return redirect(f"{reverse('admin:registry_cliente_change', args=[pk])}?acompanhar={backup.pk}&op=restauracao")
 
     def _view_status_backup(self, request, pk, backup_id):
+        from django.utils import timezone
         backup = get_object_or_404(BackupCliente, pk=backup_id, cliente__pk=pk)
         ativo = backup.status == 'em_andamento' or backup.restaurando
+        op = 'restauracao' if (backup.restaurando or request.GET.get('op') == 'restauracao') else 'backup'
+        agora = timezone.now()
+        inicio = backup.restauracao_iniciada_em if (op == 'restauracao' and backup.restauracao_iniciada_em) else backup.criado_em
+        referencia = backup.atividade_em or inicio
+        log = backup.log_restauracao if op == 'restauracao' else backup.log
+        ativo_operacao = backup.restaurando if op == 'restauracao' else backup.status == 'em_andamento'
+        mensagem = backup.mensagem_restauracao if op == 'restauracao' else backup.mensagem
         return JsonResponse({
             'status': backup.status,
             'progresso': backup.progresso,
             'restaurando': backup.restaurando,
             'ativo': ativo,
-            'mensagem': backup.mensagem[:120] if backup.mensagem else '',
+            'ativo_operacao': ativo_operacao,
+            'operacao': op,
+            'mensagem': mensagem[:300] if mensagem else '',
+            'log': log,
+            'decorrido_s': max(0, int((agora - inicio).total_seconds())),
+            'sem_atividade_s': max(0, int((agora - referencia).total_seconds())),
+            'aguardando_worker': bool(ativo_operacao and 'Aguardando um worker' in log and 'iniciou' not in log),
+            'sem_inicio': bool(ativo_operacao and not log.strip()),  # nenhuma tarefa chegou a começar (nenhum worker?)
         })
+
+    def _view_interromper_backup(self, request, pk, backup_id):
+        """Saída para backup/restauração travado (worker morto, tarefa perdida): só após 120 s sem atividade."""
+        from django.utils import timezone
+        from .console_backup import LIMITE_TRAVADO_S
+        from .log_operacao import LogOperacao
+        if request.method != 'POST':
+            return JsonResponse({'ok': False, 'motivo': 'metodo'}, status=405)
+        backup = get_object_or_404(BackupCliente, pk=backup_id, cliente__pk=pk)
+        restaurando = backup.restaurando
+        if not (backup.status == 'em_andamento' or restaurando):
+            return JsonResponse({'ok': False, 'motivo': 'nao_ativa'}, status=409)
+        inicio = backup.restauracao_iniciada_em if (restaurando and backup.restauracao_iniciada_em) else backup.criado_em
+        sem_atividade = int((timezone.now() - (backup.atividade_em or inicio)).total_seconds())
+        if sem_atividade < LIMITE_TRAVADO_S:
+            return JsonResponse({'ok': False, 'motivo': 'recente', 'sem_atividade_s': sem_atividade}, status=409)
+        motivo = f'Interrompida manualmente: sem atividade há {sem_atividade}s.'
+        if restaurando:
+            from .tasks import _scale_web
+            LogOperacao(backup.pk, 'log_restauracao').linha(f'ERRO: {motivo} Religando o web…')
+            _scale_web(backup.cliente.slug, 1)
+            BackupCliente.objects.filter(pk=backup.pk).update(
+                restaurando=False, progresso=100, mensagem_restauracao=motivo,
+            )
+        else:
+            LogOperacao(backup.pk).linha(f'ERRO: {motivo}')
+            BackupCliente.objects.filter(pk=backup.pk).update(status='erro', progresso=100, mensagem=motivo)
+        return JsonResponse({'ok': True})
 
     def status_badge(self, obj):
         cor = _STATUS_CORES.get(obj.status, '#757575')
@@ -1066,6 +1147,12 @@ class ClienteAdmin(ModelAdmin):
             'erro':         ('#ffebee', '#b71c1c', 'Erro'),
         }
 
+        ativa = next((x for x in backups if x.status == 'em_andamento' or x.restaurando), None)
+        from .console_backup import renderizar as _renderizar_console
+        console = _renderizar_console(
+            obj.pk, ativa.pk if ativa else None, 'restauracao' if (ativa and ativa.restaurando) else 'backup',
+        )
+
         linhas = []
         scripts = []
         for b in backups:
@@ -1089,7 +1176,7 @@ class ClienteAdmin(ModelAdmin):
                     f'</div>'
                     f'<div style="font-size:11px;color:#555;margin-top:3px;">'
                     f'  <span id="bppct-{b.pk}">{pct}%</span>'
-                    f'  <span style="margin-left:8px;color:#999;">· recarregando automaticamente…</span>'
+                    f'  <span style="margin-left:8px;color:#999;">· acompanhe no console acima</span>'
                     f'</div>'
                 )
                 url_status = reverse('admin:registry_cliente_backup_status', args=[obj.pk, b.pk])
@@ -1101,7 +1188,7 @@ class ClienteAdmin(ModelAdmin):
                     f'    fetch("{url_status}").then(function(r){{return r.json();}}).then(function(d){{'
                     f'      if(bar){{bar.style.width=d.progresso+"%";}} '
                     f'      if(pct){{pct.textContent=d.progresso+"%";}} '
-                    f'      if(!d.ativo){{clearInterval(iv);location.reload();}}'
+                    f'      if(!d.ativo){{clearInterval(iv);}}'
                     f'    }}).catch(function(){{clearInterval(iv);}});'
                     f'  }},2000);'
                     f'}})();'
@@ -1128,6 +1215,7 @@ class ClienteAdmin(ModelAdmin):
                 )
             else:
                 acoes = f'<span style="color:#b71c1c;font-size:12px;">{escape(b.mensagem[:100])}</span>'
+            acoes += _detalhes_log(b)
 
             linhas.append(
                 f'<tr>'
@@ -1147,7 +1235,8 @@ class ClienteAdmin(ModelAdmin):
         )
 
         script_tag = f'<script>{" ".join(scripts)}</script>' if scripts else ''
-        return format_html('{}{}{}', mark_safe(botoes), mark_safe(tabela), mark_safe(script_tag))
+        tabela = f'<div id="bk-tabela">{tabela}</div>'
+        return format_html('{}{}{}{}', mark_safe(botoes), mark_safe(console), mark_safe(tabela), mark_safe(script_tag))
 
     lista_backups.short_description = 'Backups'
 

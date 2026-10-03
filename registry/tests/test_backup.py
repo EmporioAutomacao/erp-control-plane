@@ -416,10 +416,10 @@ class TaskRestaurarNoTests(SimpleTestCase):
         self.backup.arquivo_path = 's3://clientes/acme/backup_acme_x.tar.gz'
         tar_bytes = _make_tar_bytes({'db.sql': b'-- dump', 'media/foo.txt': b'x'})
 
-        def _baixar(caminho, destino):
+        def _baixar(caminho, destino, **kwargs):
             Path(destino).write_bytes(tar_bytes)
 
-        with patch('registry.storage_backup.baixar', side_effect=_baixar) as baixar:
+        with patch('registry.storage_backup.exigir_configuracao', return_value=SimpleNamespace(bucket='b')),                 patch('registry.storage_backup.baixar', side_effect=_baixar) as baixar:
             task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id')
 
         baixar.assert_called_once()
