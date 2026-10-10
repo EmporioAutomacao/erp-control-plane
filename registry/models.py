@@ -489,6 +489,10 @@ class ConfiguracaoAtualizacao(models.Model):
         verbose_name='Atualização iniciada por',
     )
     atualizacao_container = models.CharField('Container da atualização', max_length=100, blank=True)
+    atualizacao_tag_anterior = models.CharField(
+        'Tag do web antes da atualização', max_length=100, blank=True,
+        help_text="Se era 'latest', o stack acompanha a latest e não precisa ajustar CP_VERSION.",
+    )
 
     class Meta:
         verbose_name = 'Verificar Atualizações'

@@ -54,8 +54,12 @@
     <ul>
       <li>O painel e as tarefas ficam indisponíveis por alguns instantes durante a troca; esta tela pode sair do ar.</li>
       <li>As migrations da nova versão rodam automaticamente. Não há como voltar à versão anterior pelo painel.</li>
+      {% if usa_latest %}
+      <li>O stack do CP usa a tag <code>latest</code>: um redeploy do stack (com <em>Re-pull image</em>) também traz a versão mais recente, então não precisa ajustar <code>CP_VERSION</code>.</li>
+      {% else %}
       <li><strong>Depois, ajuste <code>CP_VERSION={{ versao }}</code> no stack do Portainer.</strong>
           Sem isso, um redeploy do stack volta o CP para a versão antiga.</li>
+      {% endif %}
     </ul>
   </div>
 

@@ -225,6 +225,30 @@ def imagem_do_servico(servico):
     return imagem or None
 
 
+def tag_da_imagem(imagem):
+    """Tag de `repo:tag` (sem tag = latest). O digest já vem removido por `imagem_do_servico`."""
+    ultimo = (imagem or '').rsplit('/', 1)[-1]
+    return ultimo.split(':', 1)[1] if ':' in ultimo else 'latest'
+
+
+def stack_usa_latest(cfg=None):
+    """O stack do CP acompanha a tag `latest`? (então não é preciso ajustar `CP_VERSION` no Portainer)
+
+    True  — o serviço `web` está em `latest`, ou foi fixado pelo painel numa atualização feita quando estava em `latest`;
+    False — está numa tag numérica por escolha do stack;
+    None  — não dá para saber (sem Swarm ou stack não identificado): quem chama assume o aviso cauteloso.
+    """
+    if not swarm_manager():
+        return None
+    stack = descobrir_stack()
+    if not stack:
+        return None
+    tag = tag_da_imagem(imagem_do_servico(f'{stack}_web'))
+    if tag == 'latest':
+        return True
+    return bool(cfg and cfg.atualizacao_tag_anterior == 'latest' and tag == cfg.atualizacao_alvo)
+
+
 def montar_script(repositorio, versao, servicos):
     """Script (sh) do container auxiliar. Só recebe valores já validados (semver, repo, nomes do Docker)."""
     assert eh_semver(versao) and repositorio_valido(repositorio)
@@ -297,6 +321,7 @@ def iniciar_atualizacao(cfg, versao, usuario):
     if cfg.atualizacao_container:  # remove o auxiliar da execução anterior
         _docker('rm', '-f', cfg.atualizacao_container, timeout=30)
 
+    tag_anterior = tag_da_imagem(imagem)
     nome = f'cp-atualizador-{versao.replace(".", "-")}-{int(time.time())}'
     script = montar_script(cfg.repositorio.strip(), versao, servicos)
     r = _docker(
@@ -311,7 +336,7 @@ def iniciar_atualizacao(cfg, versao, usuario):
 
     ConfiguracaoAtualizacao.objects.filter(pk=1).update(
         atualizacao_alvo=versao, atualizacao_iniciada_em=timezone.now(),
-        atualizacao_iniciada_por=usuario, atualizacao_container=nome,
+        atualizacao_iniciada_por=usuario, atualizacao_container=nome, atualizacao_tag_anterior=tag_anterior,
     )
     logger.info('Atualizacao do CP para %s iniciada por %s (container %s)', versao, usuario, nome)
     return nome

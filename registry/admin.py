@@ -1671,16 +1671,21 @@ class ConfiguracaoAtualizacaoAdmin(ModelAdmin):
         if not atualizacoes.ha_atualizacao(atualizacoes.versao_atual(), versao):
             messages.error(request, f'A versão {versao} não é mais nova que a atual ({atualizacoes.versao_atual()}).')
             return self._voltar()
+        usa_latest = atualizacoes.stack_usa_latest(cfg)
         if request.method == 'POST':
             try:
                 atualizacoes.iniciar_atualizacao(cfg, versao, request.user)
             except atualizacoes.ErroAtualizacao as exc:
                 messages.error(request, str(exc))
             else:
+                depois = (
+                    'Como o stack usa a tag latest, um redeploy do stack também traz a versão mais recente.'
+                    if usa_latest else
+                    f'Depois, ajuste CP_VERSION={versao} no stack do Portainer, senão um redeploy volta a versão antiga.'
+                )
                 messages.warning(
                     request,
-                    f'Atualização para {versao} iniciada. O painel pode ficar indisponível por instantes. '
-                    f'Depois, ajuste CP_VERSION={versao} no stack do Portainer, senão um redeploy volta a versão antiga.',
+                    f'Atualização para {versao} iniciada. O painel pode ficar indisponível por instantes. {depois}',
                 )
             return self._voltar()
         from django.urls import reverse
@@ -1688,7 +1693,7 @@ class ConfiguracaoAtualizacaoAdmin(ModelAdmin):
             **self.admin_site.each_context(request),
             'title': f'Atualizar o CP para {versao}',
             'versao': versao, 'versao_atual': atualizacoes.versao_atual(),
-            'repositorio': cfg.repositorio,
+            'repositorio': cfg.repositorio, 'usa_latest': usa_latest,
             'voltar_url': reverse('admin:registry_configuracaoatualizacao_change', args=[1]),
         }
         return render(request, 'registry/admin_confirmar_atualizacao.html', context)
@@ -1711,6 +1716,17 @@ class ConfiguracaoAtualizacaoAdmin(ModelAdmin):
         base_atualizar = reverse('admin:registry_configuracaoatualizacao_atualizar', args=['9.9.9']).replace('9.9.9/', '')
         url_atualizar = f'{base_atualizar}{alvo}/' if alvo else ''
         recentes = ', '.join(obj.versoes_recentes[:6]) or '—'
+        usa_latest = atualizacoes.stack_usa_latest(obj) if swarm else None
+        if usa_latest:
+            nota_stack = mark_safe(
+                '<div style="margin-top:10px;font-size:12px;color:#475569;">O stack do CP usa a tag <code>latest</code>: '
+                'um redeploy do stack (com <em>Re-pull image</em>) também traz a versão mais recente.</div>'
+            )
+        else:
+            nota_stack = mark_safe(
+                '<div style="margin-top:10px;font-size:12px;color:#92400e;">Ao atualizar pelo painel, ajuste também <code>CP_VERSION</code> '
+                'no stack do Portainer — senão um redeploy volta a versão antiga.</div>'
+            )
         estilo_btn = ('display:inline-block;padding:6px 14px;color:#fff;border-radius:4px;'
                       'text-decoration:none;font-size:13px;margin-right:8px;')
         if swarm:
@@ -1751,13 +1767,11 @@ class ConfiguracaoAtualizacaoAdmin(ModelAdmin):
             '<tr><td style="padding:4px 18px 4px 0;color:#6b7280;">Versões recentes</td><td id="atz-recentes">{}</td></tr>'
             '</table>'
             '<div style="margin-top:12px;">{}<a href="{}" style="{}background:#417690;">🔄 Verificar agora</a></div>{}'
-            '<div style="margin-top:10px;font-size:12px;color:#92400e;">Ao atualizar pelo painel, ajuste também <code>CP_VERSION</code> '
-            'no stack do Portainer — senão um redeploy volta a versão antiga.</div>'
-            '<script>{}</script>',
+            '{}<script>{}</script>',
             atualizacoes.versao_atual(), obj.versao_disponivel or '—',
             _atz_pill(_ATZ_SITUACAO_ROTULOS[sit], _ATZ_SITUACAO_CORES[sit], 'atz-situacao'),
             f'verificado há {timesince(obj.verificado_em)}' if obj.verificado_em else 'ainda não verificado',
-            recentes, botao_atualizar, url_agora, mark_safe(estilo_btn), aviso_swarm, mark_safe(script),
+            recentes, botao_atualizar, url_agora, mark_safe(estilo_btn), aviso_swarm, nota_stack, mark_safe(script),
         )
     painel_versao.short_description = 'Versões'
 
@@ -1786,7 +1800,7 @@ class ConfiguracaoAtualizacaoAdmin(ModelAdmin):
         aviso = format_html(
             '<div style="margin-top:6px;font-size:12px;color:#92400e;">Lembre-se de ajustar <code>CP_VERSION={}</code> no stack do Portainer.</div>',
             obj.atualizacao_alvo,
-        ) if estado['estado'] in ('em_andamento', 'concluida') else ''
+        ) if estado['estado'] in ('em_andamento', 'concluida') and obj.atualizacao_tag_anterior != 'latest' else ''
         return format_html(
             'Para a versão <strong>{}</strong>, iniciada em {} por {}: {}{}{}',
             obj.atualizacao_alvo, quando, quem, _atz_pill(rotulo, cor), aviso, log,

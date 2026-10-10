@@ -64,6 +64,10 @@ Log manual: `docker logs cp-atualizador-<versão>-<timestamp>`.
 > serviços direto no Swarm; o Portainer continua com a versão antiga e um redeploy do stack **voltaria o CP**.
 > A tela e a mensagem de sucesso repetem esse aviso.
 
+### Stack em `latest` (sem `CP_VERSION` fixo)
+
+Se o serviço `web` roda com a tag `latest`, o aviso do `CP_VERSION` não se aplica: a tela, a confirmação e a mensagem de sucesso passam a dizer que *um redeploy do stack (com Re-pull image) também traz a versão mais recente*. A detecção (`atualizacoes.stack_usa_latest`) lê a imagem do serviço no Swarm; como o botão fixa os serviços na tag numérica, a tag que o stack usava antes é guardada em `ConfiguracaoAtualizacao.atualizacao_tag_anterior` (migration `0023`) — assim o aviso não volta a aparecer depois da atualização. Sem Swarm ou sem stack identificado, mantém o aviso cauteloso. Importante: com `latest` o Swarm só troca a imagem num redeploy/`service update`; mover a tag no Docker Hub não atualiza sozinho.
+
 ## 5. Validação
 
 | Verificação | Resultado |

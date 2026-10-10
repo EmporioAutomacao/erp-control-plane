@@ -183,7 +183,7 @@ HTML puro com estilos inline (compatível com clientes de e-mail). Visual dark m
 - A lista de tags de `emporioautomacao/ararasuite-cp` é **pública**: usuário/token do Docker Hub são opcionais (token criptografado, nunca reexibido).
 - **Botão Atualizar** (`atualizar/<versao>/`: GET confirma, POST executa; **só superusuário**): lógica em `registry/atualizacoes.py`. Um **container auxiliar destacado** (imagem atual do `web`, `docker.sock` + `/root/.docker`) roda `docker service update --with-registry-auth --update-failure-action rollback --detach=false --image <repo>:<versão>` em `celery` → `beat` → `agente-no` → `web` (web por último; `db`/`redis` nunca). Recusa downgrade/mesma versão, versão inexistente no Docker Hub, ambiente sem Swarm manager, stack não identificado e atualização em andamento. Em dev (sem Swarm) o botão não aparece.
 - O log fica no container auxiliar (`cp-atualizador-<versão>-<ts>`, sem `--rm`) e a tela mostra Em andamento / Concluída / Falhou com as últimas linhas.
-- **Depois de atualizar, ajustar `CP_VERSION` no stack do Portainer** — o painel altera os serviços direto no Swarm; um redeploy do stack com `CP_VERSION` antigo desfaria a atualização. Doc: `docs/registry/release-verificar-atualizacoes.md`.
+- **Depois de atualizar, ajustar `CP_VERSION` no stack do Portainer** — o painel altera os serviços direto no Swarm; um redeploy do stack com `CP_VERSION` antigo desfaria a atualização. **Exceção:** se o `web` roda em `latest` (`atualizacoes.stack_usa_latest`; guarda a tag anterior em `atualizacao_tag_anterior`), o aviso é trocado por "um redeploy com Re-pull image também traz a versão mais recente". Doc: `docs/registry/release-verificar-atualizacoes.md`.
 
 ### ConfiguracaoArmazenamentoAdmin (Configurações > Armazenamento)
 

@@ -17,6 +17,7 @@ def _cfg(**extra):
         repositorio='emporioautomacao/ararasuite-cp', dockerhub_usuario='', dockerhub_token_cifrado='',
         dockerhub_token='', status_conexao='nao_testado', status_mensagem='', verificado_em=None,
         versao_disponivel='', versoes_recentes=[], atualizacao_container='', atualizacao_alvo='',
+        atualizacao_tag_anterior='',
     )
     base.update(extra)
     return SimpleNamespace(**base)
@@ -291,6 +292,9 @@ class AdminAtualizacaoTests(TestCase):
         p = patch('registry.atualizacoes.swarm_manager', return_value=False)
         p.start()
         self.addCleanup(p.stop)
+        p = patch('registry.atualizacoes.stack_usa_latest', return_value=False)
+        self.usa_latest = p.start()
+        self.addCleanup(p.stop)
 
     def _salvar(self, resultado=None):
         with patch('registry.atualizacoes.verificar', return_value=resultado or self.ok):
@@ -441,3 +445,146 @@ class TaskVerificarAtualizacaoTests(TestCase):
             self.assertEqual(task_verificar_atualizacao(), 'conectado')
         cfg = ConfiguracaoAtualizacao.obter()
         self.assertEqual((cfg.versao_disponivel, cfg.versoes_recentes), ('0.0.44', ['0.0.44']))
+
+
+class TagDaImagemTests(SimpleTestCase):
+    def test_tag_da_imagem(self):
+        self.assertEqual(atualizacoes.tag_da_imagem('emporioautomacao/ararasuite-cp:latest'), 'latest')
+        self.assertEqual(atualizacoes.tag_da_imagem('emporioautomacao/ararasuite-cp:0.0.45'), '0.0.45')
+        self.assertEqual(atualizacoes.tag_da_imagem('emporioautomacao/ararasuite-cp'), 'latest')  # sem tag = latest
+        self.assertEqual(atualizacoes.tag_da_imagem('registro:5000/emporio/cp:0.0.9'), '0.0.9')  # porta no host não é tag
+        self.assertEqual(atualizacoes.tag_da_imagem('registro:5000/emporio/cp'), 'latest')
+
+
+@override_settings(VERSION='0.0.43')
+class StackUsaLatestTests(SimpleTestCase):
+    def _usa(self, tag_atual, cfg=None, swarm=True, stack='cp'):
+        imagem = f'emporioautomacao/ararasuite-cp:{tag_atual}' if tag_atual else None
+        with patch('registry.atualizacoes.swarm_manager', return_value=swarm), \
+                patch('registry.atualizacoes.descobrir_stack', return_value=stack), \
+                patch('registry.atualizacoes.imagem_do_servico', return_value=imagem):
+            return atualizacoes.stack_usa_latest(cfg)
+
+    def test_web_em_latest(self):
+        self.assertIs(self._usa('latest'), True)
+
+    def test_tag_numerica_escolhida_pelo_stack(self):
+        self.assertIs(self._usa('0.0.43', _cfg()), False)
+
+    def test_fixada_pelo_painel_quando_o_stack_era_latest(self):
+        cfg = _cfg(atualizacao_tag_anterior='latest', atualizacao_alvo='0.0.45')
+        self.assertIs(self._usa('0.0.45', cfg), True)
+
+    def test_fixada_pelo_painel_mas_o_stack_ja_era_numerico(self):
+        cfg = _cfg(atualizacao_tag_anterior='0.0.43', atualizacao_alvo='0.0.45')
+        self.assertIs(self._usa('0.0.45', cfg), False)
+
+    def test_tag_mudou_por_outro_caminho_nao_assume_latest(self):
+        cfg = _cfg(atualizacao_tag_anterior='latest', atualizacao_alvo='0.0.45')
+        self.assertIs(self._usa('0.0.50', cfg), False)
+
+    def test_sem_swarm_ou_sem_stack_e_desconhecido(self):
+        self.assertIsNone(self._usa('latest', swarm=False))
+        self.assertIsNone(self._usa('latest', stack=None))
+
+
+@override_settings(VERSION='0.0.43')
+class AvisoDoCpVersionTests(TestCase):
+    """O aviso "ajuste CP_VERSION" só aparece quando o stack NÃO acompanha a latest."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser('lat_admin', 'lat@example.com', 'SenhaSegura123!')
+        self.cfg = ConfiguracaoAtualizacao.objects.create(
+            status_conexao='conectado', versao_disponivel='0.0.45', versoes_recentes=['0.0.45', '0.0.43'],
+        )
+        self.c = Client()
+        self.c.force_login(self.user)
+        self.change = reverse('admin:registry_configuracaoatualizacao_change', args=[1])
+        self.confirmar = reverse('admin:registry_configuracaoatualizacao_atualizar', args=['0.0.45'])
+        for alvo, ret in (('registry.atualizacoes.swarm_manager', True),):
+            p = patch(alvo, return_value=ret)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _com(self, usa_latest):
+        return patch('registry.atualizacoes.stack_usa_latest', return_value=usa_latest)
+
+    def test_painel_com_stack_em_latest(self):
+        with self._com(True):
+            html = self.c.get(self.change).content.decode()
+        self.assertIn('usa a tag <code>latest</code>', html)
+        self.assertNotIn('ajuste também <code>CP_VERSION</code>', html)
+
+    def test_painel_com_stack_numerico_ou_desconhecido(self):
+        for valor in (False, None):
+            with self._com(valor):
+                html = self.c.get(self.change).content.decode()
+            self.assertIn('ajuste também <code>CP_VERSION</code>', html)
+            self.assertNotIn('usa a tag <code>latest</code>', html)
+
+    def test_confirmacao_com_stack_em_latest(self):
+        with self._com(True):
+            html = self.c.get(self.confirmar).content.decode()
+        self.assertIn('usa a tag <code>latest</code>', html)
+        self.assertNotIn('Depois, ajuste', html)
+
+    def test_confirmacao_com_stack_numerico(self):
+        with self._com(False):
+            html = self.c.get(self.confirmar).content.decode()
+        self.assertIn('Depois, ajuste <code>CP_VERSION=0.0.45</code>', html)
+
+    def test_mensagem_de_sucesso_com_stack_em_latest(self):
+        with self._com(True), patch('registry.atualizacoes.iniciar_atualizacao', return_value='cp-atualizador-x'):
+            resp = self.c.post(self.confirmar, follow=True)
+        self.assertContains(resp, 'Atualização para 0.0.45 iniciada')
+        self.assertContains(resp, 'o stack usa a tag latest')
+        self.assertNotContains(resp, 'ajuste CP_VERSION=0.0.45')
+
+    def test_mensagem_de_sucesso_com_stack_numerico(self):
+        with self._com(False), patch('registry.atualizacoes.iniciar_atualizacao', return_value='cp-atualizador-x'):
+            resp = self.c.post(self.confirmar, follow=True)
+        self.assertContains(resp, 'ajuste CP_VERSION=0.0.45')
+
+    def test_andamento_nao_cobra_cp_version_quando_o_stack_era_latest(self):
+        from django.utils import timezone
+        ConfiguracaoAtualizacao.objects.filter(pk=1).update(
+            atualizacao_alvo='0.0.45', atualizacao_container='cp-atualizador-x', atualizacao_tag_anterior='latest',
+            atualizacao_iniciada_em=timezone.now(), atualizacao_iniciada_por=self.user,
+        )
+        with self._com(True), patch('registry.atualizacoes._docker', _docker_falso(estado='running|0')):
+            html = self.c.get(self.change).content.decode()
+        self.assertIn('Em andamento', html)
+        self.assertNotIn('Lembre-se de ajustar', html)
+        ConfiguracaoAtualizacao.objects.filter(pk=1).update(atualizacao_tag_anterior='0.0.43')
+        with self._com(False), patch('registry.atualizacoes._docker', _docker_falso(estado='running|0')):
+            html = self.c.get(self.change).content.decode()
+        self.assertIn('Lembre-se de ajustar', html)
+
+
+@override_settings(VERSION='0.0.43')
+class RegistraTagAnteriorTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser('tag_admin', 'tag@example.com', 'SenhaSegura123!')
+        self.cfg = ConfiguracaoAtualizacao.objects.create(repositorio='emporioautomacao/ararasuite-cp')
+        for alvo, kw in (
+            ('registry.atualizacoes.listar_tags', {'return_value': ['0.0.43', '0.0.45']}),
+        ):
+            p = patch(alvo, **kw)
+            p.start()
+            self.addCleanup(p.stop)
+        env = patch.dict('os.environ', {'HOSTNAME': 'abc123'})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def _iniciar(self, imagem):
+        with patch('registry.atualizacoes._docker', _docker_falso(imagem=imagem)):
+            atualizacoes.iniciar_atualizacao(self.cfg, '0.0.45', self.user)
+        self.cfg.refresh_from_db()
+
+    def test_guarda_latest_quando_o_stack_estava_em_latest(self):
+        self._iniciar('emporioautomacao/ararasuite-cp:latest@sha256:abc')
+        self.assertEqual(self.cfg.atualizacao_tag_anterior, 'latest')
+
+    def test_guarda_a_tag_numerica_anterior(self):
+        self._iniciar('emporioautomacao/ararasuite-cp:0.0.43@sha256:abc')
+        self.assertEqual(self.cfg.atualizacao_tag_anterior, '0.0.43')

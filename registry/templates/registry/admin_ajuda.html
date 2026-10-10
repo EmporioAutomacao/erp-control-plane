@@ -775,6 +775,7 @@
     <p style="margin-top:8px;">Com uma versão nova, o botão <strong>⬆ Atualizar para X</strong> (só superusuários, só em ambiente Swarm) pede confirmação e atualiza os serviços celery, beat, agente-no e web, nessa ordem. O andamento (Em andamento / Concluída / Falhou) e o log aparecem na própria tela.</p>
     <div class="ajuda-alert-warn" style="margin-top:10px;margin-bottom:0;">
       ⚠️ <strong>Depois de atualizar, ajuste <code>CP_VERSION</code> no stack do Portainer</strong> para a nova versão. O painel altera os serviços direto no Swarm; se o stack for reimplantado com a versão antiga, o CP volta para ela. Durante a troca o painel pode ficar indisponível por instantes, e não é possível voltar a uma versão anterior pelo painel.
+      <br><strong>Se o seu stack usa a tag <code>latest</code></strong> (o padrão), isso não é necessário: a tela detecta e avisa que um redeploy do stack (com <em>Re-pull image</em>) também traz a versão mais recente.
     </div>
   </div>
 
