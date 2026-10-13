@@ -48,6 +48,19 @@ class MotorProvisionamentoImagemTests(SimpleTestCase):
         self.assertIn('CP_CLIENTE_NOME: "Anapolis"', stack)
         self.assertIn('CP_CLIENTE_CNPJ: "12.345.678/0001-90"', stack)
 
+    def test_site_url_usa_sempre_o_subdominio(self):
+        from registry.provisioning import site_url_cliente
+
+        cliente = SimpleNamespace(subdominio='acme.ararasuite.com.br', dominio_custom='acme.com.br')
+        self.assertEqual(site_url_cliente(cliente), 'https://acme.ararasuite.com.br')
+
+    def test_stack_propaga_site_url(self):
+        stack = self.motor._gerar_stack_yaml(
+            slug='acme', subdominio='acme.ararasuite.com.br', versao='0.0.71', regiao='anapolis',
+            env_vars={'POSTGRES_PASSWORD': 'senha', 'SITE_URL': 'https://acme.ararasuite.com.br'},
+        )
+        self.assertIn('SITE_URL: "https://acme.ararasuite.com.br"', stack)
+
     @patch('registry.models.Cliente.objects.filter')
     @patch('registry.provisioning.CHECK_HTTP_HEALTH', False)
     @patch('registry.provisioning.subprocess.run')

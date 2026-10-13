@@ -298,6 +298,10 @@ class ClienteAdmin(ModelAdmin):
 
         import secrets
 
+        from .provisioning import site_url_cliente
+
+        site_url = site_url_cliente(cliente)
+
         # Backfill do segredo de integracao CP -> erp (sincronizar-versoes) pra
         # clientes provisionados antes desta feature. Reusa o que ja estiver
         # salvo -- nunca troca um segredo existente por baixo do pano.
@@ -314,6 +318,7 @@ class ClienteAdmin(ModelAdmin):
                 'TEMA_SITE': tema,
                 'ALLOWED_HOSTS': allowed_hosts,
                 'CSRF_TRUSTED_ORIGINS': csrf_origins,
+                'SITE_URL': site_url,
                 'CP_CLIENTE_ID': str(cliente.id),
                 'CP_CLIENTE_NOME': cliente.nome,
                 'CP_CLIENTE_CNPJ': cliente.cnpj,
@@ -343,6 +348,7 @@ class ClienteAdmin(ModelAdmin):
             '--env-add', f'TEMA_SITE={tema}',
             '--env-add', f'ALLOWED_HOSTS={allowed_hosts}',
             '--env-add', f'CSRF_TRUSTED_ORIGINS={csrf_origins}',
+            '--env-add', f'SITE_URL={site_url}',
             '--env-add', f'CP_CLIENTE_ID={cliente.id}',
             '--env-add', f'CP_CLIENTE_NOME={cliente.nome}',
             '--env-add', f'CP_CLIENTE_CNPJ={cliente.cnpj}',

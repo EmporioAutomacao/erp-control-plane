@@ -17,6 +17,18 @@ DOMAIN = os.getenv('ERP_DOMAIN', 'ararasuite.com.br')
 CHECK_HTTP_HEALTH = os.getenv('PROVISIONING_CHECK_HTTP', 'true').lower() == 'true'
 
 
+def site_url_cliente(cliente) -> str:
+    """URL pública base da instância (``SITE_URL`` do ERP).
+
+    O ERP usa em tudo que sai para fora sem request: links de peça de campanha
+    no WhatsApp, imagens do HTML no e-mail, "abra no navegador", QR do portal de
+    O.S., PDFs gerados por cron. Usa sempre o **subdomínio**: ele funciona desde o
+    provisionamento, enquanto o domínio próprio depende de o cliente trocar os
+    nameservers no Cloudflare — um link já enviado com DNS pendente quebraria.
+    """
+    return f"https://{cliente.subdominio}"
+
+
 class MotorProvisionamento:
     def __init__(self, cliente):
         self.cliente = cliente
@@ -87,6 +99,7 @@ class MotorProvisionamento:
             'DJANGO_SECRET_KEY': secret_key,
             'ALLOWED_HOSTS': allowed_hosts,
             'CSRF_TRUSTED_ORIGINS': csrf_origins,
+            'SITE_URL': site_url_cliente(self.cliente),
             'DEBUG': 'false',
             'MODULOS_ATIVOS': modulos,
             'TEMA_SITE': tema,

@@ -292,13 +292,17 @@ O `stack-prod.yml` monta `/root/.docker` do host manager nos containers `web` e 
 
 ### Label do Traefik e troca de domínio
 
-O botão **"Aplicar Configurações"** (`_view_aplicar_modulos`) atualiza via `docker service update --env-add` as variáveis `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MODULOS_ATIVOS`, `TEMA_SITE`, `CP_CLIENTE_ID` e `CP_CLIENTE_NOME`. Ele também **sempre** atualiza a label do router principal do Traefik:
+O botão **"Aplicar Configurações"** (`_view_aplicar_modulos`) atualiza via `docker service update --env-add` as variáveis `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `SITE_URL`, `MODULOS_ATIVOS`, `TEMA_SITE`, `CP_CLIENTE_ID` e `CP_CLIENTE_NOME`. Ele também **sempre** atualiza a label do router principal do Traefik:
 
 ```python
 '--label-add', f'traefik.http.routers.{slug}-erp.rule=Host(`{subdominio}`)',
 ```
 
 **Por que isso importa:** se o `subdominio` do cliente for alterado no admin (ex.: migração de domínio de `ararasuite.com.br` para `jfnbrasil.com.br`), apenas atualizar o campo no banco não basta — a label do Traefik no serviço Docker ainda aponta para o domínio antigo. O wildcard DNS do domínio antigo continua roteando tráfego para o container, que agora rejeita o host com `DisallowedHost`. Clicar em "Aplicar Configurações" corrige ALLOWED_HOSTS e a label do Traefik de uma vez.
+
+### `SITE_URL` da instância (URL pública do ERP)
+
+`registry/provisioning.py::site_url_cliente(cliente)` = `https://<subdominio>` — **sempre o subdomínio**, nunca o domínio próprio (o domínio próprio depende de o cliente trocar os nameservers no Cloudflare; um link já enviado com DNS pendente quebraria). Gravado no `.env`/`environment` no provisionamento e reaplicado pelo **"Aplicar Configurações"** (clientes já provisionados só recebem ao clicar no botão). O ERP usa em tudo que sai sem request: link de peça de campanha no WhatsApp, imagens do HTML no e-mail, "abra no navegador", QR do portal de O.S., PDFs por cron. Doc: `docs/registry/site-url-instancias.md`.
 
 ### Vínculo CP → ERP para a ativação do SyncAgent (`CP_CLIENTE_ID`)
 
