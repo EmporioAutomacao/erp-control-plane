@@ -4,11 +4,11 @@ Data: 12/10/2026
 
 ## Por quê
 O ERP precisa da sua URL pública em tudo que monta **sem uma requisição em mãos** (cron, fila, envio para fora):
-- link da peça de campanha no WhatsApp (modo link) e página "abra no navegador" do e-mail;
+- link do criativo de campanha no WhatsApp (modo link) e página "abra no navegador" do e-mail;
 - imagens usadas dentro do HTML do e-mail (precisam de URL absoluta);
-- link de preview das peças, QR do portal de O.S., PDFs gerados por cron.
+- link de preview dos criativos, QR do portal de O.S., PDFs gerados por cron.
 
-Sem `SITE_URL`, esses links saem relativos (`/m/p/...`) e não abrem fora do ERP. Ver no repo `erp`: `docs/modulos/marketing/campanha-pecas-midia-v1.md`.
+Sem `SITE_URL`, esses links saem relativos (`/m/p/...`) e não abrem fora do ERP. Ver no repo `erp`: `docs/modulos/marketing/campanha-criativos-midia-v1.md`.
 
 ## O que o CP faz
 - `registry/provisioning.py::site_url_cliente(cliente)` → `https://<subdominio>`.

@@ -5,12 +5,12 @@
 - status: implementado — testes de provisionamento OK; "Aplicar Configurações" conferido no diff (suíte com banco não rodada nesta sessão)
 - versao CP: `0.0.47`
 - app: `registry`
-- depende do ERP: `0.0.134` (peças de campanha, modo link, imagens do HTML no e-mail)
+- depende do ERP: `0.0.134` (criativos de campanha, modo link, imagens do HTML no e-mail)
 
 ---
 
 ## 1. Objetivo
-O ERP passou a montar links públicos sem request (peça de campanha no WhatsApp, "abra no navegador", imagens do HTML no e-mail). Para isso precisa de `SITE_URL` absoluto, que nenhuma instância recebia do CP.
+O ERP passou a montar links públicos sem request (criativo de campanha no WhatsApp, "abra no navegador", imagens do HTML no e-mail). Para isso precisa de `SITE_URL` absoluto, que nenhuma instância recebia do CP.
 
 ## 2. O que mudou
 - `registry/provisioning.py::site_url_cliente(cliente)` → `https://<subdominio>` (sempre o subdomínio; motivo em `docs/registry/site-url-instancias.md`).

@@ -384,6 +384,14 @@ class ClienteAdmin(ModelAdmin):
                     f'Configurações aplicadas para "{slug}": {desc}. '
                     f'O serviço está reiniciando — aguarde ~30s e recarregue o ERP.',
                 )
+                # Cria o serviço de crons em clientes antigos e mantém o env dele
+                # igual ao do web (Reposição, filas de WhatsApp etc. dependem dele).
+                try:
+                    from .provisioning import MotorProvisionamento
+
+                    MotorProvisionamento(cliente).sincronizar_servico_cron()
+                except Exception as exc:
+                    messages.warning(request, f'Falha ao sincronizar o serviço de crons ({slug}_cron): {exc}')
                 if dominio_custom:
                     try:
                         cf = self._configurar_dominio_cloudflare(dominio_custom)

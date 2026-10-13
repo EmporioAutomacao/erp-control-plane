@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import secrets
@@ -15,6 +16,12 @@ CLIENTES_BASE = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes'))
 ERP_IMAGE = 'emporioautomacao/ararasuite-erp'
 DOMAIN = os.getenv('ERP_DOMAIN', 'ararasuite.com.br')
 CHECK_HTTP_HEALTH = os.getenv('PROVISIONING_CHECK_HTTP', 'true').lower() == 'true'
+
+# Executor central de crons do ERP (Reposição Automática, Mercado Livre, Yampi,
+# filas de WhatsApp/Comunicações, Tarefas recorrentes, NF-e...). O web só sobe o
+# Daphne: sem o serviço <slug>_cron nenhuma rotina automática do cliente roda.
+# Substitui o entrypoint da imagem — migrations ficam só com o web.
+CRON_COMANDO = ['python', 'manage.py', 'executar_crons', '--loop', '--sleep', '60']
 
 
 def site_url_cliente(cliente) -> str:
@@ -172,8 +179,65 @@ class MotorProvisionamento:
         self._aguardar_servico(f'{slug}_web', timeout=120)
         if CHECK_HTTP_HEALTH:
             self._aguardar_http(f'https://{subdominio}/health/', timeout=120)
+        # Só depois do web, que roda as migrations no entrypoint: o cron nunca
+        # fica com código antigo contra o schema novo (era o que matava o loop).
+        self.sincronizar_servico_cron(versao_nova)
         from .models import Cliente
         Cliente.objects.filter(pk=self.cliente.pk).update(versao_erp=versao_nova)
+
+    def sincronizar_servico_cron(self, versao=None):
+        """Garante o serviço ``<slug>_cron`` com a imagem e o ambiente atuais do web.
+
+        Clientes provisionados antes deste serviço não o têm: ele é criado a partir
+        da spec do web — e não do .env/stack.yml, que não refletem o que o
+        "Aplicar Configurações" injeta via ``--env-add``. Se já existe, recebe a
+        imagem e o env do web.
+        """
+        slug = self.cliente.slug
+        nome = f'{slug}_cron'
+        spec_web = self._spec_servico(f'{slug}_web')
+        container = spec_web['TaskTemplate']['ContainerSpec']
+        imagem = f'{ERP_IMAGE}:{versao}' if versao else container['Image'].split('@')[0]
+        env = container.get('Env') or []
+
+        if self._spec_servico(nome, obrigatorio=False) is None:
+            cmd = [
+                'docker', 'service', 'create', '--detach', '--with-registry-auth',
+                '--name', nome,
+                '--label', f'com.docker.stack.namespace={slug}',
+                '--container-label', f'com.docker.stack.namespace={slug}',
+                '--network', f'{slug}_internal',
+                '--replicas', '1',
+                '--restart-condition', 'any', '--restart-delay', '60s', '--restart-window', '120s',
+                '--entrypoint', ' '.join(CRON_COMANDO),
+            ]
+            for mount in container.get('Mounts') or []:
+                cmd += ['--mount', f"type={mount.get('Type', 'volume')},source={mount['Source']},target={mount['Target']}"]
+            for constraint in (spec_web['TaskTemplate'].get('Placement') or {}).get('Constraints') or []:
+                cmd += ['--constraint', constraint]
+            for item in env:
+                cmd += ['--env', item]
+            cmd.append(imagem)
+        else:
+            cmd = ['docker', 'service', 'update', '--detach', '--with-registry-auth', '--image', imagem]
+            for item in env:
+                cmd += ['--env-add', item]
+            cmd.append(nome)
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f'Falha ao sincronizar o serviço {nome}: {result.stderr.strip()}')
+
+    def _spec_servico(self, nome, obrigatorio=True):
+        result = subprocess.run(
+            ['docker', 'service', 'inspect', '--format', '{{json .Spec}}', nome],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            if obrigatorio:
+                raise RuntimeError(f'Serviço {nome} não encontrado: {result.stderr.strip()}')
+            return None
+        return json.loads(result.stdout)
 
     def destruir(self):
         import shutil
@@ -189,9 +253,15 @@ class MotorProvisionamento:
 
     def suspender(self):
         subprocess.run(['docker', 'service', 'scale', f'{self.cliente.slug}_web=0'], check=True)
+        # Cliente suspenso não pode continuar disparando WhatsApp/e-mail pelo cron.
+        subprocess.run(['docker', 'service', 'scale', f'{self.cliente.slug}_cron=0'], capture_output=True)
 
     def reativar(self):
         subprocess.run(['docker', 'service', 'scale', f'{self.cliente.slug}_web=1'], check=True)
+        if self._spec_servico(f'{self.cliente.slug}_cron', obrigatorio=False) is None:
+            self.sincronizar_servico_cron()
+        else:
+            subprocess.run(['docker', 'service', 'scale', f'{self.cliente.slug}_cron=1'], check=True)
 
     def _aguardar_servico(self, service_name, timeout=120):
         deadline = time.monotonic() + timeout
@@ -281,6 +351,26 @@ services:
         - "traefik.http.routers.{slug}-erp.rule=Host(`{subdominio}`)"
         - "traefik.http.routers.{slug}-erp.entrypoints=web"
         - "traefik.http.services.{slug}-erp.loadbalancer.server.port=8000"{labels_custom}
+
+  cron:
+    image: {ERP_IMAGE}:{versao}
+    entrypoint: {json.dumps(CRON_COMANDO)}
+    environment:
+{env_block}
+    volumes:
+      - media:/app/media
+      - backups:/app/backups
+    networks:
+      - internal
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.region == {regiao}
+      restart_policy:
+        condition: any
+        delay: 60s
+        window: 120s
 
   db:
     image: pgvector/pgvector:0.8.0-pg17
