@@ -477,6 +477,39 @@ def task_backup_cliente(self, cliente_id, backup_id, config_files=None):
         raise
 
 
+def _restaurar_midia(slug, media_dir):
+    """Copia `media_dir` para o volume `{slug}_media` **sem bind mount de pasta do host**.
+
+    Antes a mídia era montada com `docker run -v <pasta-do-host>:/restore/media`, o que obrigava
+    cada worker a ter `/opt/backups/cp` criada (o Swarm não cria a origem de um bind). Agora um
+    container auxiliar só monta o volume: limpa o conteúdo, recebe os arquivos por `docker cp`
+    (que lê da pasta local do próprio agente) e é removido. Devolve o `CompletedProcess` do
+    primeiro passo que falhar (ou o do `docker cp`, se tudo deu certo).
+    """
+    import os
+    import subprocess
+
+    volume = f'{slug}_media:/app/media'
+    limpar = subprocess.run(
+        ['docker', 'run', '--rm', '-v', volume, 'alpine', 'sh', '-c', 'find /app/media -mindepth 1 -delete'],
+        capture_output=True, timeout=120,
+    )
+    if limpar.returncode != 0:
+        return limpar
+    criar = subprocess.run(['docker', 'create', '-v', volume, 'alpine', 'true'], capture_output=True, timeout=60)
+    cid = (criar.stdout or b'').decode(errors='replace').strip()
+    if criar.returncode != 0 or not cid:
+        return criar
+    try:
+        # "<pasta>/." copia o CONTEÚDO da pasta (inclusive arquivos ocultos) para dentro do volume
+        return subprocess.run(
+            ['docker', 'cp', os.path.join(str(media_dir), '.'), f'{cid}:/app/media/'],
+            capture_output=True, timeout=300,
+        )
+    finally:
+        subprocess.run(['docker', 'rm', '-f', cid], capture_output=True, timeout=60)
+
+
 def _scale_web(slug, replicas):
     import subprocess
     subprocess.run(['docker', 'service', 'scale', f'{slug}_web={replicas}'], capture_output=True, timeout=60)
@@ -605,24 +638,14 @@ def task_restaurar_no(self, cliente_id, backup_id):
                 log.linha(f'Banco restaurado em {int(time.monotonic() - t0)}s.')
         _prog(75)
 
-        # 4. Restaura a mídia via container alpine temporário com acesso ao volume
+        # 4. Restaura a mídia: container auxiliar monta o volume e recebe os arquivos por `docker cp`
         log.linha('[4/4] Restaurando a mídia…')
         media_dir = restore_dir / 'media'
         if not media_dir.exists():
             avisos.append('Backup nao contem media/ - arquivos de midia nao foram restaurados.')
             log.linha('AVISO: o backup não contém media/ — mídia não restaurada.')
         else:
-            docker_run = rodar_com_pulso(
-                log, 'Restauração da mídia', subprocess.run,
-                [
-                    'docker', 'run', '--rm',
-                    '-v', f'{slug}_media:/app/media',
-                    '-v', f'{str(media_dir)}:/restore/media:ro',
-                    'alpine', 'sh', '-c',
-                    'rm -rf /app/media/* && cp -rp /restore/media/. /app/media/',
-                ],
-                capture_output=True, timeout=120,
-            )
+            docker_run = rodar_com_pulso(log, 'Restauração da mídia', _restaurar_midia, slug, media_dir)
             if docker_run.returncode != 0:
                 stderr = docker_run.stderr.decode(errors='replace').strip()
                 logger.error('Restauracao da midia falhou para %s: %s', slug, stderr)

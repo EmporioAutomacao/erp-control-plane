@@ -316,6 +316,8 @@ class TaskRestaurarNoTests(SimpleTestCase):
         self.psql_stderr = b''
         self.docker_run_returncode = 0
         self.docker_run_stderr = b''
+        self.docker_cp_returncode = 0
+        self.docker_cp_stderr = b''
 
         def _fake_run(cmd, *args, **kwargs):
             if cmd[:2] == ['docker', 'service']:
@@ -327,8 +329,14 @@ class TaskRestaurarNoTests(SimpleTestCase):
                 return SimpleNamespace(stdout='', stderr='', returncode=0)
             if cmd[1] == 'exec' and 'psql' in cmd:
                 return SimpleNamespace(stdout=b'', stderr=self.psql_stderr, returncode=self.psql_returncode)
-            if cmd[1] == 'run':
+            if cmd[1] == 'run':  # limpa o volume de mídia
                 return SimpleNamespace(stdout=b'', stderr=self.docker_run_stderr, returncode=self.docker_run_returncode)
+            if cmd[1] == 'create':
+                return SimpleNamespace(stdout=b'aux-ctr-id\n', stderr=b'', returncode=0)
+            if cmd[1] == 'cp':
+                return SimpleNamespace(stdout=b'', stderr=self.docker_cp_stderr, returncode=self.docker_cp_returncode)
+            if cmd[1] == 'rm':
+                return SimpleNamespace(stdout=b'', stderr=b'', returncode=0)
             raise AssertionError(f'comando inesperado: {cmd}')
 
         self.run_patch = patch('subprocess.run', side_effect=_fake_run)
@@ -386,22 +394,60 @@ class TaskRestaurarNoTests(SimpleTestCase):
 
         self.assertEqual(self._mensagem_restauracao(), '')
 
-    def test_caminho_da_midia_passado_ao_docker_e_absoluto(self):
+    def _comandos(self):
+        return [call.args[0] for call in self.run_mock.call_args_list]
+
+    def test_midia_e_restaurada_sem_bind_mount_de_pasta_do_host(self):
         self.db_ctr = 'db-ctr\n'
         self._escrever_backup({'db.sql': b'-- dump', 'media/foo.txt': b'x'})
 
         task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id')
 
-        docker_run_calls = [
-            call for call in self.run_mock.call_args_list
-            if call.args[0][1] == 'run'
-        ]
-        self.assertEqual(len(docker_run_calls), 1)
-        volume_arg = docker_run_calls[0].args[0][6]
-        # formato '<host>:<container_path>:<modo>' - o host pode ter um ':' proprio
-        # (drive letter do Windows), entao separamos pelos 2 ultimos ':'.
-        host_path = volume_arg.rsplit(':', 2)[0]
-        self.assertTrue(Path(host_path).is_absolute())
+        comandos = self._comandos()
+        # nenhum comando monta uma pasta do host (-v <pasta>:...): só o volume nomeado do cliente
+        montagens = [c for c in comandos if c[:2] in (['docker', 'run'], ['docker', 'create'])]
+        self.assertTrue(montagens)
+        for cmd in montagens:
+            volumes = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == '-v']
+            self.assertEqual(volumes, ['acme_media:/app/media'])
+        # sequência: limpa o volume -> cria o auxiliar -> docker cp -> remove o auxiliar
+        passos = [c[1] for c in comandos if c[0] == 'docker' and c[1] in ('run', 'create', 'cp', 'rm')]
+        self.assertEqual(passos, ['run', 'create', 'cp', 'rm'])
+
+    def test_docker_cp_da_midia_le_de_caminho_absoluto_e_vai_para_o_volume(self):
+        self.db_ctr = 'db-ctr\n'
+        self._escrever_backup({'db.sql': b'-- dump', 'media/foo.txt': b'x'})
+
+        task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id')
+
+        cp = next(c for c in self._comandos() if c[:2] == ['docker', 'cp'])
+        origem = cp[2]
+        # "<pasta>/." (conteúdo da pasta); no Windows a pasta tem drive letter
+        self.assertTrue(origem.endswith(('/.', '\\.')), origem)
+        self.assertTrue(Path(origem[:-2]).is_absolute())
+        self.assertEqual(cp[3], 'aux-ctr-id:/app/media/')
+
+    def test_auxiliar_e_removido_mesmo_se_o_docker_cp_falhar(self):
+        self.db_ctr = 'db-ctr\n'
+        self.docker_cp_returncode = 1
+        self.docker_cp_stderr = b'no space left on device'
+        self._escrever_backup({'db.sql': b'-- dump', 'media/foo.txt': b'x'})
+
+        task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id')
+
+        self.assertIn(['docker', 'rm', '-f', 'aux-ctr-id'], self._comandos())
+        self.assertIn('no space left on device', self._mensagem_restauracao())
+
+    def test_falha_ao_limpar_o_volume_nao_chega_a_copiar(self):
+        self.db_ctr = 'db-ctr\n'
+        self.docker_run_returncode = 1
+        self.docker_run_stderr = b'volume em uso'
+        self._escrever_backup({'db.sql': b'-- dump', 'media/foo.txt': b'x'})
+
+        task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id')
+
+        self.assertFalse(any(c[:2] == ['docker', 'cp'] for c in self._comandos()))
+        self.assertIn('volume em uso', self._mensagem_restauracao())
 
     def test_finalizacao_e_sempre_acionada_mesmo_com_erro(self):
         # arquivo de backup inexistente -> FileNotFoundError, mas o web precisa religar

@@ -133,9 +133,10 @@ Para manter o status fresco sem ninguém abrir a tela, crie em Admin > Agendamen
 
 1. **Bucket:** criar o bucket no RustFS e a access key (veja a seção 10). A porta do RustFS precisa estar
    acessível pelos nós.
-2. **Cada worker do Swarm:** `mkdir -p /opt/backups/cp`. O diretório é bind com o **mesmo
-   caminho** no host e no container, porque a restauração de mídia usa
-   `docker run -v <caminho>:...` e o daemon interpreta o caminho do host.
+2. **Workers do Swarm:** nenhuma preparação. O `agente-no` não monta pasta do host: o temporário do backup e da
+   restauração fica no próprio container (`CP_BACKUP_DIR=/tmp/cp-backups`) e a mídia é restaurada por um container
+   auxiliar + `docker cp` para dentro do volume `{slug}_media`. Um worker novo só precisa de Docker e de entrar no
+   Swarm — o serviço global sobe nele sozinho. *(Até a 0.0.48 era preciso `mkdir -p /opt/backups/cp` em cada worker.)*
 3. **Imagem:** rebuild e push (inclui `boto3`, `cryptography` e `entrypoint-agente.sh`).
 4. **Redeploy do stack** do CP (`docker stack deploy --with-registry-auth ...`). As
    migrations (`0019`, `0020`) rodam no `entrypoint-worker.sh` do `celery`.
@@ -172,7 +173,7 @@ O primeiro lugar para olhar é o **console ao vivo** da aba Backups (ou o **📜
 | Backup falha com "Armazenamento de backups não configurado" | Nada cadastrado em Configurações > Armazenamento | Cadastrar a conexão |
 | ⬇ Baixar abre link que não carrega | Endpoint público ausente ou inacessível pelo navegador | Preencher o **Endpoint público** |
 | Status "Erro: não foi possível decifrar a chave secreta" | A `SECRET_KEY` do CP mudou depois de salvar a conexão | Informar a secret key de novo e salvar |
-| Disco do nó enchendo em `/opt/backups/cp` | Task morreu no meio e deixou temporários (`_media_tmp_*`, `_restore_*`, `.tar.gz`) | Apagar os resíduos; o fluxo normal remove tudo ao final |
+| Disco do nó enchendo | Task morreu no meio e deixou temporários (`_media_tmp_*`, `_restore_*`, `.tar.gz`) em `/tmp/cp-backups` do container do `agente-no` (no manager, em `/opt/backups/cp`) | Reiniciar o `agente-no` (`docker service update --force <stack>_agente-no`) apaga o temporário; o fluxo normal remove tudo ao final |
 
 ## 7. Limitações conhecidas
 

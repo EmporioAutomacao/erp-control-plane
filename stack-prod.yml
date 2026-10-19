@@ -29,7 +29,7 @@ services:
     command: ["./entrypoint.sh"]
     environment:
       SECRET_KEY: "${SECRET_KEY}"                              # chave Django para sessões e CSRF
-      DEBUG: "false"
+      DEBUG: "${DEBUG:-false}"
       ALLOWED_HOSTS: "${CP_DOMAIN}"
       CSRF_TRUSTED_ORIGINS: "https://${CP_DOMAIN}"
       POSTGRES_DB: "${POSTGRES_DB:-erp_cp}"
@@ -84,9 +84,9 @@ services:
         constraints:
           - node.role == manager    # deve rodar no manager para acessar o Docker socket
       restart_policy:
-        condition: any
-        delay: 60s
-        window: 120s
+        condition: on-failure
+        delay: 10s
+        max_attempts: 0     # sem limite de tentativas
       labels:
         - "traefik.enable=true"
         - "traefik.http.routers.ararasuite-cp.rule=Host(`${CP_DOMAIN}`)"
@@ -105,7 +105,7 @@ services:
     environment:
       NODE_HOSTNAME: "{{.Node.Hostname}}"
       SECRET_KEY: "${SECRET_KEY}"
-      DEBUG: "false"
+      DEBUG: "${DEBUG:-false}"
       POSTGRES_DB: "${POSTGRES_DB:-erp_cp}"
       POSTGRES_USER: "${POSTGRES_USER:-erp_cp}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
@@ -147,29 +147,26 @@ services:
   # Um worker Celery em cada nó que NÃO é manager. Consome só a fila `no.<hostname>`:
   # backups e restaurações dos clientes que rodam naquele nó (`docker exec/cp/run` só
   # enxergam o daemon local). Os arquivos vão para/vêm do bucket S3 (Admin > Configurações > Armazenamento).
-  # Pré-requisito em cada nó: `mkdir -p /opt/backups/cp` (diretório temporário bind).
+  # Não exige nenhuma preparação no nó: o temporário do backup/restauração fica no próprio
+  # container (sem bind mount), então um worker novo só precisa entrar no Swarm.
   agente-no:
     image: emporioautomacao/ararasuite-cp:${CP_VERSION:-latest}
     command: ["./entrypoint-agente.sh"]
     environment:
       NODE_HOSTNAME: "{{.Node.Hostname}}"
       SECRET_KEY: "${SECRET_KEY}"
-      DEBUG: "false"
+      DEBUG: "${DEBUG:-false}"
       POSTGRES_DB: "${POSTGRES_DB:-erp_cp}"
       POSTGRES_USER: "${POSTGRES_USER:-erp_cp}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
       POSTGRES_HOST: "db"
       POSTGRES_PORT: "5432"
       REDIS_URL: "redis://redis:6379/0"
-      CP_BACKUP_DIR: "${CP_BACKUP_DIR:-/opt/backups/cp}"
+      CP_BACKUP_DIR: "/tmp/cp-backups"    # temporário dentro do container (não é bind do host)
     volumes:
       - type: bind
         source: /var/run/docker.sock
         target: /var/run/docker.sock
-      # mesmo caminho no host e no container: `docker run -v` na restauração usa o caminho do host
-      - type: bind
-        source: /opt/backups/cp
-        target: /opt/backups/cp
     networks:
       - cp-internal
       - storage-net
@@ -190,7 +187,7 @@ services:
     command: ["./entrypoint-worker.sh", "celery", "-A", "core", "beat", "--loglevel=info", "--scheduler", "django_celery_beat.schedulers:DatabaseScheduler"]
     environment:
       SECRET_KEY: "${SECRET_KEY}"
-      DEBUG: "false"
+      DEBUG: "${DEBUG:-false}"
       POSTGRES_DB: "${POSTGRES_DB:-erp_cp}"
       POSTGRES_USER: "${POSTGRES_USER:-erp_cp}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
