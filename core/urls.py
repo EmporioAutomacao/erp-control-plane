@@ -18,6 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 
 from registry.views import admin_ajuda
+from registry.arpa_oauth import arpa_oauth_callback
 from registry.release_api import register_pdv_local_release
 
 urlpatterns = [
@@ -30,4 +31,7 @@ urlpatterns = [
     # Chamado pelo workflow de release do repo pdv-local (GitHub Actions) —
     # ver registry/release_api.py.
     path('v1/releases/pdv-local:register', register_pdv_local_release, name='register_pdv_local_release'),
+    # redirect_uri unico do app da Arara Suite no portal Arpa: repassa code/state
+    # ao ERP do cliente -- ver registry/arpa_oauth.py.
+    path('integracoes/arpa/oauth/callback/', arpa_oauth_callback, name='arpa_oauth_callback'),
 ]
