@@ -100,7 +100,7 @@ configuração do banco do CP.
 
 | Campo | Exemplo | Descrição |
 |---|---|---|
-| Endpoint de acesso | `http://rustfs-s3:9000` | Usado pelo CP e pelos nós (upload/download dos backups). Deve ser alcançável **pelos nós** |
+| Endpoint de acesso | `https://s3.ararasuite.com.br` | Usado pelo CP e pelos nós (upload/download dos backups). Deve ser alcançável **pelos nós**. Pode ser o mesmo endereço do endpoint público |
 | Endpoint público | `https://s3.ararasuite.com.br` | Alcançável **pelo navegador**; só para os links de ⬇ Baixar. Vazio = usa o endpoint de acesso |
 | Bucket | `cp-backups` | Precisa existir |
 | Access key / Secret key | — | Chave dedicada com leitura, escrita e exclusão no bucket (não use a root) |
@@ -164,6 +164,7 @@ O primeiro lugar para olhar é o **console ao vivo** da aba Backups (ou o **📜
 | Console: "Sem atividade… Nenhuma tarefa começou ainda" (log vazio) | Nenhum worker `celery` pegou o pedido do manager | `docker service ps <stack>_celery`; subir o serviço. Se não voltar, **Interromper** (aparece após 2 min) |
 | Console: "Nenhum worker do nó iniciou a tarefa" | O log parou em "Aguardando um worker do nó iniciar…": agente do nó parado ou nó sem agente | `docker service ps <stack>_agente-no`; ver logs; a task executa quando o agente voltar |
 | Console: "provavelmente travado" no meio de uma etapa | Worker/comando morreu depois de começar (o último pulso mostra onde) | Ver o último "em execução há…"; **Interromper** libera o registro (na restauração religa o web). Confira o container e o nó |
+| `agente-no` com `N-1/N` réplicas e uma tarefa eternamente `pending` em um nó | O nó é **ARM** (aarch64) e a imagem do CP é só amd64 (`unsupported platform`) | O stack já restringe o agente a `node.platform.arch == x86_64`. Para rodar clientes num nó ARM é preciso publicar a imagem multi-arch (amd64 + arm64) e remover a constraint |
 | Backup fica "Em andamento" com 0% (versões anteriores à 0.0.45) | Não há worker consumindo a fila do nó (agente parado ou nó sem agente) | `docker service ps <stack>_agente-no`; ver logs; a task executa quando o agente voltar |
 | Restauração travada e o ERP do cliente fora do ar | Agente do nó caiu entre o `scale web=0` e a restauração | Subir o agente (a task roda e religa o web). Emergência: `docker service scale {slug}_web=1` no manager |
 | Aviso "Container {slug}_db nao encontrado" | A task rodou em nó errado (ex.: serviço migrou de nó depois do despacho) | Repetir o backup; conferir `docker service ps {slug}_db` |
@@ -241,7 +242,7 @@ fixo no nó `servidorubuntuanptruenas`, dados no volume nomeado local `rustfs_da
 
 | Quem | Endereço | Caminho |
 |---|---|---|
-| Nós do Swarm (upload no backup, download na restauração) | **Endpoint de acesso** `http://rustfs-s3:9000` | rede overlay `storage-net` (criada pelo stack do RustFS), direto ao RustFS |
+| Nós do Swarm (upload no backup, download na restauração) | **Endpoint de acesso** `https://<S3_DOMAIN>` | Cloudflare → Traefik (`web`) → RustFS (padrão, sem rede compartilhada). *Opcional:* `http://rustfs-s3:9000` pela rede `storage-net` (ver abaixo) |
 | Navegador (⬇ Baixar) | **Endpoint público** `https://<S3_DOMAIN>` | Cloudflare → Traefik (`web`) → RustFS |
 | Você (console) | `https://<CONSOLE_DOMAIN>` | Cloudflare → Traefik (`web`) → RustFS:9001 |
 
@@ -257,12 +258,12 @@ SigV4 vale porque o Traefik preserva o `Host` recebido.
 2. Portainer → Stacks → Add stack → colar o `stack-rustfs.yml` e definir as variáveis:
    `RUSTFS_ACCESS_KEY`, `RUSTFS_SECRET_KEY` (mín. 8 caracteres, não use `rustfsadmin`) e, se quiser outros
    domínios, `S3_DOMAIN`/`CONSOLE_DOMAIN`; opcionalmente `RUSTFS_VERSION` (fixe uma tag em vez de `latest`).
-   Este stack **cria a rede overlay `storage-net`** — faça o deploy dele antes do CP.
+   Este stack também cria a rede overlay `storage-net`, usada só no atalho interno opcional (veja abaixo); o CP não depende dela.
 3. Abrir o console, criar o bucket `cp-backups` e uma **access key dedicada** ao CP (não use a conta root).
-4. No CP, em **Admin > Configurações > Armazenamento**: endpoint de acesso `http://rustfs-s3:9000`, endpoint
+4. No CP, em **Admin > Configurações > Armazenamento**: endpoint de acesso `https://<S3_DOMAIN>`, endpoint
    público `https://<S3_DOMAIN>`, bucket `cp-backups` e a chave dedicada. Ao salvar, o CP testa a conexão e o
    status deve ficar 🟢 Conectado.
-5. Redeploy do stack do CP (o `stack-prod.yml` agora anexa `web`, `celery` e `agente-no` à `storage-net`).
+5. Redeploy do stack do CP (não exige a rede `storage-net`).
 
 ### Verificação
 
@@ -270,7 +271,7 @@ SigV4 vale porque o Traefik preserva o `Host` recebido.
 docker service ps rustfs_rustfs                    # deve estar Running em servidorubuntuanptruenas
 curl -I https://<S3_DOMAIN>/health                 # 200 pelo Traefik/Cloudflare
 # de dentro da rede interna (qualquer nó), para validar o endpoint usado pelos agentes:
-docker run --rm --network storage-net curlimages/curl -s -o /dev/null -w "%{http_code}\n" http://rustfs-s3:9000/health
+curl -I https://<S3_DOMAIN>/health      # o mesmo endereço que o CP usa
 ```
 
 Depois do status 🟢, **💾 Novo Backup** num cliente: o registro deve apontar para `s3://clientes/{slug}/...` e o objeto

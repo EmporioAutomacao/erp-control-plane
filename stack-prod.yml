@@ -77,7 +77,6 @@ services:
     networks:
       - traefik-public    # rede compartilhada com o Traefik para roteamento HTTP
       - cp-internal       # rede interna entre os serviços do CP
-      - storage-net       # acesso interno ao RustFS (upload/download de backups)
     deploy:
       replicas: 1
       placement:
@@ -89,6 +88,8 @@ services:
         max_attempts: 0     # sem limite de tentativas
       labels:
         - "traefik.enable=true"
+        # o web está em 2 redes (traefik-public, cp-internal): diz ao Traefik por qual rotear
+        - "traefik.swarm.network=traefik-public"
         - "traefik.http.routers.ararasuite-cp.rule=Host(`${CP_DOMAIN}`)"
         - "traefik.http.routers.ararasuite-cp.entrypoints=web"
         - "traefik.http.services.ararasuite-cp.loadbalancer.server.port=8000"
@@ -134,7 +135,6 @@ services:
         target: /opt/backups/cp
     networks:
       - cp-internal
-      - storage-net
     deploy:
       replicas: 1
       placement:
@@ -146,9 +146,10 @@ services:
   # ─── Agente por nó ────────────────────────────────────────────────────────
   # Um worker Celery em cada nó que NÃO é manager. Consome só a fila `no.<hostname>`:
   # backups e restaurações dos clientes que rodam naquele nó (`docker exec/cp/run` só
-  # enxergam o daemon local). Os arquivos vão para/vêm do bucket S3 (Admin > Configurações > Armazenamento).
+  # enxergam o daemon local). Os arquivos vão para/vêm do bucket S3 (Admin > Configurações > Armazenamento),
+  # acessado pelo endereço do RustFS (ex.: https://s3.seudominio.com.br) — não precisa de rede compartilhada.
   # Não exige nenhuma preparação no nó: o temporário do backup/restauração fica no próprio
-  # container (sem bind mount), então um worker novo só precisa entrar no Swarm.
+  # container (sem bind mount), então um worker novo só precisa entrar no Swarm (nós x86_64).
   agente-no:
     image: emporioautomacao/ararasuite-cp:${CP_VERSION:-latest}
     command: ["./entrypoint-agente.sh"]
@@ -169,12 +170,13 @@ services:
         target: /var/run/docker.sock
     networks:
       - cp-internal
-      - storage-net
     deploy:
       mode: global
       placement:
         constraints:
           - node.role != manager
+          # a imagem do CP é só linux/amd64: sem isso, um nó ARM (aarch64) fica com a tarefa em "pending" para sempre
+          - node.platform.arch == x86_64
       restart_policy:
         condition: on-failure
 
@@ -251,6 +253,3 @@ networks:
   cp-internal:
     driver: overlay
     attachable: false
-  # Rede do RustFS — criada pelo stack-rustfs.yml: faça o deploy do RustFS antes do CP
-  storage-net:
-    external: true

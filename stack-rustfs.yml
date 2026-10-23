@@ -1,8 +1,8 @@
 # stack-rustfs.yml — RustFS (armazenamento S3 dos backups do CP) para o Portainer / Docker Swarm
 #
 # Cole em Portainer > Stacks > Add stack (nome sugerido: "rustfs") e defina as variáveis abaixo na
-# tela do stack. Faça o deploy deste stack ANTES de (re)implantar o stack do CP: ele cria a rede
-# overlay "storage-net", que o stack-prod.yml do CP referencia como externa.
+# tela do stack. Ele também cria a rede overlay "storage-net", usada só num atalho interno OPCIONAL
+# (o CP não depende dela: por padrão acessa o RustFS pelo domínio público).
 #
 # Pré-requisitos:
 #   - Rede externa "traefik-public" (a mesma do Traefik e do CP).
@@ -18,9 +18,9 @@
 #
 # Como o CP usa este serviço:
 #   Cadastre a conexão em Admin > Configurações > Armazenamento:
-#   - Endpoint de acesso (nós e CP, rede interna):  http://rustfs-s3:9000
-#     (não passa pelo Cloudflare, que limita o corpo das requisições e cobraria banda).
-#   - Endpoint público (links de download):         https://<S3_DOMAIN>
+#   - Endpoint de acesso e endpoint público:        https://<S3_DOMAIN>
+#   Atalho interno opcional (evita o Cloudflare, que limita o corpo das requisições): anexe a rede
+#   "storage-net" a web/celery/agente-no no stack do CP e use http://rustfs-s3:9000 como endpoint de acesso.
 #   Depois do deploy: entre no console, crie o bucket "cp-backups" e uma access key dedicada para o CP
 #   (não use a conta root na tela de Armazenamento). A tela mostra o status da conexão.
 
