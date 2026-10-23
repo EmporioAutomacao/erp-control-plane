@@ -8,7 +8,8 @@ done
 echo "[CP] PostgreSQL disponível."
 
 python manage.py migrate --noinput
-python manage.py loaddata registry/fixtures/initial_data.json
+# Só cria Planos/Módulos ausentes — loaddata sobrescrevia edições do admin (preços) a cada boot
+python manage.py carregar_dados_iniciais
 
 if [ -n "$DJANGO_SUPERUSER_USERNAME" ] && [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
   python manage.py createsuperuser \

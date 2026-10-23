@@ -23,7 +23,7 @@
 6. Atualizacao de versao do ERP em instancias ativas via `task_atualizar_versao`.
 7. Suspensao e reativacao de instancias via `task_suspender_tenant` e `task_reativar_tenant`.
 8. Health check periodico de todas as instancias ativas via `task_healthcheck_todas_instancias`.
-9. Fixture inicial `registry/fixtures/initial_data.json` com os planos e modulos da plataforma.
+9. Fixture inicial `registry/fixtures/initial_data.json` com os planos e modulos da plataforma, carregada por `manage.py carregar_dados_iniciais` (so cria os ausentes; nunca sobrescreve edicoes do admin).
 
 ## 3. Entidades principais
 
@@ -229,7 +229,7 @@ if result.returncode != 0 and 'AlreadyExists' not in result.stderr:
 | `registry/provisioning.py` | `ProvisioningEngine` com logica de deploy |
 | `registry/tasks.py` | tasks Celery de provisionamento e ciclo de vida |
 | `registry/admin.py` | interface admin para gestao de tenants e logs |
-| `registry/fixtures/initial_data.json` | dados iniciais de `Modulo` e `Plano` |
+| `registry/fixtures/initial_data.json` | dados iniciais de `Modulo` e `Plano` (carregados por `carregar_dados_iniciais`) |
 | `.env` | variaveis do control plane (PROVISIONING_CHECK_HTTP, SAAS_DOMAIN etc.) |
 
 ## 12. Pontos de atencao

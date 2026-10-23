@@ -143,7 +143,7 @@ ERP_LATEST_VERSION = os.getenv('ERP_LATEST_VERSION', '0.0.22')
 
 - Tailwind Play CDN e adequado para desenvolvimento; em producao, substituir por build PostCSS com `tailwindcss` CLI para eliminar o overhead do compilador em-browser.
 - Os dados de planos sao lidos diretamente do banco — se o banco nao tiver nenhum plano `ativo=True`, a pagina inicial nao renderiza cards de planos.
-- O fixture `registry/fixtures/initial_data.json` popula os planos e modulos iniciais; deve ser carregado via `manage.py loaddata` sempre que um novo ambiente for criado.
+- O fixture `registry/fixtures/initial_data.json` popula os planos e modulos iniciais via `manage.py carregar_dados_iniciais` (roda no `entrypoint.sh` a cada boot e so cria os ausentes). Nao usar `loaddata` em banco com dados: sobrescreve precos e edicoes do admin (ver `docs/registry/release-fix-precos-planos-revertidos.md`).
 - O fixture deve ser mantido com encoding UTF-8 sem BOM; para regerar, usar o script Python que captura stdout do `dumpdata` via `io.StringIO` (ver `docs/padroes/encoding-postgres.md`).
 - Links internos entre paginas usam `{% url 'landing:nome' %}` — nunca `href="#ancora"` na navbar ou no rodape.
 

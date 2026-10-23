@@ -20,8 +20,9 @@ docker compose -f docker-compose.dev.yml up -d db redis
 # 3. Migrations
 .\venv\Scripts\python.exe manage.py migrate
 
-# 4. Carregar dados iniciais (planos e módulos)
-.\venv\Scripts\python.exe manage.py loaddata registry/fixtures/initial_data.json
+# 4. Carregar dados iniciais (planos e módulos) — só cria os ausentes, nunca sobrescreve
+#    (NÃO usar loaddata: ele reverte preços/edições do admin; o entrypoint.sh roda este comando a cada boot)
+.\venv\Scripts\python.exe manage.py carregar_dados_iniciais
 
 # 5. Shell Django
 .\venv\Scripts\python.exe manage.py shell
@@ -350,6 +351,10 @@ Todo cliente novo precisa de pelo menos uma **Empresa** (Configurações > Empre
 Requer **ERP ≥ 0.0.104**. Clientes provisionados antes: cadastrar manualmente no ERP **ou** clicar em **"Aplicar Configurações"** (injeta `CP_CLIENTE_CNPJ` no serviço `{slug}_web`) e reiniciar o serviço — o seed roda no próximo boot.
 
 > Ao mexer nisso foi corrigido de passagem um bug pré-existente no grafo de migrations do ERP: a criação de um banco do zero (todo provisionamento de cliente novo roda `migrate` num volume postgres vazio) falhava em `financeiro.0021` com *"column financeiro_condicaopagamento.quantidade_parcelas does not exist"* — nenhum cliente novo era provisionável desde ~jun/2026. Fix no repo `erp`: duas arestas de dependência em `financeiro/migrations/0018_rename_tables_condicao_especie.py` (`vendas.0024` e `dedetizacao.0006`), consistentes com a ordem histórica de aplicação. Detalhes na seção "Migration graph" do `CLAUDE.md` do `erp`.
+
+### Dados iniciais (Planos e Módulos) no boot — nunca `loaddata`
+
+O `entrypoint.sh` roda `manage.py carregar_dados_iniciais` a cada boot do `web`. O comando lê `registry/fixtures/initial_data.json` e **só cria** os `Modulo`/`Plano` ausentes; os existentes não são tocados. Um `Modulo` recém-criado é incluído nos `Plano` existentes que o listam na fixture (fluxo de release de módulo novo). Antes era `loaddata`, que sobrescrevia tudo a cada reinício — os preços editados no admin voltavam para 10/20/30. Consequências: mudar preço/limites de plano existente é pelo admin (a fixture só vale para banco novo); remover um módulo de um plano na fixture não o remove em bancos existentes. Doc: `docs/registry/release-fix-precos-planos-revertidos.md`.
 
 ### Página de Ajuda do admin
 
