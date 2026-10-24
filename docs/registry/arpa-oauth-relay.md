@@ -13,8 +13,8 @@ https://ararasuite.com.br/integracoes/arpa/oauth/callback/
 
 ## Fluxo
 ```
-ERP do cliente  --(Conectar ao Arpa)-->  Arpa /auth2/oauth/authorize?...&state=<slug>.<nonce>&redirect_uri=<URL acima>
-Arpa            --302-->  CP  /integracoes/arpa/oauth/callback/?code=...&state=<slug>.<nonce>
+ERP do cliente  --(Conectar ao Arpa)-->  Arpa /auth2/oauth/authorize?...&state=<CP_CLIENTE_ID>.<nonce>&redirect_uri=<URL acima>
+Arpa            --302-->  CP  /integracoes/arpa/oauth/callback/?code=...&state=<CP_CLIENTE_ID>.<nonce>
 CP              --302-->  https://<subdominio do cliente>/arpa/oauth/retorno/?code=...&state=...
 ERP do cliente  confere o nonce da sessao e troca o code no Arpa (/oauth/token, com o mesmo redirect_uri)
 ```
@@ -24,12 +24,12 @@ O CP so repassa: nao conhece `client_secret`, nao troca o `code`, nao guarda tok
 ## Regras
 | Situacao | Resposta |
 |---|---|
-| `state` = `<slug>.<nonce>` valido, cliente com status `ativo`, `trial` ou `atualizando`, com `code` | 302 para `site_url_cliente(cliente)` + `/arpa/oauth/retorno/` |
+| `state` = `<cliente>.<nonce>` valido (`<cliente>` = UUID do `Cliente`, que o ERP conhece como `CP_CLIENTE_ID`, ou o slug), cliente com status `ativo`, `trial` ou `atualizando`, com `code` | 302 para `site_url_cliente(cliente)` + `/arpa/oauth/retorno/` |
 | Usuario cancelou no Arpa (`error`/`error_description` + `state`) | 302 repassando `error`, `error_description` e `state` (o ERP mostra a mensagem) |
-| `state` fora do formato (slug `[-a-zA-Z0-9_]{1,50}`, ponto, nonce `[A-Za-z0-9_-]{8,128}`) | 400, pagina de erro, sem redirecionar |
+| `state` fora do formato (cliente `[-a-zA-Z0-9_]{1,50}`, ponto, nonce `[A-Za-z0-9_-]{8,128}`) | 400, pagina de erro, sem redirecionar |
 | Sem `code` e sem `error` | 400 |
 | Algum parametro repassado com mais de 2048 caracteres | 400 |
-| Slug inexistente ou cliente em outro status (suspenso, cancelado, trial expirado, provisionando...) | 404, pagina de erro |
+| Cliente (id/slug) inexistente ou em outro status (suspenso, cancelado, trial expirado, provisionando...) | 404, pagina de erro |
 | Metodo diferente de GET | 405 |
 
 - O destino e sempre `https://<subdominio>` (`site_url_cliente`), nunca o dominio proprio nem uma URL vinda da querystring (sem open redirect). Parametros desconhecidos sao descartados.

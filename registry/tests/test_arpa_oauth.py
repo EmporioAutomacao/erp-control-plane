@@ -47,6 +47,23 @@ class ArpaOauthCallbackTests(TestCase):
         self.assertEqual(response["Cache-Control"], "no-store")
         self.assertEqual(response["Referrer-Policy"], "no-referrer")
 
+    def test_aceita_id_do_cliente_no_state(self):
+        cliente = self._cliente()
+        state = f"{cliente.id}.{self.NONCE}"
+        response = self.client.get(self.URL, {"code": "abc", "state": state})
+
+        self.assertEqual(response.status_code, 302)
+        partes, params = self._destino(response)
+        self.assertEqual(partes.netloc, "loja.ararasuite.com.br")
+        self.assertEqual(params["state"], state)
+
+    def test_id_de_cliente_inexistente_nao_redireciona(self):
+        self._cliente()
+        state = f"00000000-0000-0000-0000-000000000000.{self.NONCE}"
+        response = self.client.get(self.URL, {"code": "abc", "state": state})
+
+        self.assertEqual(response.status_code, 404)
+
     def test_usa_subdominio_mesmo_com_dominio_proprio(self):
         self._cliente(dominio_custom="loja.com.br")
         response = self.client.get(self.URL, {"code": "abc", "state": self._state()})
