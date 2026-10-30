@@ -155,9 +155,17 @@ def task_reativar_cliente(cliente_id):
     cliente.save(update_fields=['status', 'data_suspensao'])
 
 
+DIAS_RETENCAO_SAUDE = 30
+
+
 @shared_task
 def task_verificar_saude_todas():
-    from .models import Cliente
+    from datetime import timedelta
+    from django.utils import timezone
+    from .models import Cliente, VerificacaoSaude
+
+    # A cada 15 min por cliente a tabela cresce ~2.900 linhas/mês: guarda só a janela recente.
+    VerificacaoSaude.objects.filter(verificado_em__lt=timezone.now() - timedelta(days=DIAS_RETENCAO_SAUDE)).delete()
 
     clientes = Cliente.objects.filter(status__in=['ativo', 'trial'])
     for cliente in clientes:
@@ -796,8 +804,10 @@ def task_verificar_atualizacao():
 
 @shared_task
 def task_verificar_saude_cliente(cliente_id):
+    from django.conf import settings
     from .models import Cliente, VerificacaoSaude
     import json
+    import urllib.error
     import urllib.request
     import time
 
@@ -805,8 +815,11 @@ def task_verificar_saude_cliente(cliente_id):
     url = f'{cliente.url}/health/'
     inicio = time.monotonic()
     versao_erp = None
+    respondeu = True
+    # O Cloudflare responde 403 ao User-Agent padrão "Python-urllib/x.y": sem um próprio, todo cliente sai offline.
+    req = urllib.request.Request(url, headers={'User-Agent': f'AraraSuite-CP/{settings.VERSION} (health-check)'})
     try:
-        resp = urllib.request.urlopen(url, timeout=10)
+        resp = urllib.request.urlopen(req, timeout=10)
         status_http = resp.status
         online = status_http == 200
         # O corpo de /health/ é {"status":"ok","version":"X.Y.Z"} — de graça,
@@ -817,10 +830,16 @@ def task_verificar_saude_cliente(cliente_id):
             versao_erp = str(corpo.get('version') or '') or None
         except Exception:
             pass
+    except urllib.error.HTTPError as exc:
+        # Respondeu, mas com erro (502/503 do Traefik, 500 do ERP): guarda o código real.
+        status_http = exc.code
+        online = False
     except Exception:
+        # Sem resposta (timeout, DNS, conexão recusada): não há latência a medir.
         status_http = 0
         online = False
-    latencia_ms = int((time.monotonic() - inicio) * 1000)
+        respondeu = False
+    latencia_ms = int((time.monotonic() - inicio) * 1000) if respondeu else None
 
     VerificacaoSaude.objects.create(
         cliente=cliente,

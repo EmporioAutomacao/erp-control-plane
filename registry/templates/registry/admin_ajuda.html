@@ -782,7 +782,7 @@
     <p style="margin-top:10px;"><strong>Antes do ponto sem volta</strong>, qualquer falha (ou o botão <strong>⏹ Interromper</strong>) devolve o cliente à origem e confere que os dados de lá estão intactos. <strong>Depois dele</strong>, uma falha vira <span class="tag-no">Exige intervenção</span>, sem volta automática: voltar ao banco antigo faria as lojas cujo agente já renovou o token no destino precisarem de um novo código de ativação.</p>
     <p style="margin-top:8px;"><strong>Pré-requisitos do servidor novo:</strong> uma <strong>Região</strong> própria (só esse nó com o label dela), um <strong>Host</strong> dessa região, x86_64, worker do CP rodando no nó (<code>agente-no</code>) e, se o nó estiver atrás de WireGuard, MTU do overlay ajustada.</p>
     <div class="ajuda-alert-warn" style="margin-top:10px;margin-bottom:0;">
-      ⚠️ Nada é apagado automaticamente: depois de concluída (ou revertida), a página da migração lista os <strong>volumes residuais</strong> e o nó onde ficaram. Quando tiver certeza, clique em <strong>🧹 Remover agora</strong> (só superusuário): o CP recusa se o cliente estiver rodando naquele nó ou se algum container em execução usar o volume, e o resultado aparece no log da migração. Uma nova migração para um nó com volumes do cliente é recusada até eles saírem. Status, data de ativação e o estado ligado/parado do cliente são preservados. Especificação e runbook: <code>docs/registry/migracao-cliente-entre-servidores.md</code>.
+      ⚠️ Nada é apagado automaticamente: depois de concluída (ou revertida), a página da migração lista os <strong>volumes residuais</strong> e o nó onde ficaram. Quando tiver certeza, clique em <strong>🧹 Remover agora</strong> (só superusuário): o CP recusa se o cliente estiver rodando naquele nó ou se algum container em execução usar o volume, e o resultado aparece no log da migração. Uma nova migração para um nó com volumes do cliente é recusada até eles saírem. O campo <strong>Host</strong> do cliente fica somente leitura depois de implantado (trocá-lo à mão e re-provisionar subiria um banco vazio em outro servidor): troque de servidor só pela migração, que atualiza o host sozinha. Status, data de ativação e o estado ligado/parado do cliente são preservados. Especificação e runbook: <code>docs/registry/migracao-cliente-entre-servidores.md</code>.
     </div>
   </div>
 
@@ -828,7 +828,7 @@
     <h3>🔄 Como atualizar os dados</h3>
     <div class="ajuda-step" style="margin-top:4px;">
       <div class="ajuda-step-num">1</div>
-      <div class="ajuda-step-text">A tarefa periódica <strong>"Versões e instalações dos clientes"</strong> coleta de todos os clientes ativos/trial a cada 30 minutos, e <strong>"Saúde dos clientes (/health/)"</strong> a cada 10 minutos. Desde a versão 0.0.52 elas já nascem agendadas (antes eram criadas à mão em cada ambiente).</div>
+      <div class="ajuda-step-text">A tarefa periódica <strong>"Versões e instalações dos clientes"</strong> coleta de todos os clientes ativos/trial a cada 30 minutos, e <strong>"Saúde dos clientes (/health/)"</strong> a cada 15 minutos. Desde a versão 0.0.52 elas já nascem agendadas (antes eram criadas à mão em cada ambiente). Cada verificação de saúde vira um registro em <em>Clientes → Verificações de Saúde</em> (online/offline, código HTTP e latência; somente leitura, guardados por 30 dias). O botão <strong>🔄 Verificar agora</strong> dessa tela roda a verificação na hora.</div>
     </div>
     <div class="ajuda-step">
       <div class="ajuda-step-num">2</div>

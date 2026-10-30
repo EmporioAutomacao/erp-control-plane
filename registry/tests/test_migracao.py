@@ -608,6 +608,48 @@ class AdminTests(_Base):
         self.assertIn('Interromper e voltar para a origem', d['acoes'])
         self.assertIn('<table', d['verificacoes'])
 
+    def _pagina_do_cliente(self):
+        return self.c.get(reverse('admin:registry_cliente_change', args=[self.cliente.pk])).content.decode()
+
+    def test_cliente_com_migracao_no_historico_continua_com_o_botao(self):
+        # Regressão: "{:%d/%m}" no format_html levantava ValueError (o admin engolia e o campo
+        # inteiro, com o botão, virava "-") a partir da primeira migração do cliente.
+        self._com_migracao_ativa()
+        MigracaoCliente.objects.filter(pk=self.m.pk).update(status='revertida')
+        html = self._pagina_do_cliente()
+        self.assertIn('🚚 Migrar servidor', html)
+        self.assertIn(timezone.localtime(self.m.iniciada_em).strftime('%d/%m/%Y %H:%M'), html)
+        self.assertIn('Revertida', html)
+
+    def test_painel_com_ponto_sem_volta_mostra_a_data(self):
+        self._com_migracao_ativa()
+        quando = timezone.now()
+        MigracaoCliente.objects.filter(pk=self.m.pk).update(status='abrindo', ponto_sem_volta_em=quando)
+        esperado = timezone.localtime(quando).strftime('%d/%m %H:%M:%S')
+        html = self.c.get(reverse('admin:registry_migracaocliente_change', args=[self.m.pk])).content.decode()
+        self.assertIn(f'ponto sem volta em {esperado}', html)
+        r = self.c.get(reverse('admin:registry_migracaocliente_andamento', args=[self.m.pk]))
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(esperado, r.json()['cabecalho'])
+
+    def test_host_somente_leitura_depois_de_implantado(self):
+        html = self._pagina_do_cliente()  # cliente ativo, sem migração
+        self.assertNotIn('name="host"', html)
+        self.assertIn('para trocar de servidor use 🚚 Migrar servidor', html)
+
+    def test_host_editavel_antes_de_implantar_e_no_cadastro_novo(self):
+        Cliente.objects.filter(pk=self.cliente.pk).update(status='erro_provisao', data_ativacao=None)
+        self.assertIn('name="host"', self._pagina_do_cliente())
+        self.assertIn('name="host"', self.c.get(reverse('admin:registry_cliente_add')).content.decode())
+
+    def test_host_editavel_no_cliente_legado_sem_host(self):
+        Cliente.objects.filter(pk=self.cliente.pk).update(host=None)
+        self.assertIn('name="host"', self._pagina_do_cliente())
+
+    def test_cliente_ativado_que_voltou_para_erro_provisao_nao_libera_o_host(self):
+        Cliente.objects.filter(pk=self.cliente.pk).update(status='erro_provisao', data_ativacao=timezone.now())
+        self.assertNotIn('name="host"', self._pagina_do_cliente())
+
 
 class TasksAdiadasTests(_Base):
     def test_suspender_durante_a_migracao_e_adiado(self):

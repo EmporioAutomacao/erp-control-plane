@@ -133,6 +133,9 @@ Necessárias para a migração e aproveitadas pelo backup/restauração comuns:
 - `executar(modo_migracao=...)`: réplicas 0, Traefik desligado, preserva status/data e exige o `.env` (A5, A6).
 - Com web/cron em 0 o Docker só cria no destino o volume do `_db`; `media`/`backups` não existem lá. A restauração da migração cria esses volumes vazios (`criar_se_ausente=True`, rótulo `com.docker.stack.namespace`) antes de copiar. Fora da migração, volume ausente continua sendo aviso. Os volumes que a migração deixa (destino numa volta, origem numa conclusão) saem pelo botão 🧹 Remover agora da página da migração, com as travas descritas no `CLAUDE.md` (cliente não pode rodar no nó dos resíduos; container em execução usando o volume impede). Achado em produção (0.0.53, `demo` anapolis → hostinger: "volume demo_media não existe neste nó"; voltou para a origem intacta).
 
+- Host do Cliente somente leitura depois de implantado: trocar à mão e re-provisionar subiria o banco vazio no nó da região nova, e a migração partiria da região errada. Só a migração troca o host.
+- Achado em produção (0.0.54): o histórico de migrações na página do Cliente usava `{:%d/%m/%Y %H:%M}` no `format_html`, que falha com `SafeString`; o admin engolia o `ValueError` e o botão 🚚 Migrar servidor sumia de todo cliente com uma migração no histórico. Datas agora são formatadas antes (`timezone.localtime(...).strftime`).
+
 ## 7. Pré-requisitos de um servidor novo
 
 - Entrar no Swarm; arquitetura **x86_64**.

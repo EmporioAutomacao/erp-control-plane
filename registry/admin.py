@@ -372,6 +372,17 @@ def _migracao_ativa(cliente):
     return MigracaoCliente.objects.filter(cliente=cliente).exclude(status__in=MigracaoCliente.STATUS_FINAIS).first()
 
 
+def _host_editavel(cliente):
+    """O host só pode ser escolhido antes de o stack existir (ou num cliente legado sem host).
+
+    Depois de implantado, trocar o host só muda o CP: um re-provisionamento subiria o banco
+    vazio no nó da região nova (ERP vazio exposto) e a migração partiria da região errada.
+    Trocar de servidor é pelo 🚚 Migrar servidor, que atualiza o host sozinho."""
+    if cliente is None or cliente.host_id is None:
+        return True
+    return cliente.status in ('aguardando_provisao', 'erro_provisao') and cliente.data_ativacao is None
+
+
 def _bloqueado_por_migracao(request, cliente):
     """Recusa operações que mexem no stack enquanto o cliente está em migração de servidor."""
     from django.contrib import messages
@@ -427,10 +438,14 @@ def _detalhes_log(b):
 
 def format_html_join_migracoes(migracoes):
     from django.urls import reverse
+    from django.utils import timezone
+    # Datas formatadas antes: o format_html escapa os argumentos para SafeString, e "{:%d/%m}" num
+    # SafeString levanta ValueError — que o admin engole, sumindo com o campo inteiro (e o botão).
     itens = [
         format_html(
-            '<li><a href="{}">{:%d/%m/%Y %H:%M}</a> — {} → {}: {}</li>',
-            reverse('admin:registry_migracaocliente_change', args=[m.pk]), m.iniciada_em,
+            '<li><a href="{}">{}</a> — {} → {}: {}</li>',
+            reverse('admin:registry_migracaocliente_change', args=[m.pk]),
+            timezone.localtime(m.iniciada_em).strftime('%d/%m/%Y %H:%M'),
             m.regiao_origem, m.regiao_destino, m.get_status_display(),
         )
         for m in migracoes
@@ -517,6 +532,7 @@ class MigracaoClienteAdmin(ModelAdmin):
     def _partes(self, obj):
         """HTML das partes do painel que mudam durante a migração (o log vai à parte, como texto)."""
         from django.urls import reverse
+        from django.utils import timezone
         gates = (obj.verificacoes or {}).get('gates') or {}
         linhas_gates = ''.join(
             format_html('<tr><td><code>{}</code></td><td>{}</td><td>{}</td></tr>', codigo,
@@ -551,7 +567,8 @@ class MigracaoClienteAdmin(ModelAdmin):
             '<p><strong>{}</strong>: {} ({}) → {} ({}) · status <strong style="color:{};">{}</strong>{}</p>{}{}',
             obj.cliente.slug, obj.regiao_origem, obj.no_origem, obj.regiao_destino, obj.no_destino,
             _MIGRACAO_CORES.get(obj.status, '#6a1b9a'), obj.get_status_display(),
-            format_html(' · ponto sem volta em {:%d/%m %H:%M:%S}', obj.ponto_sem_volta_em) if obj.ponto_sem_volta_em else '',
+            format_html(' · ponto sem volta em {}', timezone.localtime(obj.ponto_sem_volta_em).strftime('%d/%m %H:%M:%S'))
+            if obj.ponto_sem_volta_em else '',
             format_html('<p style="color:#b71c1c;white-space:pre-wrap;"><strong>Motivo:</strong> {}</p>', obj.mensagem_erro)
             if obj.mensagem_erro else '',
             residuais,
@@ -649,7 +666,10 @@ class ClienteAdmin(ModelAdmin):
             return [f.name for f in self.model._meta.fields] + [
                 f.name for f in self.model._meta.many_to_many
             ] + list(self.readonly_fields)
-        return super().get_readonly_fields(request, obj)
+        campos = list(super().get_readonly_fields(request, obj))
+        if not _host_editavel(obj):
+            campos.append('host')
+        return campos
 
     def get_urls(self):
         urls = super().get_urls()
@@ -725,10 +745,14 @@ class ClienteAdmin(ModelAdmin):
         historico = MigracaoCliente.objects.filter(cliente=obj)[:5]
         linhas = format_html_join_migracoes(historico)
         url = reverse('admin:registry_cliente_migrar', args=[obj.pk])
+        aviso = '' if _host_editavel(obj) else mark_safe(
+            '<p style="margin:0 0 8px;font-size:12px;color:#6b7280;">O host não é editável depois de o cliente '
+            'ser implantado: para trocar de servidor use 🚚 Migrar servidor (leva os dados junto).</p>'
+        )
         return format_html(
-            '<a href="{}" style="display:inline-block;padding:6px 14px;background:#6a1b9a;color:#fff;border-radius:4px;'
+            '{}<a href="{}" style="display:inline-block;padding:6px 14px;background:#6a1b9a;color:#fff;border-radius:4px;'
             'text-decoration:none;font-size:13px;">🚚 Migrar servidor</a>{}',
-            url, linhas,
+            aviso, url, linhas,
         )
     migracao_servidor.short_description = 'Migração de servidor'
 
@@ -1749,8 +1773,55 @@ class ClienteAdmin(ModelAdmin):
 
 @admin.register(VerificacaoSaude)
 class VerificacaoSaudeAdmin(ModelAdmin):
-    list_display = ['cliente', 'online', 'status_http', 'latencia_ms', 'verificado_em']
-    list_filter = ['online', 'cliente']
+    """Somente leitura: os registros nascem só de task_verificar_saude_todas (agendada pela migration 0033)."""
+    change_list_template = 'admin/registry/verificacaosaude/change_list.html'
+    list_display = ['cliente', 'situacao', 'status_http', 'latencia', 'verificado_em']
+    list_filter = ['online', 'verificado_em', 'cliente']
+    search_fields = ['cliente__slug', 'cliente__nome']
+    date_hierarchy = 'verificado_em'
+    list_select_related = ['cliente']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_urls(self):
+        return [
+            path('verificar-agora/', self.admin_site.admin_view(self._view_verificar_agora),
+                 name='registry_verificacaosaude_verificar_agora'),
+        ] + super().get_urls()
+
+    def situacao(self, obj):
+        if obj.online:
+            return format_html('<span style="{}background:#2e7d32;">🟢 Online</span>', _PILL_SAUDE)
+        return format_html('<span style="{}background:#b71c1c;">🔴 Offline</span>', _PILL_SAUDE)
+    situacao.short_description = 'Situação'
+    situacao.admin_order_field = 'online'
+
+    def latencia(self, obj):
+        if obj.latencia_ms is None:
+            return '—'
+        cor = '#2e7d32' if obj.latencia_ms < 500 else '#ef6c00' if obj.latencia_ms < 2000 else '#b71c1c'
+        return format_html('<span style="color:{};font-weight:600;">{} ms</span>', cor, obj.latencia_ms)
+    latencia.short_description = 'Latência'
+    latencia.admin_order_field = 'latencia_ms'
+
+    def _view_verificar_agora(self, request):
+        from django.contrib import messages
+        from .tasks import task_verificar_saude_todas
+        if request.method == 'POST':
+            task_verificar_saude_todas.delay()
+            messages.success(request, 'Verificação disparada para todos os clientes ativos/trial; '
+                                      'os resultados aparecem aqui em alguns segundos.')
+        return redirect('admin:registry_verificacaosaude_changelist')
+
+
+_PILL_SAUDE = 'display:inline-block;padding:2px 10px;border-radius:999px;color:#fff;font-size:12px;font-weight:600;'
 
 
 class _ConfiguracaoEmailForm(forms.ModelForm):

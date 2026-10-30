@@ -63,9 +63,11 @@
   - registro de cada atualizacao de versao aplicada a um tenant;
   - guarda versao anterior, versao nova, status e log de execucao.
 
-- `registry.HealthCheck`
+- `registry.VerificacaoSaude`
   - snapshot de disponibilidade de uma instancia em um momento;
-  - guarda `status_http`, `latencia_ms`, `online`.
+  - guarda `status_http`, `latencia_ms`, `online`;
+  - gerado so pelo processo automatico (`task_verificar_saude_todas`, a cada 15 min pela migration `0033`); o admin e somente leitura e tem o botao Verificar agora;
+  - retencao de 30 dias (`DIAS_RETENCAO_SAUDE`).
 
 ## 4. Fluxo de provisionamento
 

@@ -1,0 +1,21 @@
+{% extends "admin/change_list.html" %}
+
+{% block content %}
+  <section style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:12px;padding:16px;">
+    <h2 style="margin:0;font-size:20px;">Verificações de Saúde</h2>
+    <p style="color:#64748b;font-size:13px;line-height:1.5;margin:8px 0 0;">
+      Registros <strong>automáticos</strong>: a cada 15 minutos o CP faz <code>GET /health/</code> em todos os
+      clientes ativos/trial e grava se responderam (HTTP 200) e a latência. Não há cadastro manual.
+      Intervalo em <code>Agendamentos &gt; Tarefas Periódicas &gt; Saúde dos clientes (/health/)</code>;
+      registros com mais de 30 dias são apagados.
+    </p>
+    <form method="post" action="{% url 'admin:registry_verificacaosaude_verificar_agora' %}" style="margin-top:14px;">
+      {% csrf_token %}
+      <button type="submit"
+              style="padding:6px 14px;background:#2e7d32;color:#fff;border:0;border-radius:4px;font-size:13px;cursor:pointer;">
+        🔄 Verificar agora
+      </button>
+    </form>
+  </section>
+  {{ block.super }}
+{% endblock %}
