@@ -123,8 +123,9 @@ class ColetorVersoes:
 
     def _tentar_health(self, host):
         """Fallback: GET /health/ (publico) só pra versao do ERP."""
+        from . import http_publico
         try:
-            with urllib.request.urlopen(f'https://{host}/health/', timeout=10) as r:
+            with http_publico.abrir(f'https://{host}/health/', timeout=10) as r:
                 corpo = json.loads(r.read().decode('utf-8'))
             return str(corpo.get('version') or '')[:20]
         except Exception:

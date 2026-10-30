@@ -549,8 +549,10 @@ class MigracaoClienteAdmin(ModelAdmin):
                 reverse('admin:registry_migracaocliente_interromper', args=[obj.pk]),
             )
         residuais = ''
-        if obj.volumes_residuais:
-            no, volumes = obj.volumes_residuais.get('no'), ' '.join(obj.volumes_residuais.get('volumes') or [])
+        from . import migracao
+        sobra = migracao.residuais_da_migracao(obj)
+        if sobra:
+            no, volumes = sobra.get('no'), ' '.join(sobra.get('volumes') or [])
             limpar = ''
             if not obj.ativa:
                 limpar = format_html(
@@ -560,8 +562,14 @@ class MigracaoClienteAdmin(ModelAdmin):
                     reverse('admin:registry_migracaocliente_limpar_residuais', args=[obj.pk]),
                     f'Apagar de vez os volumes {volumes} do nó {no}? O cliente não roda lá; não há como desfazer.',
                 )
+            nota = mark_safe(
+                '<br><span style="font-size:12px;color:#6b7280;">A migração parou antes de terminar e não registrou '
+                'estes volumes; são os do destino, que nunca foi exposto. O CP só remove se o cliente estiver '
+                'rodando na origem.</span>'
+            ) if sobra.get('presumidos') else ''
             residuais = format_html(
-                '<p><strong>Volumes residuais</strong> em <code>{}</code>: <code>{}</code>{}</p>', no, volumes, limpar,
+                '<p><strong>Volumes residuais</strong> em <code>{}</code>: <code>{}</code>{}{}</p>',
+                no, volumes, limpar, nota,
             )
         cabecalho = format_html(
             '<p><strong>{}</strong>: {} ({}) → {} ({}) · status <strong style="color:{};">{}</strong>{}</p>{}{}',

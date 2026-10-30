@@ -765,6 +765,40 @@ class LimparResiduaisTests(_Base):
         with self.assertRaises(migracao.Recusa):
             self._pedir(onde_roda=None)
 
+    def _intervencao(self, **campos):
+        self.iniciar()
+        MigracaoCliente.objects.filter(pk=self.m.pk).update(
+            status='exige_intervencao', host_trocado=True, volumes_residuais=None, **campos)
+        return self.recarregar()
+
+    def test_intervencao_antes_do_ponto_sem_volta_presume_os_volumes_do_destino(self):
+        self._intervencao()
+        self.assertEqual(migracao.residuais_da_migracao(self.m),
+                         {'no': 'no-b', 'volumes': self.VOLUMES, 'presumidos': True})
+        enviar = self._pedir(onde_roda='no-a')
+        enviar.assert_called_once_with(args=[self.m.pk], queue='no.no-b')
+        self.assertEqual(self.recarregar().volumes_residuais, {'no': 'no-b', 'volumes': self.VOLUMES})
+
+    def test_intervencao_presumida_exige_o_cliente_na_origem(self):
+        self._intervencao()
+        with self.assertRaisesMessage(migracao.Recusa, 'não na origem'):
+            self._pedir(onde_roda='no-c')
+        self.assertIsNone(self.recarregar().volumes_residuais)
+
+    def test_intervencao_depois_do_ponto_sem_volta_nao_presume_nada(self):
+        self._intervencao(ponto_sem_volta_em=timezone.now())
+        self.assertIsNone(migracao.residuais_da_migracao(self.m))
+        with self.assertRaises(migracao.Recusa):
+            self._pedir()
+
+    def test_intervencao_mostra_o_botao_com_a_nota(self):
+        self._intervencao()
+        c = Client()
+        c.force_login(self.user)
+        html = c.get(reverse('admin:registry_migracaocliente_change', args=[self.m.pk])).content.decode()
+        self.assertIn('Remover agora', html)
+        self.assertIn('nunca foi exposto', html)
+
     def test_recusa_com_migracao_ativa(self):
         self.iniciar()
         MigracaoCliente.objects.filter(pk=self.m.pk).update(volumes_residuais={'no': 'no-b', 'volumes': self.VOLUMES})
@@ -809,6 +843,29 @@ class LimparResiduaisTests(_Base):
             r = c.post(reverse('admin:registry_migracaocliente_limpar_residuais', args=[self.m.pk]))
         enviar.assert_called_once()
         self.assertEqual(r.url, url + '?limpando=1')
+
+
+class HealthPublicoUserAgentTests(SimpleTestCase):
+    """O Cloudflare devolve 403 ao "Python-urllib/x.y": a volta da migração do demo terminou em
+    "exige intervenção" esperando um 200 do /health/ que nunca vinha."""
+
+    def _resposta(self):
+        resp = MagicMock(status=200)
+        resp.read.return_value = b'{"version": "0.0.143"}'
+        return resp
+
+    def test_migracao_manda_o_user_agent_do_cp(self):
+        cliente = SimpleNamespace(subdominio='acme.ararasuite.com.br')
+        with patch('urllib.request.urlopen', return_value=self._resposta()) as urlopen:
+            migracao.health_publico(cliente, '0.0.143', timeout=5)
+        req = urlopen.call_args.args[0]
+        self.assertTrue(req.get_header('User-agent').startswith('AraraSuite-CP/'))
+
+    def test_provisionamento_manda_o_user_agent_do_cp(self):
+        from registry.provisioning import MotorProvisionamento
+        with patch('urllib.request.urlopen', return_value=self._resposta()) as urlopen:
+            MotorProvisionamento.__new__(MotorProvisionamento)._aguardar_http('https://acme.ararasuite.com.br/health/')
+        self.assertTrue(urlopen.call_args.args[0].get_header('User-agent').startswith('AraraSuite-CP/'))
 
 
 class RemoverVolumeTests(SimpleTestCase):

@@ -136,6 +136,8 @@ Necessárias para a migração e aproveitadas pelo backup/restauração comuns:
 - Host do Cliente somente leitura depois de implantado: trocar à mão e re-provisionar subiria o banco vazio no nó da região nova, e a migração partiria da região errada. Só a migração troca o host.
 - Achado em produção (0.0.54): o histórico de migrações na página do Cliente usava `{:%d/%m/%Y %H:%M}` no `format_html`, que falha com `SafeString`; o admin engolia o `ValueError` e o botão 🚚 Migrar servidor sumia de todo cliente com uma migração no histórico. Datas agora são formatadas antes (`timezone.localtime(...).strftime`).
 
+- Achado em produção (`demo`, 0.0.54): a volta para a origem religou o ERP, mas o `health_publico` recebeu 403 do Cloudflare (User-Agent padrão do urllib) por 300 s e a migração terminou em `exige_intervencao`, sem registrar os volumes residuais do destino. Corrigido com `registry/http_publico.py` (User-Agent do CP) em toda chamada ao endereço público do cliente; migrações em intervenção que trocaram de host antes do ponto sem volta passam a oferecer a limpeza dos volumes do destino (`residuais_da_migracao`, só com o banco rodando na origem).
+
 ## 7. Pré-requisitos de um servidor novo
 
 - Entrar no Swarm; arquitetura **x86_64**.

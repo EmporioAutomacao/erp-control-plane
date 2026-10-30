@@ -804,11 +804,10 @@ def task_verificar_atualizacao():
 
 @shared_task
 def task_verificar_saude_cliente(cliente_id):
-    from django.conf import settings
+    from . import http_publico
     from .models import Cliente, VerificacaoSaude
     import json
     import urllib.error
-    import urllib.request
     import time
 
     cliente = Cliente.objects.get(pk=cliente_id)
@@ -816,10 +815,9 @@ def task_verificar_saude_cliente(cliente_id):
     inicio = time.monotonic()
     versao_erp = None
     respondeu = True
-    # O Cloudflare responde 403 ao User-Agent padrão "Python-urllib/x.y": sem um próprio, todo cliente sai offline.
-    req = urllib.request.Request(url, headers={'User-Agent': f'AraraSuite-CP/{settings.VERSION} (health-check)'})
+    # User-Agent do CP (http_publico): o Cloudflare responde 403 ao padrão do urllib.
     try:
-        resp = urllib.request.urlopen(req, timeout=10)
+        resp = http_publico.abrir(url, timeout=10)
         status_http = resp.status
         online = status_http == 200
         # O corpo de /health/ é {"status":"ok","version":"X.Y.Z"} — de graça,

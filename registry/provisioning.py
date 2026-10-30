@@ -259,12 +259,11 @@ class MotorProvisionamento:
         raise TimeoutError(f'Serviço {service_name} não ficou Running em {timeout}s')
 
     def _aguardar_http(self, url, timeout=180):
-        import urllib.request
-        import urllib.error
+        from . import http_publico
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
-                resp = urllib.request.urlopen(url, timeout=10)
+                resp = http_publico.abrir(url, timeout=10)
                 if resp.status == 200:
                     return
             except Exception:

@@ -17,13 +17,12 @@ import json
 import logging
 import os
 import time
-import urllib.request
 
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from . import swarm
+from . import http_publico, swarm
 from .log_operacao import LogOperacao
 from .volumes import VOLUMES_STACK
 
@@ -456,7 +455,7 @@ def health_publico(cliente, versao, timeout=TIMEOUT_HEALTH_S):
     ultimo = ''
     while time.monotonic() < limite:
         try:
-            resp = urllib.request.urlopen(url, timeout=10)
+            resp = http_publico.abrir(url, timeout=10)
             corpo = json.loads(resp.read().decode('utf-8') or '{}')
             if resp.status == 200 and str(corpo.get('version')) == versao:
                 return f'{url} → 200, versão {versao}'
@@ -593,18 +592,33 @@ def finalizar_reversao(migracao_id):
         log(migracao_id, f'REVERTIDA: o cliente continua na origem, com os dados de antes.{extra}')
 
 
+def residuais_da_migracao(m):
+    """Volumes que a migração deixou para trás, ou None.
+
+    Os registrados (`volumes_residuais`, gravados ao concluir ou reverter) ou, numa migração que
+    parou em "exige intervenção" depois de implantar no destino mas **antes** do ponto sem volta,
+    os do destino (`presumidos`): o destino nunca foi exposto, então o que há lá é sobra.
+    """
+    if m.volumes_residuais:
+        return m.volumes_residuais
+    if m.status == 'exige_intervencao' and m.host_trocado and not m.ponto_sem_volta_em and m.no_destino:
+        return {'no': m.no_destino, 'volumes': [f'{m.cliente.slug}_{v}' for v in VOLUMES_STACK], 'presumidos': True}
+    return None
+
+
 def limpar_residuais(migracao_id, usuario=None):
     """Pede ao worker do nó dos resíduos a remoção dos volumes que a migração deixou.
 
     Levanta `Recusa` se a migração ainda estiver ativa, se não houver resíduos, se o cliente
     tiver outra operação em andamento ou se o banco do cliente estiver rodando justamente no
-    nó dos resíduos (seriam os dados em uso, não sobra)."""
+    nó dos resíduos (seriam os dados em uso, não sobra). Com resíduos presumidos (migração em
+    intervenção), exige o banco rodando na origem."""
     from .nos import fila_do_no, hostname_do_no
     from .tasks import task_migracao_limpar_residuais
     m = _modelo().objects.select_related('cliente').get(pk=migracao_id)
-    residuais = m.volumes_residuais or {}
     if m.ativa:
         raise Recusa('a migração ainda está em andamento')
+    residuais = residuais_da_migracao(m) or {}
     if not residuais.get('volumes') or not residuais.get('no'):
         raise Recusa('não há volumes residuais registrados')
     ocupado = operacao_ativa(m.cliente)
@@ -615,6 +629,13 @@ def limpar_residuais(migracao_id, usuario=None):
         raise Recusa(f'não foi possível confirmar onde {m.cliente.slug}_db roda agora')
     if atual == residuais['no']:
         raise Recusa(f'{m.cliente.slug}_db está rodando em {atual}: esses volumes são os dados em uso')
+    if residuais.get('presumidos'):
+        if atual != m.no_origem:
+            raise Recusa(f'{m.cliente.slug}_db roda em {atual}, não na origem ({m.no_origem}): '
+                         'confira a situação antes de apagar qualquer volume')
+        # A task do nó lê `volumes_residuais`: grava os presumidos (sem a marca) antes de despachar.
+        residuais = {'no': residuais['no'], 'volumes': residuais['volumes']}
+        _modelo().objects.filter(pk=migracao_id).update(volumes_residuais=residuais)
     quem = getattr(usuario, 'username', '') or 'usuário'
     log(migracao_id, f'Limpeza dos volumes residuais pedida por {quem}: {", ".join(residuais["volumes"])} '
                      f'em {residuais["no"]} (o cliente roda em {atual}).')
