@@ -92,6 +92,7 @@ class MotorProvisionamento:
 
         env_vars = self.montar_env(env_existente)
         senha_temp = env_vars['DJANGO_SUPERUSER_PASSWORD']
+        cp_shared_secret = env_vars['CP_SHARED_SECRET']
         env_file.write_text('\n'.join(f'{k}={v}' for k, v in env_vars.items()))
         env_file.chmod(0o600)
 

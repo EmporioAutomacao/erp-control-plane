@@ -720,6 +720,19 @@ class ModoMigracaoProvisionamentoTests(TestCase):
         self.assertEqual(self.cliente.status, 'suspenso')
         self.assertIsNone(self.cliente.data_ativacao)
 
+    @patch('registry.cp_push.SincronizadorPlano')
+    @patch('registry.provisioning.CHECK_HTTP_HEALTH', False)
+    @patch('registry.provisioning.MotorProvisionamento._aguardar_servico')
+    def test_provisionamento_normal_deixa_o_cliente_ativo(self, _aguardar, _sincronizador):
+        (self.dir / '.env').write_text('\n'.join(f'{k}={v}' for k, v in SEGREDOS.items()))
+        self._motor().executar()
+
+        env = dict(l.split('=', 1) for l in (self.dir / '.env').read_text().splitlines())
+        self.cliente.refresh_from_db()
+        self.assertEqual(self.cliente.status, 'ativo')
+        self.assertIsNotNone(self.cliente.data_ativacao)
+        self.assertEqual(self.cliente.integracao_secret, env['CP_SHARED_SECRET'])
+
 
 class LimparResiduaisTests(_Base):
     VOLUMES = ['acme_pgdata', 'acme_media', 'acme_backups']
