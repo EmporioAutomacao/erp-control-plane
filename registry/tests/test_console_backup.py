@@ -185,15 +185,17 @@ class LogsDasTasksTests(SimpleTestCase):
         self.addCleanup(p.stop)
         self.bucket = instalar_fake_bucket(self)
 
-    def _fake_run(self, db='db-ctr\n', web='web-ctr\n', dump=b'-- dump', rc=0):
+    def _fake_run(self, db='db-ctr\n', volumes=True, dump=b'-- dump', rc=0):
         def _run(cmd, *a, **kw):
             if cmd[:2] == ['docker', 'ps']:
-                alvo = cmd[-1]
-                saida = db if '_db' in alvo else web
-                return SimpleNamespace(stdout=saida, stderr='', returncode=0)
+                return SimpleNamespace(stdout=db if '_db' in cmd[-1] else '', stderr='', returncode=0)
+            if cmd[:3] == ['docker', 'volume', 'inspect']:
+                return SimpleNamespace(stdout=b'', stderr=b'', returncode=0 if volumes else 1)
             if cmd[1] == 'exec':
                 return SimpleNamespace(stdout=dump, stderr=b'senha incorreta', returncode=rc)
-            if cmd[1] == 'cp':
+            if cmd[1] == 'create':
+                return SimpleNamespace(stdout=b'aux\n', stderr=b'', returncode=0)
+            if cmd[1] in ('cp', 'rm'):
                 return SimpleNamespace(stdout=b'', stderr=b'', returncode=0)
             raise AssertionError(cmd)
         return _run
@@ -203,21 +205,23 @@ class LogsDasTasksTests(SimpleTestCase):
             task_backup_cliente('c', 7, config_files={'.env': 'Rk9PPWJhcg=='})
         texto = ''.join(_linhas_do_log(self.filter))
         etapas = [
-            'Worker "worker-7" iniciou o backup', '[1/4] Banco de dados', 'Container do banco encontrado',
-            'pg_dump concluído: 7 B', 'db.sql compactado em', '[2/4] Mídia', 'Mídia copiada', '[3/4] Configuração do cliente',
-            'Configuração adicionada (1 arquivo(s))', 'Finalizando o arquivo', 'Arquivo pronto',
-            '[4/4] Enviando ao armazenamento (bucket "fake")', 'Envio concluído', 'CONCLUÍDO',
+            'Worker "worker-7" iniciou o backup', '[1/5] Banco de dados', 'Container do banco encontrado',
+            'pg_dump concluído: 7 B', 'db.sql compactado em', '[2/5] Mídia', 'Mídia copiado',
+            '[3/5] Backups internos do ERP', 'Backups internos do ERP copiado', '[4/5] Configuração do cliente',
+            'Configuração adicionada (1 arquivo(s))', 'Finalizando o arquivo', 'Arquivo pronto', 'SHA-256',
+            '[5/5] Enviando ao armazenamento (bucket "fake")', 'Envio concluído', 'CONCLUÍDO',
         ]
         posicoes = [texto.index(e) for e in etapas]
         self.assertEqual(posicoes, sorted(posicoes))
         self.assertNotIn('ERRO', texto)
 
     def test_avisos_e_erro_ficam_no_log(self):
-        with patch('subprocess.run', side_effect=self._fake_run(db='', web='')):
+        with patch('subprocess.run', side_effect=self._fake_run(db='', volumes=False)):
             task_backup_cliente('c', 7, config_files={})
         texto = ''.join(_linhas_do_log(self.filter))
         self.assertIn('AVISO: container acme_db não encontrado', texto)
-        self.assertIn('AVISO: container acme_web não encontrado', texto)
+        self.assertIn('AVISO: volume acme_media não encontrado', texto)
+        self.assertIn('AVISO: volume acme_backups não encontrado', texto)
         self.assertIn('ERRO: nenhum conteúdo foi capturado', texto)
 
     def test_falha_do_pg_dump_vira_aviso_no_log(self):
@@ -245,7 +249,7 @@ class LogsDasTasksTests(SimpleTestCase):
             info.size = 4
             tar.addfile(info, io.BytesIO(b'-- x\n'[:4]))
         tar_bytes = buf.getvalue()
-        backup = SimpleNamespace(pk=7, arquivo_path='s3://clientes/acme/b.tar.gz')
+        backup = SimpleNamespace(pk=7, arquivo_path='s3://clientes/acme/b.tar.gz', sha256='')
 
         def run(cmd, *a, **kw):
             if cmd[:2] == ['docker', 'ps']:
@@ -261,7 +265,7 @@ class LogsDasTasksTests(SimpleTestCase):
         texto = ''.join(_linhas_do_log(self.filter, 'log_restauracao'))
         for etapa in ('iniciou a restauração', '[1/4] Baixando', 'Download concluído', '[2/4] Extraindo',
                       '[3/4] Restaurando o banco', 'Banco restaurado em', '[4/4] Restaurando a mídia',
-                      'AVISO: o backup não contém media/', 'Pedindo ao manager para religar o web'):
+                      'AVISO: o backup não contém media/', 'Pedindo ao manager para religar o web e o cron'):
             self.assertIn(etapa, texto)
         self.assertEqual(_linhas_do_log(self.filter, 'log'), [])  # não mistura com o log do backup
 
@@ -444,7 +448,7 @@ class AbasDoClienteTests(_Base):
     CAMPOS_ANTES = [
         'id', 'slug', 'nome', 'cnpj', 'email_contato', 'telefone',
         'painel_acesso',
-        'host', 'versao_erp', 'stack_path', 'subdominio', 'dominio_custom',
+        'host', 'migracao_servidor', 'versao_erp', 'stack_path', 'subdominio', 'dominio_custom',
         'versao_atual',
         'plano', 'modulos_ativos', 'tema_site', 'acoes_plano_sync',
         'atualizacao_automatica_agente', 'versoes_permitidas', 'acoes_versoes',

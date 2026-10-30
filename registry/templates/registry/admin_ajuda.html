@@ -672,9 +672,12 @@
   </div>
 
   <div class="ajuda-card">
-    <h3>🖥️ Hosts de infraestrutura</h3>
-    <p>Cada cliente pode ser associado a um <strong>HostInfraestrutura</strong>. O campo <strong>Região</strong> define o placement do Docker Swarm:</p>
+    <h3>🖥️ Hosts de infraestrutura e regiões</h3>
+    <p>Cada cliente pode ser associado a um <strong>HostInfraestrutura</strong>. A <strong>Região</strong> do host define o placement do Docker Swarm (é o único campo do host usado pelo CP; nome, Swarm node ID, IP, CPU e RAM são informativos):</p>
     <div class="ajuda-code">node.labels.region == {regiao}</div>
+    <p style="margin-top:8px;">As regiões são cadastradas em <strong>Infraestrutura → Regiões</strong>. O <strong>código</strong> (ex.: <code>hostinger</code>) é o valor do label no Swarm e não pode ser alterado depois de salvo; a tela da região mostra o comando pronto. Região com hosts não pode ser apagada — desative-a para tirá-la da lista do cadastro de hosts.</p>
+    <p style="margin-top:8px;"><strong>Status do host</strong> (coluna na lista e seção no cadastro, verificado a cada 5 minutos e ao abrir o host): <span class="tag-ok">Online</span> = nó Ready/Active no Swarm e o worker do CP respondendo nele; <span class="tag-warn">Atenção</span> = funciona, mas com ressalva (nó em Drain, label ou IP diferente do cadastro, disco do Docker com menos de 15% livre, ARM, worker ainda sem resposta); <span class="tag-no">Offline</span> = nó fora do Swarm, Down ou worker sem responder há mais de 15 minutos (backups, restaurações e migrações nesse nó não andam). O detalhe mostra CPU/RAM reais, disco livre e quantos clientes rodam no nó. O Swarm node ID é preenchido sozinho quando a região tem um único nó.</p>
+    <p style="margin-top:8px;">Use um código <strong>exclusivo por servidor</strong> quando quiser escolher o servidor do cliente: dois nós com o mesmo label dividem os clientes daquela região entre si.</p>
     <p style="margin-top:8px;">Para ver os labels de um nó do Swarm:</p>
     <div class="ajuda-code">docker node inspect {node-id} --format '{{.Spec.Labels}}'</div>
     <p style="margin-top:8px;">Para adicionar um label de região a um nó:</p>
@@ -698,8 +701,13 @@
       </tr>
       <tr>
         <td><code>media/</code></td>
-        <td><code>docker cp {slug}_web:/app/media/.</code></td>
+        <td>volume <code>{slug}_media</code> (lido direto do volume)</td>
         <td>Arquivos enviados pelos usuários (uploads, imagens, documentos)</td>
+      </tr>
+      <tr>
+        <td><code>backups/</code></td>
+        <td>volume <code>{slug}_backups</code></td>
+        <td>Backups internos gerados pelo próprio ERP</td>
       </tr>
       <tr>
         <td><code>config/</code></td>
@@ -707,7 +715,7 @@
         <td><code>.env</code> e <code>stack.yml</code> do cliente</td>
       </tr>
     </table>
-    <p style="margin-top:10px;">O arquivo é enviado ao bucket de backups como <code>clientes/{slug}/backup_{slug}_{timestamp}.tar.gz</code>.<br><strong>Retenção:</strong> 3 backups por cliente. O mais antigo é removido automaticamente.<br><strong>Onde fica:</strong> o backup é gerado no servidor (nó) em que o cliente roda e enviado ao armazenamento de backups (bucket S3). O botão ⬇ Baixar gera um link temporário de download.<br><strong>Conexão com o armazenamento:</strong> cadastrada em <em>Configurações → Armazenamento</em>. A tela mostra o status da conexão — <span class="tag-ok">Conectado</span> (tudo certo), <span class="tag-warn">Atenção</span> (o bucket funciona, mas o endereço público para download não responde) ou <span class="tag-no">Erro</span> (a mensagem explica o motivo). Sem essa configuração, o backup não é iniciado.</p>
+    <p style="margin-top:10px;">O arquivo é enviado ao bucket de backups como <code>clientes/{slug}/backup_{slug}_{timestamp}.tar.gz</code>.<br>Os volumes são lidos direto do disco do nó, então o backup funciona com o ERP parado (cliente suspenso). O SHA-256 do arquivo é gravado e conferido antes de restaurar; a restauração para e religa o web <strong>e o cron</strong>, devolvendo as réplicas de antes (um cliente suspenso continua parado).<br><strong>Retenção:</strong> 3 backups por cliente. O mais antigo é removido automaticamente.<br><strong>Onde fica:</strong> o backup é gerado no servidor (nó) em que o cliente roda e enviado ao armazenamento de backups (bucket S3). O botão ⬇ Baixar gera um link temporário de download.<br><strong>Conexão com o armazenamento:</strong> cadastrada em <em>Configurações → Armazenamento</em>. A tela mostra o status da conexão — <span class="tag-ok">Conectado</span> (tudo certo), <span class="tag-warn">Atenção</span> (o bucket funciona, mas o endereço público para download não responde) ou <span class="tag-no">Erro</span> (a mensagem explica o motivo). Sem essa configuração, o backup não é iniciado.</p>
   </div>
 
   <div class="ajuda-card">
@@ -759,6 +767,25 @@
     </div>
   </div>
 
+  <div class="ajuda-card" style="grid-column: 1 / -1;">
+    <h3>🚚 Migrar cliente para outro servidor</h3>
+    <p>Na página do cliente, aba <strong>Acesso e Infraestrutura</strong>, clique em <strong>🚚 Migrar servidor</strong>, escolha o host de destino, confira as verificações e confirme digitando o slug. O CP faz tudo sozinho e mostra o andamento em <em>Infraestrutura → Migrações de servidor</em>. O ERP do cliente fica fora do ar do início ao fim; o PDV continua vendendo e envia a fila depois.</p>
+    <table class="ajuda-table" style="margin-top:10px;">
+      <tr><th>Etapa</th><th>O que acontece</th></tr>
+      <tr><td>Verificações</td><td>13 gates: um nó só por região, x86_64, worker do destino respondendo, destino sem volumes do cliente, espaço livre, versão da imagem, segredos do <code>.env</code>, ambiente do web, armazenamento e vigia. Reprovou = nada é alterado.</td></tr>
+      <tr><td>Parar e inventariar</td><td>Para web e cron na origem e conta <strong>exatamente</strong> as linhas de cada tabela, as migrations e os arquivos (com hash) da mídia e dos backups internos.</td></tr>
+      <tr><td>Backup</td><td>Banco + volumes de mídia e de backups, com SHA-256. Qualquer aviso aborta.</td></tr>
+      <tr><td>Implantar e restaurar</td><td>O stack sobe no destino com o ERP <strong>parado e fora do Traefik</strong>; o backup é restaurado e o inventário do destino precisa ser idêntico ao da origem.</td></tr>
+      <tr><td>Teste interno</td><td>O web liga no destino e responde ao <code>/health/</code> por dentro, ainda sem tráfego externo.</td></tr>
+      <tr><td><strong>Abrir</strong></td><td><strong>Ponto sem volta:</strong> o Traefik passa a enviar o tráfego ao destino e o cron volta.</td></tr>
+    </table>
+    <p style="margin-top:10px;"><strong>Antes do ponto sem volta</strong>, qualquer falha (ou o botão <strong>⏹ Interromper</strong>) devolve o cliente à origem e confere que os dados de lá estão intactos. <strong>Depois dele</strong>, uma falha vira <span class="tag-no">Exige intervenção</span>, sem volta automática: voltar ao banco antigo faria as lojas cujo agente já renovou o token no destino precisarem de um novo código de ativação.</p>
+    <p style="margin-top:8px;"><strong>Pré-requisitos do servidor novo:</strong> uma <strong>Região</strong> própria (só esse nó com o label dela), um <strong>Host</strong> dessa região, x86_64, worker do CP rodando no nó (<code>agente-no</code>) e, se o nó estiver atrás de WireGuard, MTU do overlay ajustada.</p>
+    <div class="ajuda-alert-warn" style="margin-top:10px;margin-bottom:0;">
+      ⚠️ Nada é apagado automaticamente: depois de concluída (ou revertida), a página da migração lista os <strong>volumes residuais</strong> e o nó onde ficaram. Remova-os à mão quando tiver certeza; uma nova migração para um nó com volumes do cliente é recusada. Status, data de ativação e o estado ligado/parado do cliente são preservados. Especificação e runbook: <code>docs/registry/migracao-cliente-entre-servidores.md</code>.
+    </div>
+  </div>
+
 </div>
 
 <div class="ajuda-alert">
@@ -801,7 +828,7 @@
     <h3>🔄 Como atualizar os dados</h3>
     <div class="ajuda-step" style="margin-top:4px;">
       <div class="ajuda-step-num">1</div>
-      <div class="ajuda-step-text">Uma task agendada coleta de todos os clientes ativos/trial periodicamente (mesmo esquema do health check).</div>
+      <div class="ajuda-step-text">A tarefa periódica <strong>"Versões e instalações dos clientes"</strong> coleta de todos os clientes ativos/trial a cada 30 minutos, e <strong>"Saúde dos clientes (/health/)"</strong> a cada 10 minutos. Desde a versão 0.0.52 elas já nascem agendadas (antes eram criadas à mão em cada ambiente).</div>
     </div>
     <div class="ajuda-step">
       <div class="ajuda-step-num">2</div>
@@ -810,6 +837,19 @@
     <div class="ajuda-alert-warn" style="margin-top:8px;margin-bottom:0;">
       ⚠️ A versão do SyncAgent/PDV precisa do endpoint <code>/v1/cp/status</code> no ERP do cliente. Clientes com ERP antigo mostram só a versão do ERP (via <code>/health/</code>) e o aviso "ERP sem /v1/cp/status". Sem <strong>segredo de integração</strong> (⚙ Aplicar Configurações), idem.
     </div>
+  </div>
+
+  <div class="ajuda-card" style="grid-column: 1 / -1;">
+    <h3>🩺 Status/versões funcionam num ambiente e não no outro</h3>
+    <p>Confira nesta ordem:</p>
+    <table class="ajuda-table" style="margin-top:8px;">
+      <tr><th>#</th><th>Onde olhar</th><th>Sintoma e correção</th></tr>
+      <tr><td>1</td><td><em>Agendamentos → Tarefas Periódicas</em></td><td>As tarefas <strong>"Versões e instalações dos clientes"</strong> e <strong>"Saúde dos clientes (/health/)"</strong> precisam existir e estar <strong>ativas</strong>. Sem elas, "Verificado em" nunca muda sozinho. (A migration <code>0030</code> cria as que faltam; uma já existente, mesmo desativada, é mantida como está.)</td></tr>
+      <tr><td>2</td><td><code>docker service ps &lt;stack&gt;_beat</code> e <code>&lt;stack&gt;_celery</code></td><td>O <strong>beat</strong> dispara as tarefas agendadas e o <strong>celery</strong> as executa. Com um deles parado, nada atualiza e o botão 🔄 Verificar versões agora não tem efeito.</td></tr>
+      <tr><td>3</td><td>Aba <em>Versões</em> do cliente → mensagem de erro</td><td><em>"Sem segredo de integração"</em> → ⚙ Aplicar Configurações. <em>401</em> → segredo divergente entre CP e ERP (Aplicar Configurações). <em>timeout / conexão</em> → o CP não alcança <code>https://&lt;subdominio&gt;</code> (DNS, Cloudflare, Traefik). <em>"ERP sem /v1/cp/status"</em> → ERP antigo, atualize a versão.</td></tr>
+      <tr><td>4</td><td><code>docker service logs &lt;stack&gt;_celery</code></td><td>Procure <code>task_coletar_versoes_cliente</code> / <code>task_verificar_saude_cliente</code> e o erro de cada execução.</td></tr>
+    </table>
+    <p style="margin-top:8px;">Em desenvolvimento o botão roda direto no worker local, por isso costuma "funcionar" mesmo sem tarefa periódica cadastrada.</p>
   </div>
 
 </div>

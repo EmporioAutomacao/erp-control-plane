@@ -10,6 +10,11 @@
 
 ---
 
+> **Atualização 0.0.52:** a mídia passou a ser lida direto do volume `{slug}_media` (e o volume `{slug}_backups`
+> entrou no backup), sem depender do container do web; o backup grava o SHA-256 e a restauração o confere;
+> a restauração para e religa também o `cron`, devolvendo as réplicas de antes. Ver
+> `migracao-cliente-entre-servidores.md`.
+
 ## 1. Problema
 
 Em produção o botão **💾 Novo Backup** gerava um arquivo de ~1,6 KB, "Concluído",
@@ -126,8 +131,8 @@ salvamento, a cada clique em **🔌 Testar conexão agora**, a cada envio de bac
 | 🔴 Erro | Endpoint inacessível, bucket inexistente, credenciais recusadas ou sem permissão — a mensagem diz qual |
 | ⚪ Não testado | Configuração incompleta ou ainda não verificada |
 
-Para manter o status fresco sem ninguém abrir a tela, crie em Admin > Agendamentos > Tarefas Periódicas um
-`PeriodicTask` para `registry.tasks.task_verificar_armazenamento` (ex.: a cada 15 min), como o health check.
+Para manter o status fresco sem ninguém abrir a tela, `registry.tasks.task_verificar_armazenamento` roda a cada
+15 min — desde a 0.0.52 agendada pela migration `0030_agenda_verificacoes_periodicas` (antes era criada à mão).
 
 ## 5. Deploy
 

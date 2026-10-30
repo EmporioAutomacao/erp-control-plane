@@ -93,9 +93,25 @@ instalação.
 
 ## 5. Agendamento
 
-Não há schedule em código (igual ao health check). **Criar um `PeriodicTask` no
-admin do django-celery-beat** apontando para `registry.tasks.task_coletar_versoes_todas`
-com um crontab (ex.: a cada 30 min), em dev e em produção.
+**Desde a 0.0.52 o agendamento é criado pela migration `0030_agenda_verificacoes_periodicas`:**
+`task_coletar_versoes_todas` a cada 30 min e `task_verificar_saude_todas` a cada 10 min (também
+`task_verificar_armazenamento` a cada 15 min e `task_verificar_atualizacao` a cada 6 h). A migration só cria o que
+falta: se já existe uma tarefa periódica para a mesma task — mesmo desativada de propósito — ela fica como está.
+
+Antes disso era preciso criar o `PeriodicTask` à mão em cada ambiente; um ambiente sem ele (era o caso de produção)
+nunca atualizava "Verificado em", a versão detectada nem as instalações sozinho.
+
+### Diagnóstico: funciona num ambiente e não no outro
+
+1. *Agendamentos → Tarefas Periódicas*: "Versões e instalações dos clientes" e "Saúde dos clientes (/health/)"
+   existem e estão ativas?
+2. `docker service ps <stack>_beat` e `<stack>_celery`: os dois rodando? Sem o beat nada é disparado; sem o celery,
+   nem o botão 🔄 funciona.
+3. Aba *Versões* do cliente → `deteccao_versoes_erro`: sem segredo / 401 → ⚙ Aplicar Configurações;
+   timeout/conexão → o CP não alcança `https://<subdominio>`; "ERP sem /v1/cp/status" → ERP antigo.
+4. `docker service logs <stack>_celery` filtrando `task_coletar_versoes_cliente` / `task_verificar_saude_cliente`.
+
+Em desenvolvimento o botão roda direto no worker local, por isso costuma funcionar mesmo sem a tarefa periódica.
 
 ## 6. Ordem de deploy
 

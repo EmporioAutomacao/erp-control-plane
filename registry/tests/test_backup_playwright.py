@@ -20,6 +20,9 @@ from registry.tests.playwright_base import PlaywrightAdminTestCase
 def _fake_run_sem_containers(cmd, *args, **kwargs):
     if cmd[:2] == ['docker', 'ps']:
         return SimpleNamespace(stdout='', stderr='', returncode=0)
+    if cmd[:3] == ['docker', 'volume', 'inspect']:
+        # nenhum volume do cliente neste nó
+        return SimpleNamespace(stdout=b'', stderr=b'', returncode=1)
     if cmd[:3] == ['docker', 'service', 'ps']:
         # sem Swarm: a descoberta do nó falha e o backup cai na fila padrão
         return SimpleNamespace(stdout='', stderr='', returncode=1)
@@ -101,7 +104,7 @@ class BackupClientePlaywrightTests(PlaywrightAdminTestCase):
         log = self.page.locator('#bk-log').inner_text()
         self.assertIn('Backup solicitado', log)
         self.assertIn('Worker', log)
-        self.assertIn('[1/4] Banco de dados', log)
+        self.assertIn('[1/5] Banco de dados', log)
         self.assertIn('AVISO: container pw-backup-teste_db não encontrado', log)
         self.assertIn('ERRO: nenhum conteúdo foi capturado', log)
         self.assertIn('Erro', self.page.locator('#bk-estado').inner_text())
@@ -121,7 +124,7 @@ class BackupClientePlaywrightTests(PlaywrightAdminTestCase):
         backup = BackupCliente.objects.get(cliente=self.cliente)
         self.assertEqual(backup.status, 'erro')
         self.assertIn('pw-backup-teste_db', backup.mensagem)
-        self.assertIn('pw-backup-teste_web', backup.mensagem)
+        self.assertIn('pw-backup-teste_media', backup.mensagem)
         self.assertIn('Diretorio de configuracao', backup.mensagem)
         self.assertEqual(backup.tamanho_bytes, 0)
         self.assertEqual(backup.arquivo_path, '')
@@ -149,7 +152,7 @@ class BackupClientePlaywrightTests(PlaywrightAdminTestCase):
         self.assertEqual(backup.status, 'concluido')
         self.assertGreater(backup.tamanho_bytes, 0)
         self.assertIn('pw-backup-teste_db', backup.mensagem)
-        self.assertIn('pw-backup-teste_web', backup.mensagem)
+        self.assertIn('pw-backup-teste_media', backup.mensagem)
 
     def test_importar_backup_manual_mostra_tag_manual_na_lista(self):
         self.autenticar_admin(self.user)

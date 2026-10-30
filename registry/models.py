@@ -48,19 +48,65 @@ class Plano(models.Model):
         return self.nome
 
 
+regiao_slug_validator = RegexValidator(
+    regex=r"^[a-z0-9][a-z0-9-]*$",
+    message="Use só letras minúsculas sem acento, números e hífen (ex.: hostinger, sao-paulo).",
+)
+
+
+class Regiao(models.Model):
+    """Região de placement no Swarm: o slug é o valor do label ``region`` do nó."""
+
+    slug = models.CharField(
+        'Código', max_length=20, primary_key=True, validators=[regiao_slug_validator],
+        help_text='Valor do label do nó no Swarm (node.labels.region). Não pode ser alterado depois de salvo.',
+    )
+    nome = models.CharField(max_length=100, unique=True)
+    ativo = models.BooleanField(default=True, help_text='Regiões inativas não aparecem no cadastro de hosts.')
+    observacoes = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = 'Região'
+        verbose_name_plural = 'Regiões'
+        ordering = ['slug']
+
+    def __str__(self):
+        return self.nome
+
+
 class HostInfraestrutura(models.Model):
     TIPO_CHOICES = [('vps', 'VPS'), ('dedicado', 'Dedicado'), ('cloud_vm', 'Cloud VM')]
-    REGIAO_CHOICES = [('anapolis', 'Anápolis'), ('brasilia', 'Brasília')]
 
     nome = models.CharField(max_length=100, unique=True)
     swarm_node_id = models.CharField(max_length=100, blank=True)
     ip = models.GenericIPAddressField()
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default='dedicado')
-    regiao = models.CharField(max_length=20, choices=REGIAO_CHOICES, default='anapolis')
+    regiao = models.ForeignKey(
+        Regiao, on_delete=models.PROTECT, db_column='regiao', related_name='hosts',
+        verbose_name='Região',
+    )
     cpu_total = models.PositiveIntegerField()
     ram_gb_total = models.PositiveIntegerField()
     ativo = models.BooleanField(default=True)
     observacoes = models.TextField(blank=True)
+
+    # Sinalizador de saúde (registry/hosts.py): Swarm (manager) + resposta do worker do CP no nó.
+    STATUS_CHOICES = [
+        ('online', 'Online'),
+        ('atencao', 'Atenção'),
+        ('offline', 'Offline'),
+        ('nao_verificado', 'Não verificado'),
+    ]
+    status_conexao = models.CharField('Status', max_length=20, choices=STATUS_CHOICES, default='nao_verificado')
+    status_mensagem = models.TextField('Detalhe do status', blank=True)
+    verificado_em = models.DateTimeField('verificado em', null=True, blank=True)
+    no_hostname = models.CharField('hostname do nó', max_length=100, blank=True)
+    agente_respondeu_em = models.DateTimeField('worker do CP respondeu em', null=True, blank=True)
+    disco_livre_bytes = models.BigIntegerField(null=True, blank=True)
+    disco_total_bytes = models.BigIntegerField(null=True, blank=True)
+    cpus_swarm = models.FloatField('CPUs (Swarm)', null=True, blank=True)
+    ram_bytes_swarm = models.BigIntegerField('RAM (Swarm)', null=True, blank=True)
+    containers_clientes = models.PositiveIntegerField('containers de clientes', null=True, blank=True)
 
     class Meta:
         verbose_name = 'Host de Infraestrutura'
@@ -68,7 +114,7 @@ class HostInfraestrutura(models.Model):
         ordering = ['regiao', 'nome']
 
     def __str__(self):
-        return f'{self.nome} ({self.regiao})'
+        return f'{self.nome} ({self.regiao_id})'
 
 
 class Cliente(models.Model):
@@ -528,6 +574,7 @@ class BackupCliente(models.Model):
     ORIGEM_CHOICES = [
         ('automatico', 'Automático'),
         ('manual', 'Importado manualmente'),
+        ('migracao', 'Migração de servidor'),
     ]
     cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='backups')
     criado_em = models.DateTimeField(auto_now_add=True)
@@ -546,6 +593,11 @@ class BackupCliente(models.Model):
     atividade_em = models.DateTimeField(
         'última atividade', null=True, blank=True,
         help_text='Heartbeat: renovado a cada linha de log e a cada pulso de um comando longo.',
+    )
+    sha256 = models.CharField('SHA-256 do arquivo', max_length=64, blank=True)
+    replicas_restauracao = models.JSONField(
+        'réplicas antes da restauração', null=True, blank=True,
+        help_text='{"web": n, "cron": n|null} — devolvidas ao terminar ou interromper a restauração.',
     )
 
     class Meta:
@@ -579,3 +631,80 @@ class VerificacaoSaude(models.Model):
 
     def __str__(self):
         return f'{self.cliente.slug} — {"OK" if self.online else "FALHA"} em {self.verificado_em:%d/%m %H:%M}'
+
+
+class MigracaoCliente(models.Model):
+    """Migração do stack de um cliente para outro nó do Swarm.
+
+    Máquina de estados descrita em `docs/registry/migracao-cliente-entre-servidores.md`. Só há uma
+    migração ativa por cliente (constraint). `ponto_sem_volta_em` preenchido = o destino foi aberto
+    ao tráfego e a volta automática deixa de ser permitida.
+    """
+    STATUS_CHOICES = [
+        ('verificando', 'Verificando'),
+        ('congelando', 'Parando o ERP na origem'),
+        ('manifestando', 'Inventariando a origem'),
+        ('backup', 'Gerando backup'),
+        ('implantando_destino', 'Implantando no destino'),
+        ('restaurando', 'Restaurando no destino'),
+        ('conferindo', 'Conferindo integridade'),
+        ('testando', 'Testando no destino'),
+        ('abrindo', 'Abrindo o destino ao tráfego'),
+        ('concluida', 'Concluída'),
+        ('revertendo', 'Voltando para a origem'),
+        ('revertida', 'Revertida (cliente na origem)'),
+        ('falhou_sem_alteracao', 'Recusada nas verificações'),
+        ('exige_intervencao', 'Exige intervenção'),
+    ]
+    STATUS_FINAIS = ('concluida', 'revertida', 'falhou_sem_alteracao', 'exige_intervencao')
+    # Até `testando` (inclusive) a volta automática é segura; a partir de `abrindo`, não.
+    STATUS_ANTES_DO_PONTO_SEM_VOLTA = (
+        'verificando', 'congelando', 'manifestando', 'backup', 'implantando_destino',
+        'restaurando', 'conferindo', 'testando',
+    )
+
+    cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name='migracoes')
+    host_origem = models.ForeignKey(HostInfraestrutura, on_delete=models.PROTECT, related_name='+')
+    host_destino = models.ForeignKey(HostInfraestrutura, on_delete=models.PROTECT, related_name='+')
+    regiao_origem = models.CharField(max_length=20)
+    regiao_destino = models.CharField(max_length=20)
+    no_origem = models.CharField('nó de origem', max_length=100, blank=True)
+    no_destino = models.CharField('nó de destino', max_length=100, blank=True)
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='verificando')
+    host_trocado = models.BooleanField(
+        default=False, help_text='O stack já foi implantado no destino (a volta precisa reimplantar na origem).',
+    )
+    replicas_web = models.PositiveSmallIntegerField(null=True, blank=True)
+    replicas_cron = models.PositiveSmallIntegerField(null=True, blank=True)
+    versao_erp = models.CharField(max_length=20, blank=True)
+    backup = models.ForeignKey('BackupCliente', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    verificacoes = models.JSONField(default=dict, blank=True)
+    manifesto_origem = models.JSONField(null=True, blank=True)
+    manifesto_destino = models.JSONField(null=True, blank=True)
+    volumes_residuais = models.JSONField(null=True, blank=True)
+    log = models.TextField(blank=True)
+    mensagem_erro = models.TextField(blank=True)
+    atividade_em = models.DateTimeField(null=True, blank=True)
+    iniciada_por = models.ForeignKey('auth.User', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    iniciada_em = models.DateTimeField(auto_now_add=True)
+    ponto_sem_volta_em = models.DateTimeField(null=True, blank=True)
+    concluida_em = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Migração de servidor'
+        verbose_name_plural = 'Migrações de servidor'
+        ordering = ['-iniciada_em']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['cliente'],
+                condition=~models.Q(status__in=['concluida', 'revertida', 'falhou_sem_alteracao', 'exige_intervencao']),
+                name='migracao_unica_ativa_por_cliente',
+            ),
+        ]
+
+    def __str__(self):
+        return f'Migração {self.cliente.slug}: {self.regiao_origem} → {self.regiao_destino}'
+
+    @property
+    def ativa(self):
+        return self.status not in self.STATUS_FINAIS

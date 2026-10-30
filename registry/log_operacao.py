@@ -63,14 +63,18 @@ class Progresso:
 
 
 class LogOperacao:
-    """Anexa linhas ao log de um `BackupCliente` (`log` ou `log_restauracao`)."""
+    """Anexa linhas ao log de um `BackupCliente` (`log` ou `log_restauracao`) ou de outro modelo
+    com `log` + `atividade_em` (ex.: `MigracaoCliente`, passando `modelo`)."""
 
-    def __init__(self, backup_id, campo='log'):
+    def __init__(self, backup_id, campo='log', modelo=None):
         assert campo in ('log', 'log_restauracao')
         self.backup_id = backup_id
         self.campo = campo
+        self.modelo = modelo
 
     def _qs(self):
+        if self.modelo is not None:
+            return self.modelo.objects.filter(pk=self.backup_id)
         from .models import BackupCliente
         return BackupCliente.objects.filter(pk=self.backup_id)
 
@@ -87,7 +91,7 @@ class LogOperacao:
     def reiniciar(self):
         """Começa um log novo (ex.: nova restauração do mesmo backup)."""
         agora = timezone.now()
-        extra = {'restauracao_iniciada_em': agora} if self.campo == 'log_restauracao' else {}
+        extra = {'restauracao_iniciada_em': agora} if self.campo == 'log_restauracao' and self.modelo is None else {}
         self._qs().update(**{self.campo: ''}, atividade_em=agora, **extra)
 
 

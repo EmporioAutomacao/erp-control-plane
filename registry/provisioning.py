@@ -23,6 +23,10 @@ CHECK_HTTP_HEALTH = os.getenv('PROVISIONING_CHECK_HTTP', 'true').lower() == 'tru
 # Substitui o entrypoint da imagem — migrations ficam só com o web.
 CRON_COMANDO = ['python', 'manage.py', 'executar_crons', '--loop', '--sleep', '60']
 
+# Segredos que precisam sobreviver a qualquer reimplantação: trocar qualquer um deles quebra o
+# acesso ao volume do banco, as sessões ou as credenciais de empresas cifradas no ERP.
+SEGREDOS_ENV = ('POSTGRES_PASSWORD', 'DJANGO_SECRET_KEY', 'EMPRESAS_CREDENCIAL_MASTER_KEY')
+
 
 def site_url_cliente(cliente) -> str:
     """URL pública base da instância (``SITE_URL`` do ERP).
@@ -53,82 +57,56 @@ class MotorProvisionamento:
             log.concluido_em = timezone.now()
         log.save()
 
-    def executar(self):
+    def executar(self, modo_migracao=False):
+        """Gera o .env/stack.yml e implanta o stack do cliente.
+
+        `modo_migracao=True` (usado pela migração de servidor): exige o `.env` com os segredos,
+        implanta com web/cron em 0 réplicas e o Traefik desligado (o ERP não atende ninguém antes de
+        restaurado), não espera o web, não altera status/datas do cliente e não envia o plano.
+        O `stack.yml` gravado em disco continua sendo o normal.
+        """
         slug = self.cliente.slug
         cliente_dir = CLIENTES_BASE / slug
         cliente_dir.mkdir(parents=True, exist_ok=True)
 
         self._log('escolher_host', 'executando')
         host = self.cliente.host
-        regiao = host.regiao if host else 'anapolis'
+        regiao = host.regiao_id if host else 'anapolis'
         self._log('escolher_host', 'concluido', f'Região: {regiao}')
 
         self._log('gerar_stack', 'executando')
         versao = self.cliente.versao_erp or 'latest'
         subdominio = self.cliente.subdominio
-        modulos = ','.join(m.slug for m in self.cliente.modulos_ativos.all()) or 'financeiro,tarefas'
-        tema = self.cliente.tema_site or 'loja'
         dominio_custom = self.cliente.dominio_custom or ''
-
-        allowed_hosts = f'{subdominio},{dominio_custom}' if dominio_custom else subdominio
-        csrf_origins = (
-            f'https://{subdominio},https://{dominio_custom}' if dominio_custom
-            else f'https://{subdominio}'
-        )
 
         # Reusar credenciais existentes para não conflitar com o volume pgdata
         env_file = cliente_dir / '.env'
-        env_existente = {}
-        if env_file.exists():
-            for linha in env_file.read_text().splitlines():
-                if '=' in linha:
-                    k, v = linha.split('=', 1)
-                    env_existente[k.strip()] = v.strip()
+        env_existente = self.ler_env_existente()
 
-        db_password = env_existente.get('POSTGRES_PASSWORD') or secrets.token_hex(24)
-        secret_key = env_existente.get('DJANGO_SECRET_KEY') or secrets.token_hex(50)
-        master_key = env_existente.get('EMPRESAS_CREDENCIAL_MASTER_KEY') or secrets.token_hex(32)
-        senha_temp = env_existente.get('DJANGO_SUPERUSER_PASSWORD') or secrets.token_urlsafe(12)
-        # Segredo usado pelo CP para autenticar chamadas HTTPS PARA esta
-        # instancia (ex.: sincronizar versoes permitidas do SyncAgent/PDV) —
-        # reusa o que ja estiver salvo no Cliente antes de gerar um novo, pra
-        # nao invalidar integracoes existentes a cada reprovisionamento.
-        cp_shared_secret = self.cliente.integracao_secret or env_existente.get('CP_SHARED_SECRET') or secrets.token_hex(32)
+        if modo_migracao:
+            faltando = [k for k in SEGREDOS_ENV if not env_existente.get(k)]
+            if faltando:
+                raise RuntimeError(
+                    f'.env do cliente sem {", ".join(faltando)} em {env_file}: a migração não pode gerar segredos novos.'
+                )
 
-        env_vars = {
-            'SLUG': slug,
-            'POSTGRES_DB': f'erp_{slug}',
-            'POSTGRES_USER': f'erp_{slug}',
-            'POSTGRES_PASSWORD': db_password,
-            'POSTGRES_HOST': 'db',
-            'POSTGRES_PORT': '5432',
-            'REDIS_URL': 'redis://redis:6379/0',
-            'DJANGO_SECRET_KEY': secret_key,
-            'ALLOWED_HOSTS': allowed_hosts,
-            'CSRF_TRUSTED_ORIGINS': csrf_origins,
-            'SITE_URL': site_url_cliente(self.cliente),
-            'DEBUG': 'false',
-            'MODULOS_ATIVOS': modulos,
-            'TEMA_SITE': tema,
-            'CP_CLIENTE_ID': str(self.cliente.id),
-            'CP_CLIENTE_NOME': self.cliente.nome,
-            'CP_CLIENTE_CNPJ': self.cliente.cnpj,
-            'CP_SHARED_SECRET': cp_shared_secret,
-            'EMPRESAS_CREDENCIAL_MASTER_KEY': master_key,
-            'BACKUP_DIR': '/app/backups',
-            'DJANGO_SUPERUSER_USERNAME': 'admin',
-            'DJANGO_SUPERUSER_EMAIL': self.cliente.email_contato,
-            'DJANGO_SUPERUSER_PASSWORD': senha_temp,
-        }
+        env_vars = self.montar_env(env_existente)
+        senha_temp = env_vars['DJANGO_SUPERUSER_PASSWORD']
         env_file.write_text('\n'.join(f'{k}={v}' for k, v in env_vars.items()))
         env_file.chmod(0o600)
 
-        # senha_temp logged before deploy so it's preserved even if deploy fails
-        self._log('criar_superuser', 'pendente', f'senha_temp:{senha_temp}')
+        if not modo_migracao:
+            # senha_temp logged before deploy so it's preserved even if deploy fails
+            self._log('criar_superuser', 'pendente', f'senha_temp:{senha_temp}')
 
         stack_content = self._gerar_stack_yaml(slug, subdominio, versao, regiao, env_vars, dominio_custom)
         stack_file = cliente_dir / 'stack.yml'
         stack_file.write_text(stack_content)
+        if modo_migracao:
+            stack_file = cliente_dir / 'stack-migracao.yml'
+            stack_file.write_text(self._gerar_stack_yaml(
+                slug, subdominio, versao, regiao, env_vars, dominio_custom, replicas_app=0, traefik=False,
+            ))
         self._log('gerar_stack', 'concluido')
 
         self._log('subir_stack', 'executando')
@@ -138,6 +116,9 @@ class MotorProvisionamento:
         )
         if result.returncode != 0 and 'AlreadyExists' not in result.stderr:
             raise subprocess.CalledProcessError(result.returncode, result.args, result.stderr)
+        if modo_migracao:
+            self._log('subir_stack', 'concluido', f'Modo migração: região {regiao}, web/cron em 0, Traefik desligado')
+            return
         # Entrypoint handles: pgvector, migrations, superuser creation
         self._aguardar_servico(f'{slug}_web', timeout=180)
         if CHECK_HTTP_HEALTH:
@@ -308,7 +289,72 @@ class MotorProvisionamento:
             check=True, env=env,
         )
 
-    def _gerar_stack_yaml(self, slug, subdominio, versao, regiao, env_vars, dominio_custom=''):
+    def ler_env_existente(self):
+        """Conteúdo do `.env` atual do cliente (dict vazio se não existir)."""
+        env_file = CLIENTES_BASE / self.cliente.slug / '.env'
+        env_existente = {}
+        if env_file.exists():
+            for linha in env_file.read_text().splitlines():
+                if '=' in linha:
+                    k, v = linha.split('=', 1)
+                    env_existente[k.strip()] = v.strip()
+        return env_existente
+
+    def montar_env(self, env_existente):
+        """Ambiente do web/cron que um provisionamento gravaria agora (sem gravar nada).
+
+        Reaproveita os segredos de `env_existente`; só gera um valor novo quando ele não existe.
+        """
+        slug = self.cliente.slug
+        subdominio = self.cliente.subdominio
+        modulos = ','.join(m.slug for m in self.cliente.modulos_ativos.all()) or 'financeiro,tarefas'
+        tema = self.cliente.tema_site or 'loja'
+        dominio_custom = self.cliente.dominio_custom or ''
+
+        allowed_hosts = f'{subdominio},{dominio_custom}' if dominio_custom else subdominio
+        csrf_origins = (
+            f'https://{subdominio},https://{dominio_custom}' if dominio_custom
+            else f'https://{subdominio}'
+        )
+
+        db_password = env_existente.get('POSTGRES_PASSWORD') or secrets.token_hex(24)
+        secret_key = env_existente.get('DJANGO_SECRET_KEY') or secrets.token_hex(50)
+        master_key = env_existente.get('EMPRESAS_CREDENCIAL_MASTER_KEY') or secrets.token_hex(32)
+        senha_temp = env_existente.get('DJANGO_SUPERUSER_PASSWORD') or secrets.token_urlsafe(12)
+        # Segredo usado pelo CP para autenticar chamadas HTTPS PARA esta
+        # instancia (ex.: sincronizar versoes permitidas do SyncAgent/PDV) —
+        # reusa o que ja estiver salvo no Cliente antes de gerar um novo, pra
+        # nao invalidar integracoes existentes a cada reprovisionamento.
+        cp_shared_secret = self.cliente.integracao_secret or env_existente.get('CP_SHARED_SECRET') or secrets.token_hex(32)
+
+        return {
+            'SLUG': slug,
+            'POSTGRES_DB': f'erp_{slug}',
+            'POSTGRES_USER': f'erp_{slug}',
+            'POSTGRES_PASSWORD': db_password,
+            'POSTGRES_HOST': 'db',
+            'POSTGRES_PORT': '5432',
+            'REDIS_URL': 'redis://redis:6379/0',
+            'DJANGO_SECRET_KEY': secret_key,
+            'ALLOWED_HOSTS': allowed_hosts,
+            'CSRF_TRUSTED_ORIGINS': csrf_origins,
+            'SITE_URL': site_url_cliente(self.cliente),
+            'DEBUG': 'false',
+            'MODULOS_ATIVOS': modulos,
+            'TEMA_SITE': tema,
+            'CP_CLIENTE_ID': str(self.cliente.id),
+            'CP_CLIENTE_NOME': self.cliente.nome,
+            'CP_CLIENTE_CNPJ': self.cliente.cnpj,
+            'CP_SHARED_SECRET': cp_shared_secret,
+            'EMPRESAS_CREDENCIAL_MASTER_KEY': master_key,
+            'BACKUP_DIR': '/app/backups',
+            'DJANGO_SUPERUSER_USERNAME': 'admin',
+            'DJANGO_SUPERUSER_EMAIL': self.cliente.email_contato,
+            'DJANGO_SUPERUSER_PASSWORD': senha_temp,
+        }
+
+    def _gerar_stack_yaml(self, slug, subdominio, versao, regiao, env_vars, dominio_custom='',
+                          replicas_app=1, traefik=True):
         env_block = '\n'.join(f'      {k}: "{v}"' for k, v in env_vars.items() if k != 'SLUG')
         labels_custom = ''
         if dominio_custom:
@@ -338,7 +384,7 @@ services:
       - traefik-public
       - internal
     deploy:
-      replicas: 1
+      replicas: {replicas_app}
       placement:
         constraints:
           - node.labels.region == {regiao}
@@ -347,7 +393,7 @@ services:
         delay: 60s
         window: 120s
       labels:
-        - "traefik.enable=true"
+        - "traefik.enable={'true' if traefik else 'false'}"
         - "traefik.http.routers.{slug}-erp.rule=Host(`{subdominio}`)"
         - "traefik.http.routers.{slug}-erp.entrypoints=web"
         - "traefik.http.services.{slug}-erp.loadbalancer.server.port=8000"{labels_custom}
@@ -363,7 +409,7 @@ services:
     networks:
       - internal
     deploy:
-      replicas: 1
+      replicas: {replicas_app}
       placement:
         constraints:
           - node.labels.region == {regiao}

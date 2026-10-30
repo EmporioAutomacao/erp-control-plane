@@ -1,0 +1,74 @@
+{% extends "admin/base_site.html" %}
+
+{% block title %}Migrar servidor — {{ cliente.nome }}{% endblock %}
+
+{% block content %}
+<style>
+  .mig-card { border: 1px solid var(--color-base-200, #e2e8f0); border-radius: 14px; padding: 24px;
+              background: var(--color-base-50, #f8fafc); max-width: 860px; margin-bottom: 18px; }
+  .dark .mig-card { border-color: oklch(30% .02 264); background: oklch(20% .025 264); }
+  .mig-card h2 { margin: 0 0 10px; font-size: 18px; font-weight: 700; }
+  .mig-alerta { background: rgba(234,179,8,.08); border: 1px solid rgba(234,179,8,.35); border-radius: 10px;
+                padding: 14px 18px; font-size: 13px; line-height: 1.6; margin: 14px 0; }
+  .mig-tabela { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .mig-tabela td, .mig-tabela th { padding: 6px 8px; border-bottom: 1px solid var(--color-base-200, #e2e8f0);
+                                   text-align: left; vertical-align: top; }
+  .mig-ok { color: #2e7d32; font-weight: 700; }
+  .mig-no { color: #b71c1c; font-weight: 700; }
+  .mig-campo { display: block; margin: 8px 0 14px; padding: 8px; min-width: 320px; border-radius: 6px;
+               border: 1px solid var(--color-base-300, #cbd5e1); background: var(--color-base-100, #f1f5f9); }
+  .mig-botao { display: inline-block; padding: 8px 18px; border-radius: 6px; border: 0; color: #fff;
+               background: #6a1b9a; font-size: 14px; cursor: pointer; }
+  .mig-botao[disabled] { background: #9e9e9e; cursor: not-allowed; }
+</style>
+
+<div class="mig-card">
+  <h2>🚚 Migrar {{ cliente.slug }} para outro servidor</h2>
+  <p>Origem: <strong>{{ cliente.host.nome|default:"sem host" }}</strong> (região <code>{{ cliente.host.regiao_id|default:"?" }}</code>).</p>
+  <div class="mig-alerta">
+    O ERP do cliente fica <strong>fora do ar</strong> do início ao fim (backup, implantação, restauração e conferência).
+    O PDV continua vendendo e envia a fila depois. Até o ERP ser aberto no destino, qualquer falha devolve o cliente
+    à origem automaticamente; depois disso não há volta automática. Nada é apagado na origem.
+    Detalhes: <code>docs/registry/migracao-cliente-entre-servidores.md</code>.
+  </div>
+
+  {% if not hosts %}
+    <p class="mig-no">Nenhum host ativo em outra região ativa. Cadastre a região e o host de destino primeiro.</p>
+  {% else %}
+    <form method="get">
+      <label for="host">Host de destino</label>
+      <select name="host" id="host" class="mig-campo" onchange="this.form.submit()">
+        <option value="">— escolha —</option>
+        {% for h in hosts %}
+          <option value="{{ h.pk }}" {% if destino and destino.pk == h.pk %}selected{% endif %}>{{ h.nome }} ({{ h.regiao.nome }})</option>
+        {% endfor %}
+      </select>
+    </form>
+  {% endif %}
+</div>
+
+{% if destino %}
+<div class="mig-card">
+  <h2>Verificações do manager</h2>
+  <p style="font-size:12px;">As verificações que dependem dos nós (worker do destino, volumes residuais, espaço livre e
+     tamanhos) rodam logo após confirmar; se reprovarem, a migração termina sem alterar nada.</p>
+  <table class="mig-tabela">
+    <tr><th>Gate</th><th></th><th>Detalhe</th></tr>
+    {% for codigo, g in gates %}
+      <tr><td><code>{{ codigo }}</code></td>
+          <td>{% if g.ok %}<span class="mig-ok">✓</span>{% else %}<span class="mig-no">✗</span>{% endif %}</td>
+          <td>{{ g.detalhe }}</td></tr>
+    {% endfor %}
+  </table>
+
+  <form method="post" style="margin-top:18px;">
+    {% csrf_token %}
+    <input type="hidden" name="host" value="{{ destino.pk }}">
+    <label for="confirmacao">Para confirmar, digite o slug do cliente (<code>{{ cliente.slug }}</code>):</label>
+    <input type="text" name="confirmacao" id="confirmacao" class="mig-campo" autocomplete="off" {% if not aprovado %}disabled{% endif %}>
+    <button type="submit" class="mig-botao" {% if not aprovado %}disabled{% endif %}>🚚 Iniciar migração</button>
+    {% if not aprovado %}<p class="mig-no" style="margin-top:8px;">Corrija os itens reprovados para liberar a migração.</p>{% endif %}
+  </form>
+</div>
+{% endif %}
+{% endblock %}

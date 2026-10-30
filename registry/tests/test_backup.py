@@ -29,14 +29,19 @@ def _make_tar_bytes(members):
 
 
 def _fake_run(cmd, *args, **kwargs):
-    """Simula `docker ps` / `docker exec pg_dump` / `docker cp` conforme o comando recebido."""
+    """Simula `docker ps` / `docker exec pg_dump` / volumes (`inspect`, auxiliar, `cp`) conforme o comando."""
     if cmd[:2] == ['docker', 'ps']:
         alvo = cmd[-1]
         if '_db' in alvo and getattr(_fake_run, 'db_ctr', None):
             return SimpleNamespace(stdout=_fake_run.db_ctr, stderr='', returncode=0)
-        if '_web' in alvo and getattr(_fake_run, 'web_ctr', None):
-            return SimpleNamespace(stdout=_fake_run.web_ctr, stderr='', returncode=0)
         return SimpleNamespace(stdout='', stderr='', returncode=0)
+    if cmd[:3] == ['docker', 'volume', 'inspect']:
+        existe = cmd[3] in getattr(_fake_run, 'volumes', set())
+        return SimpleNamespace(stdout=b'', stderr=b'', returncode=0 if existe else 1)
+    if cmd[1] == 'create':
+        return SimpleNamespace(stdout=b'aux-ctr\n', stderr=b'', returncode=0)
+    if cmd[1] == 'rm':
+        return SimpleNamespace(stdout=b'', stderr=b'', returncode=0)
     if cmd[1] == 'exec' and 'pg_dump' in cmd:
         return SimpleNamespace(
             stdout=_fake_run.pg_dump_stdout,
@@ -58,7 +63,7 @@ class TaskBackupClienteTests(SimpleTestCase):
         self.clientes_base_path = Path(self.tmpdir.name) / 'clientes'
 
         _fake_run.db_ctr = None
-        _fake_run.web_ctr = None
+        _fake_run.volumes = set()
         _fake_run.pg_dump_stdout = b''
         _fake_run.pg_dump_stderr = b''
         _fake_run.pg_dump_returncode = 0
@@ -105,7 +110,8 @@ class TaskBackupClienteTests(SimpleTestCase):
         self.assertEqual(len(updates), 1)
         self.assertEqual(updates[0]['status'], 'erro')
         self.assertIn('acme_db', updates[0]['mensagem'])
-        self.assertIn('acme_web', updates[0]['mensagem'])
+        self.assertIn('acme_media', updates[0]['mensagem'])
+        self.assertIn('acme_backups', updates[0]['mensagem'])
         self.assertEqual(self._backup_files(), [])
 
     def test_pg_dump_falha_e_demais_etapas_ausentes_marca_erro(self):
@@ -133,13 +139,14 @@ class TaskBackupClienteTests(SimpleTestCase):
         self.assertEqual(updates[0]['status'], 'concluido')
         self.assertGreater(updates[0]['tamanho_bytes'], 0)
         self.assertIn('acme_db', updates[0]['mensagem'])
-        self.assertIn('acme_web', updates[0]['mensagem'])
+        self.assertIn('acme_media', updates[0]['mensagem'])
+        self.assertIn('acme_backups', updates[0]['mensagem'])
         self.assertEqual(len(self._backup_files()), 1)
 
     def test_todas_etapas_ok_marca_concluido_sem_avisos(self):
         _fake_run.db_ctr = 'db-container-id\n'
         _fake_run.pg_dump_stdout = b'-- dump completo do postgres'
-        _fake_run.web_ctr = 'web-container-id\n'
+        _fake_run.volumes = {'acme_media', 'acme_backups'}
         cliente_dir = self.clientes_base_path / 'acme'
         cliente_dir.mkdir(parents=True)
         (cliente_dir / 'stack.yml').write_text('version: "3.8"', encoding='utf-8')
@@ -151,6 +158,59 @@ class TaskBackupClienteTests(SimpleTestCase):
         self.assertEqual(updates[0]['status'], 'concluido')
         self.assertEqual(updates[0]['mensagem'], '')
         self.assertEqual(len(self._backup_files()), 1)
+
+    def test_volumes_sao_lidos_do_volume_mesmo_com_o_web_parado(self):
+        _fake_run.db_ctr = 'db-container-id\n'
+        _fake_run.pg_dump_stdout = b'-- dump'
+        _fake_run.volumes = {'acme_media', 'acme_backups'}
+
+        with patch('subprocess.run', side_effect=_fake_run) as run:
+            task_backup_cliente(cliente_id='cliente-id', backup_id='backup-id')
+
+        comandos = [c.args[0] for c in run.call_args_list]
+        self.assertFalse(any('_web' in ' '.join(c) for c in comandos))  # nunca depende do container do web
+        criados = [c for c in comandos if c[:2] == ['docker', 'create']]
+        self.assertEqual([c[3] for c in criados], ['acme_media:/dados:ro', 'acme_backups:/dados:ro'])
+        with tarfile.open(self._backup_files()[0]) as tar:
+            nomes = tar.getnames()
+        self.assertIn('media', nomes)
+        self.assertIn('backups', nomes)
+
+    def test_volume_inexistente_nao_e_criado_e_vira_aviso(self):
+        _fake_run.db_ctr = 'db-container-id\n'
+        _fake_run.pg_dump_stdout = b'-- dump'
+        _fake_run.volumes = {'acme_backups'}
+
+        with patch('subprocess.run', side_effect=_fake_run) as run:
+            task_backup_cliente(cliente_id='cliente-id', backup_id='backup-id')
+
+        comandos = [c.args[0] for c in run.call_args_list]
+        self.assertFalse(any(c[:2] in (['docker', 'create'], ['docker', 'run']) and 'acme_media:/dados:ro' in c
+                             for c in comandos))
+        self.assertIn('acme_media nao encontrado', self._status_updates()[0]['mensagem'])
+
+    def test_grava_o_sha256_do_arquivo(self):
+        import hashlib
+        _fake_run.db_ctr = 'db-container-id\n'
+        _fake_run.pg_dump_stdout = b'-- dump'
+
+        task_backup_cliente(cliente_id='cliente-id', backup_id='backup-id')
+
+        sha = self._status_updates()[0]['sha256']
+        self.assertEqual(sha, hashlib.sha256(self._backup_files()[0].read_bytes()).hexdigest())
+
+    def test_com_migracao_devolve_o_resultado_ao_manager(self):
+        _fake_run.db_ctr = 'db-container-id\n'
+        _fake_run.pg_dump_stdout = b'-- dump'
+        self.filter_mock.return_value.values.return_value.first.return_value = {
+            'status': 'concluido', 'mensagem': '', 'sha256': 'abc',
+        }
+        with patch('registry.tasks.task_migracao_avancar.apply_async') as avancar:
+            task_backup_cliente(cliente_id='cliente-id', backup_id='backup-id', migracao_id=9)
+
+        avancar.assert_called_once_with(
+            args=[9, 'backup_terminado', {'status': 'concluido', 'avisos': '', 'sha256': 'abc'}], queue='celery',
+        )
 
 
 class BackupMultiNoTests(SimpleTestCase):
@@ -176,7 +236,7 @@ class BackupMultiNoTests(SimpleTestCase):
         p.start()
         self.addCleanup(p.stop)
         _fake_run.db_ctr = 'db-ctr\n'
-        _fake_run.web_ctr = None
+        _fake_run.volumes = set()
         _fake_run.pg_dump_stdout = b'-- dump'
         _fake_run.pg_dump_stderr = b''
         _fake_run.pg_dump_returncode = 0
@@ -296,7 +356,7 @@ class TaskRestaurarNoTests(SimpleTestCase):
 
         self.arquivo = self.cp_backup_dir / 'backup_acme_teste.tar.gz'
         self.cp_backup_dir.mkdir(parents=True)
-        self.backup = SimpleNamespace(pk='backup-id', arquivo_path=str(self.arquivo))
+        self.backup = SimpleNamespace(pk='backup-id', arquivo_path=str(self.arquivo), sha256='')
         self.backup_get_patch = patch('registry.models.BackupCliente.objects.get', return_value=self.backup)
         self.backup_get_patch.start()
         self.addCleanup(self.backup_get_patch.stop)
@@ -322,6 +382,10 @@ class TaskRestaurarNoTests(SimpleTestCase):
         def _fake_run(cmd, *args, **kwargs):
             if cmd[:2] == ['docker', 'service']:
                 return SimpleNamespace(stdout='', stderr=b'', returncode=0)
+            if cmd[:3] == ['docker', 'volume', 'inspect']:
+                return SimpleNamespace(stdout=b'', stderr=b'', returncode=0)
+            if cmd[1] == 'exec' and 'pg_isready' in cmd:
+                return SimpleNamespace(stdout=b'', stderr=b'', returncode=0)
             if cmd[:2] == ['docker', 'ps']:
                 alvo = cmd[-1]
                 if '_db' in alvo and self.db_ctr:
@@ -409,7 +473,7 @@ class TaskRestaurarNoTests(SimpleTestCase):
         self.assertTrue(montagens)
         for cmd in montagens:
             volumes = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == '-v']
-            self.assertEqual(volumes, ['acme_media:/app/media'])
+            self.assertEqual(volumes, ['acme_media:/dados'])
         # sequência: limpa o volume -> cria o auxiliar -> docker cp -> remove o auxiliar
         passos = [c[1] for c in comandos if c[0] == 'docker' and c[1] in ('run', 'create', 'cp', 'rm')]
         self.assertEqual(passos, ['run', 'create', 'cp', 'rm'])
@@ -425,7 +489,7 @@ class TaskRestaurarNoTests(SimpleTestCase):
         # "<pasta>/." (conteúdo da pasta); no Windows a pasta tem drive letter
         self.assertTrue(origem.endswith(('/.', '\\.')), origem)
         self.assertTrue(Path(origem[:-2]).is_absolute())
-        self.assertEqual(cp[3], 'aux-ctr-id:/app/media/')
+        self.assertEqual(cp[3], 'aux-ctr-id:/dados/')
 
     def test_auxiliar_e_removido_mesmo_se_o_docker_cp_falhar(self):
         self.db_ctr = 'db-ctr\n'
@@ -472,6 +536,57 @@ class TaskRestaurarNoTests(SimpleTestCase):
         self.assertEqual(self._mensagem_restauracao(), '')
         self.finalizar_mock.assert_called_once()
 
+    def test_restaura_tambem_o_volume_de_backups_internos(self):
+        self.db_ctr = 'db-ctr\n'
+        self._escrever_backup({'db.sql': b'-- dump', 'media/foo.txt': b'x', 'backups/b1.zip': b'y'})
+
+        task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id')
+
+        limpos = [c for c in self._comandos() if c[:2] == ['docker', 'run']]
+        self.assertEqual([c[c.index('-v') + 1] for c in limpos], ['acme_media:/dados', 'acme_backups:/dados'])
+        self.assertEqual(self._mensagem_restauracao(), '')
+
+    def test_sha256_divergente_aborta_antes_de_tocar_no_banco(self):
+        self.db_ctr = 'db-ctr\n'
+        self._escrever_backup({'db.sql': b'-- dump', 'media/foo.txt': b'x'})
+        self.backup.sha256 = '0' * 64
+
+        with self.assertRaises(RuntimeError):
+            task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id')
+
+        self.assertFalse(any('psql' in c for c in self._comandos()))
+        self.assertIn('SHA-256', self._mensagem_restauracao())
+        self.finalizar_mock.assert_called_once()
+
+    def test_sha256_igual_segue_a_restauracao(self):
+        import hashlib
+        self.db_ctr = 'db-ctr\n'
+        self._escrever_backup({'db.sql': b'-- dump', 'media/foo.txt': b'x'})
+        self.backup.sha256 = hashlib.sha256(self.arquivo.read_bytes()).hexdigest()
+
+        task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id')
+
+        self.assertEqual(self._mensagem_restauracao(), '')
+
+    def test_finalizacao_devolve_as_replicas_de_antes(self):
+        self.db_ctr = 'db-ctr\n'
+        self._escrever_backup({'db.sql': b'-- dump', 'media/foo.txt': b'x'})
+
+        task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id', replicas_app={'web': 0, 'cron': 0})
+
+        self.assertEqual(self.finalizar_mock.call_args.kwargs['kwargs'], {'replicas_app': {'web': 0, 'cron': 0}})
+
+    def test_com_migracao_nao_religa_e_devolve_o_resultado(self):
+        self.db_ctr = 'db-ctr\n'
+        self._escrever_backup({'db.sql': b'-- dump', 'media/foo.txt': b'x'})
+
+        with patch('registry.tasks.task_migracao_avancar.apply_async') as avancar:
+            task_restaurar_no(cliente_id='cliente-id', backup_id='backup-id', migracao_id=5)
+
+        self.finalizar_mock.assert_not_called()
+        self.assertFalse(any(c[:3] == ['docker', 'service', 'scale'] for c in self._comandos()))
+        avancar.assert_called_once_with(args=[5, 'restauracao_terminada', {'avisos': ''}], queue='celery')
+
 
 class TaskRestaurarClienteOrquestracaoTests(SimpleTestCase):
     def setUp(self):
@@ -480,31 +595,54 @@ class TaskRestaurarClienteOrquestracaoTests(SimpleTestCase):
             ('cliente_get', 'registry.models.Cliente.objects.get', {'return_value': self.cliente}),
             ('filtro', 'registry.models.BackupCliente.objects.filter', {}),
             ('sleep', 'time.sleep', {}),
-            ('scale_web', 'registry.tasks._scale_web', {}),
+            ('replicas', 'registry.tasks._replicas_app', {'return_value': {'web': 1, 'cron': 1}}),
+            ('parar', 'registry.tasks._parar_app', {}),
+            ('religar', 'registry.tasks._religar_app', {}),
         ]:
             p = patch(alvo, **kw)
             setattr(self, nome, p.start())
             self.addCleanup(p.stop)
 
-    def test_despacha_para_a_fila_do_no_do_cliente(self):
+    def test_despacha_para_a_fila_do_no_do_cliente_com_web_e_cron_parados(self):
         with patch('registry.nos.hostname_do_no', return_value='worker-2'), \
                 patch('registry.tasks.task_restaurar_no.apply_async') as apply_async:
             task_restaurar_cliente(cliente_id='cliente-id', backup_id='backup-id')
 
-        self.scale_web.assert_called_once_with('acme', 0)
-        apply_async.assert_called_once_with(args=['cliente-id', 'backup-id'], queue='no.worker-2')
+        self.parar.assert_called_once_with('acme')
+        apply_async.assert_called_once_with(
+            args=['cliente-id', 'backup-id'], kwargs={'replicas_app': {'web': 1, 'cron': 1}}, queue='no.worker-2',
+        )
+        self.filtro.return_value.update.assert_any_call(replicas_restauracao={'web': 1, 'cron': 1})
 
-    def test_falha_no_despacho_religa_o_web(self):
+    def test_falha_no_despacho_religa_com_as_replicas_de_antes(self):
         with patch('registry.nos.hostname_do_no', return_value=None), \
                 patch('registry.tasks.task_restaurar_no.apply_async', side_effect=RuntimeError('redis fora')):
             with self.assertRaises(RuntimeError):
                 task_restaurar_cliente(cliente_id='cliente-id', backup_id='backup-id')
 
-        self.assertEqual([c.args for c in self.scale_web.call_args_list], [('acme', 0), ('acme', 1)])
+        self.religar.assert_called_once_with('acme', {'web': 1, 'cron': 1})
 
-    def test_finalizar_religa_o_web(self):
+    def test_finalizar_devolve_as_replicas(self):
+        task_finalizar_restauracao('cliente-id', 'backup-id', replicas_app={'web': 0, 'cron': 0})
+        self.religar.assert_called_once_with('acme', {'web': 0, 'cron': 0})
+
+    def test_finalizar_sem_replicas_mantem_o_comportamento_antigo(self):
         task_finalizar_restauracao('cliente-id', 'backup-id')
-        self.scale_web.assert_called_once_with('acme', 1)
+        self.religar.assert_called_once_with('acme', None)
+
+
+class ReligarAppTests(SimpleTestCase):
+    def test_cliente_suspenso_continua_parado(self):
+        from registry.tasks import _religar_app
+        with patch('subprocess.run') as run:
+            _religar_app('acme', {'web': 0, 'cron': 0})
+        self.assertEqual([c.args[0][-1] for c in run.call_args_list], ['acme_web=0', 'acme_cron=0'])
+
+    def test_sem_cron_nao_escala_o_cron(self):
+        from registry.tasks import _religar_app
+        with patch('subprocess.run') as run:
+            _religar_app('acme', {'web': 1, 'cron': None})
+        self.assertEqual([c.args[0][-1] for c in run.call_args_list], ['acme_web=1'])
 
 
 class UploadBackupViewTests(TestCase):

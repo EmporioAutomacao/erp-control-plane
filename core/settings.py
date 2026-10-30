@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / '.env')
 
-VERSION = '0.0.51'
+VERSION = '0.0.52'
 
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-change-me')
 DEBUG = os.getenv('DEBUG', 'true').lower() in ('1', 'true', 'yes')
@@ -49,6 +49,8 @@ UNFOLD = {
                     {"title": "Planos", "icon": "workspace_premium", "link": reverse_lazy("admin:registry_plano_changelist")},
                     {"title": "Módulos", "icon": "extension", "link": reverse_lazy("admin:registry_modulo_changelist")},
                     {"title": "Versões do Agente", "icon": "system_update", "link": reverse_lazy("admin:registry_versaoagente_changelist")},
+                    {"title": "Regiões", "icon": "public", "link": reverse_lazy("admin:registry_regiao_changelist")},
+                    {"title": "Migrações de servidor", "icon": "move_down", "link": reverse_lazy("admin:registry_migracaocliente_changelist")},
                     {"title": "Hosts de Infraestrutura", "icon": "dns", "link": reverse_lazy("admin:registry_hostinfraestrutura_changelist")},
                     {"title": "Verificações de Saúde", "icon": "monitor_heart", "link": reverse_lazy("admin:registry_verificacaosaude_changelist")},
                 ],

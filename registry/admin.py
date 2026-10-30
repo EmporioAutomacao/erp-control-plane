@@ -1,12 +1,13 @@
 import os
 from django import forms
 from django.contrib import admin
+from django.db.models import Count, Q
 from django.http import FileResponse, Http404, JsonResponse
 from django.urls import path
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils.html import escape, format_html, mark_safe
+from django.utils.html import escape, format_html, format_html_join, mark_safe
 from unfold.admin import ModelAdmin
-from .models import Modulo, Plano, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare, ConfiguracaoArmazenamento, ConfiguracaoAtualizacao, BackupCliente, VersaoAgente, SincronizacaoVersoesAgente, InstalacaoAgente
+from .models import Modulo, Plano, Regiao, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare, ConfiguracaoArmazenamento, ConfiguracaoAtualizacao, BackupCliente, VersaoAgente, SincronizacaoVersoesAgente, InstalacaoAgente, MigracaoCliente
 
 
 @admin.register(Modulo)
@@ -22,10 +23,178 @@ class PlanoAdmin(ModelAdmin):
     filter_horizontal = ['modulos_inclusos']
 
 
+@admin.register(Regiao)
+class RegiaoAdmin(ModelAdmin):
+    list_display = ['nome', 'slug', 'qtd_hosts', 'qtd_clientes', 'ativo']
+    list_editable = ['ativo']
+    fields = ['nome', 'slug', 'ativo', 'observacoes', 'comando_label']
+    readonly_fields = ['comando_label']
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(
+            _qtd_hosts=Count('hosts', distinct=True),
+            _qtd_clientes=Count('hosts__cliente', distinct=True),
+        )
+
+    def get_readonly_fields(self, request, obj=None):
+        # O slug é a chave primária e o label dos nós no Swarm: trocar criaria outra região.
+        if obj is not None:
+            return ['slug', *self.readonly_fields]
+        return self.readonly_fields
+
+    @admin.display(description='Hosts', ordering='_qtd_hosts')
+    def qtd_hosts(self, obj):
+        return obj._qtd_hosts
+
+    @admin.display(description='Clientes', ordering='_qtd_clientes')
+    def qtd_clientes(self, obj):
+        return obj._qtd_clientes
+
+    @admin.display(description='Label no Swarm')
+    def comando_label(self, obj):
+        if obj is None or not obj.slug:
+            return 'Salve a região para ver o comando.'
+        return format_html(
+            '<p>Rode no manager do Swarm para cada nó desta região:</p>'
+            '<pre style="margin-top:6px;padding:8px;background:#263238;color:#eceff1;border-radius:4px;">'
+            'docker node update --label-add region={} &lt;node-id&gt;</pre>'
+            '<p style="margin-top:6px;">Clientes cujo host é desta região só sobem em nós com esse label.</p>',
+            obj.slug,
+        )
+
+
+_HOST_CORES = {'online': '#16a34a', 'atencao': '#d97706', 'offline': '#dc2626', 'nao_verificado': '#6b7280'}
+_HOST_ROTULOS = dict(HostInfraestrutura.STATUS_CHOICES)
+
+
+def _host_pill(status, elemento_id=''):
+    return format_html(
+        '<span {} style="display:inline-block;padding:3px 12px;border-radius:12px;background:{};color:#fff;'
+        'font-size:12px;font-weight:600;white-space:nowrap;">● {}</span>',
+        mark_safe(f'id="{elemento_id}"') if elemento_id else '', _HOST_CORES.get(status, '#6b7280'),
+        _HOST_ROTULOS.get(status, status),
+    )
+
+
 @admin.register(HostInfraestrutura)
 class HostInfraestruturaAdmin(ModelAdmin):
-    list_display = ['nome', 'regiao', 'tipo', 'ip', 'cpu_total', 'ram_gb_total', 'ativo']
-    list_filter = ['regiao', 'tipo', 'ativo']
+    list_display = ['nome', 'status_lista', 'regiao', 'tipo', 'ip', 'cpu_total', 'ram_gb_total', 'verificado_quando', 'ativo']
+    list_filter = ['status_conexao', 'regiao', 'tipo', 'ativo']
+    readonly_fields = ['status_painel', 'botao_verificar']
+    fieldsets = [
+        ('Cadastro', {'fields': ['nome', 'regiao', 'tipo', 'ip', 'swarm_node_id', 'cpu_total', 'ram_gb_total', 'ativo', 'observacoes']}),
+        ('Status', {'fields': ['status_painel', 'botao_verificar']}),
+    ]
+
+    def get_urls(self):
+        return [
+            path('<pk>/verificar/', self.admin_site.admin_view(self._view_verificar),
+                 name='registry_hostinfraestrutura_verificar'),
+            path('<pk>/verificar-agora/', self.admin_site.admin_view(self._view_verificar_agora),
+                 name='registry_hostinfraestrutura_verificar_agora'),
+        ] + super().get_urls()
+
+    def _verificar(self, host):
+        from .hosts import verificar_host
+        from .tasks import _pedir_ping_host
+        status, mensagem = verificar_host(host)
+        try:
+            _pedir_ping_host(host.pk)  # a resposta do worker reavalia o status em segundos
+        except Exception:
+            pass
+        return status, mensagem
+
+    def _view_verificar(self, request, pk):
+        """JSON usado pelo formulário para atualizar o sinalizador ao abrir a tela."""
+        host = get_object_or_404(HostInfraestrutura, pk=pk)
+        if not self.has_view_permission(request, host):
+            raise Http404
+        status, mensagem = self._verificar(host)
+        return JsonResponse({'status': status, 'rotulo': _HOST_ROTULOS.get(status, status), 'mensagem': mensagem})
+
+    def _view_verificar_agora(self, request, pk):
+        from django.contrib import messages
+        host = get_object_or_404(HostInfraestrutura, pk=pk)
+        if not self.has_change_permission(request, host):
+            raise Http404
+        status, mensagem = self._verificar(host)
+        nivel = {'online': messages.SUCCESS, 'atencao': messages.WARNING}.get(status, messages.ERROR)
+        messages.add_message(request, nivel, f'{_HOST_ROTULOS.get(status, status)}: {mensagem}')
+        return redirect('admin:registry_hostinfraestrutura_change', pk)
+
+    @admin.display(description='Status', ordering='status_conexao')
+    def status_lista(self, obj):
+        return format_html('<span title="{}">{}</span>', obj.status_mensagem or '', _host_pill(obj.status_conexao))
+
+    @admin.display(description='Verificado', ordering='verificado_em')
+    def verificado_quando(self, obj):
+        from django.utils.timesince import timesince
+        return f'há {timesince(obj.verificado_em)}' if obj.verificado_em else '—'
+
+    @admin.display(description='Status')
+    def status_painel(self, obj):
+        if not obj or not obj.pk:
+            return 'Salve o host para verificar o status.'
+        import json
+        from django.urls import reverse
+        from django.utils.timesince import timesince
+        from .log_operacao import fmt_bytes
+
+        def quando(dt):
+            return f'há {timesince(dt)}' if dt else 'nunca'
+
+        linhas = [
+            ('Nó no Swarm', f'{obj.no_hostname or "—"} ({obj.swarm_node_id or "sem ID"})'),
+            ('CPU / RAM no Swarm', (f'{obj.cpus_swarm:g} CPUs / {fmt_bytes(obj.ram_bytes_swarm)}'
+                                    if obj.cpus_swarm else '—') + f' (cadastrado: {obj.cpu_total} CPUs / {obj.ram_gb_total} GB)'),
+            ('Disco do Docker', f'{fmt_bytes(obj.disco_livre_bytes)} livres de {fmt_bytes(obj.disco_total_bytes)}'
+                                if obj.disco_total_bytes else '—'),
+            ('Clientes neste nó', '—' if obj.containers_clientes is None else str(obj.containers_clientes)),
+            ('Worker do CP respondeu', quando(obj.agente_respondeu_em)),
+        ]
+        tabela = format_html_join('', '<tr><td style="padding:2px 12px 2px 0;color:#6b7280;">{}</td><td>{}</td></tr>', linhas)
+        url = reverse('admin:registry_hostinfraestrutura_verificar', args=[obj.pk])
+        script = (
+            '(function(){'
+            'var cores=' + json.dumps(_HOST_CORES) + ';'
+            'var rot=document.getElementById("host-badge");var msg=document.getElementById("host-msg");'
+            'var q=document.getElementById("host-quando");if(!rot)return;q.textContent="verificando agora…";'
+            'fetch(' + json.dumps(url) + ',{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){'
+            'rot.style.background=cores[d.status]||"#6b7280";rot.textContent="● "+d.rotulo;'
+            'msg.textContent=d.mensagem;q.textContent="verificado agora";'
+            '}).catch(function(){q.textContent="não foi possível verificar agora";});'
+            '})();'
+        )
+        return format_html(
+            '{} <span id="host-quando" style="margin-left:8px;color:#6b7280;font-size:12px;">verificado {}</span>'
+            '<div id="host-msg" style="margin-top:6px;font-size:13px;">{}</div>'
+            '<table style="margin-top:10px;font-size:13px;">{}</table><script>{}</script>',
+            _host_pill(obj.status_conexao, 'host-badge'), quando(obj.verificado_em), obj.status_mensagem or '',
+            tabela, mark_safe(script),
+        )
+
+    @admin.display(description='')
+    def botao_verificar(self, obj):
+        if not obj or not obj.pk:
+            return '—'
+        from django.urls import reverse
+        return format_html(
+            '<a href="{}" style="display:inline-block;padding:6px 14px;background:#0369a1;color:#fff;border-radius:4px;'
+            'text-decoration:none;font-size:13px;">🔌 Verificar agora</a>'
+            '<p style="margin-top:6px;font-size:12px;color:#6b7280;">Também é verificado automaticamente a cada 5 minutos. '
+            'Online exige o nó Ready/Active no Swarm e o worker do CP respondendo nele.</p>',
+            reverse('admin:registry_hostinfraestrutura_verificar_agora', args=[obj.pk]),
+        )
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'regiao':
+            # Regiões inativas somem da lista, mas a atual do host continua selecionável.
+            object_id = request.resolver_match.kwargs.get('object_id') if request.resolver_match else None
+            filtro = Q(ativo=True)
+            if object_id:
+                filtro |= Q(hosts__pk=object_id)
+            kwargs['queryset'] = Regiao.objects.filter(filtro).distinct()
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
 _STATUS_CORES = {
@@ -158,9 +327,24 @@ class VersaoAgenteAdmin(ModelAdmin):
         return redirect('admin:registry_versaoagente_changelist')
 
 
+def _migracao_ativa(cliente):
+    return MigracaoCliente.objects.filter(cliente=cliente).exclude(status__in=MigracaoCliente.STATUS_FINAIS).first()
+
+
+def _bloqueado_por_migracao(request, cliente):
+    """Recusa operações que mexem no stack enquanto o cliente está em migração de servidor."""
+    from django.contrib import messages
+    if _migracao_ativa(cliente):
+        messages.error(request, f'"{cliente.slug}" está em migração de servidor: aguarde ela terminar.')
+        return True
+    return False
+
+
 def acao_reprovisionar(modeladmin, request, queryset):
     from .tasks import task_provisionar_cliente
     for cliente in queryset:
+        if _bloqueado_por_migracao(request, cliente):
+            continue
         cliente.logs.all().delete()
         task_provisionar_cliente.delay(str(cliente.pk))
     modeladmin.message_user(request, f'{queryset.count()} cliente(s) enviado(s) para re-provisionamento.')
@@ -171,6 +355,8 @@ acao_reprovisionar.short_description = 'Re-provisionar cliente(s)'
 def acao_destruir(modeladmin, request, queryset):
     from .provisioning import MotorProvisionamento
     for cliente in queryset:
+        if _bloqueado_por_migracao(request, cliente):
+            continue
         MotorProvisionamento(cliente).destruir()
     modeladmin.message_user(request, f'{queryset.count()} cliente(s) destruído(s) com sucesso.')
 
@@ -198,12 +384,129 @@ def _detalhes_log(b):
     )
 
 
+def format_html_join_migracoes(migracoes):
+    from django.urls import reverse
+    itens = [
+        format_html(
+            '<li><a href="{}">{:%d/%m/%Y %H:%M}</a> — {} → {}: {}</li>',
+            reverse('admin:registry_migracaocliente_change', args=[m.pk]), m.iniciada_em,
+            m.regiao_origem, m.regiao_destino, m.get_status_display(),
+        )
+        for m in migracoes
+    ]
+    if not itens:
+        return ''
+    return format_html('<ul style="margin:8px 0 0 18px;font-size:12px;">{}</ul>', mark_safe(''.join(itens)))
+
+
+_MIGRACAO_CORES = {
+    'concluida': '#2e7d32', 'revertida': '#1565c0', 'falhou_sem_alteracao': '#757575', 'exige_intervencao': '#b71c1c',
+}
+
+
+@admin.register(MigracaoCliente)
+class MigracaoClienteAdmin(ModelAdmin):
+    list_display = ['cliente', 'regiao_origem', 'regiao_destino', 'status_colorido', 'iniciada_em', 'concluida_em']
+    list_filter = ['status', 'regiao_destino']
+    search_fields = ['cliente__slug', 'cliente__nome']
+    fields = ['painel']
+    readonly_fields = ['painel']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def get_urls(self):
+        return [
+            path('<pk>/interromper/', self.admin_site.admin_view(self._view_interromper),
+                 name='registry_migracaocliente_interromper'),
+        ] + super().get_urls()
+
+    def _view_interromper(self, request, pk):
+        from django.contrib import messages
+        from . import migracao
+        if request.method != 'POST':
+            return redirect('admin:registry_migracaocliente_change', pk)
+        m = get_object_or_404(MigracaoCliente, pk=pk)
+        if migracao.interromper(m.pk, request.user):
+            messages.warning(request, 'Interrupção pedida: o cliente está voltando para a origem.')
+        else:
+            messages.error(request, 'Esta migração não pode mais ser interrompida (já passou do ponto sem volta ou terminou).')
+        return redirect('admin:registry_migracaocliente_change', pk)
+
+    @admin.display(description='Status')
+    def status_colorido(self, obj):
+        cor = _MIGRACAO_CORES.get(obj.status, '#6a1b9a')
+        return format_html('<strong style="color:{};">{}</strong>', cor, obj.get_status_display())
+
+    @admin.display(description='Migração')
+    def painel(self, obj):
+        from django.urls import reverse
+        gates = (obj.verificacoes or {}).get('gates') or {}
+        linhas_gates = ''.join(
+            format_html('<tr><td><code>{}</code></td><td>{}</td><td>{}</td></tr>', codigo,
+                        '✓' if g.get('ok') else '✗', g.get('detalhe', ''))
+            for codigo, g in sorted(gates.items())
+        )
+        interromper = ''
+        if obj.status in MigracaoCliente.STATUS_ANTES_DO_PONTO_SEM_VOLTA:
+            # A página já está dentro do <form> do admin: o POST é montado por JS (CSRF do cookie).
+            interromper = format_html(
+                '<button type="button" data-url="{}" style="margin-top:12px;padding:6px 14px;background:#ba2121;'
+                'color:#fff;border:0;border-radius:4px;" onclick="interromperMigracao(this.dataset.url)">'
+                '⏹ Interromper e voltar para a origem</button>{}',
+                reverse('admin:registry_migracaocliente_interromper', args=[obj.pk]),
+                mark_safe(
+                    '<script>function interromperMigracao(url) {'
+                    ' if (!confirm("Interromper e voltar o cliente para a origem?")) return;'
+                    ' var f = document.createElement("form"); f.method = "post"; f.action = url;'
+                    ' var t = document.createElement("input"); t.type = "hidden"; t.name = "csrfmiddlewaretoken";'
+                    ' t.value = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || "";'
+                    ' f.appendChild(t); document.body.appendChild(f); f.submit(); }</script>'
+                ),
+            )
+        recarregar = mark_safe('<script>setTimeout(function(){location.reload();}, 5000);</script>') if obj.ativa else ''
+        residuais = ''
+        if obj.volumes_residuais:
+            residuais = format_html(
+                '<p><strong>Volumes residuais</strong> em <code>{}</code> (remover à mão quando quiser): <code>{}</code></p>',
+                obj.volumes_residuais.get('no'), ' '.join(obj.volumes_residuais.get('volumes') or []),
+            )
+        return format_html(
+            '<div style="font-size:13px;line-height:1.6;">'
+            '<p><strong>{}</strong>: {} ({}) → {} ({}) · status <strong style="color:{};">{}</strong>'
+            '{}</p>'
+            '{}'
+            '{}'
+            '<p style="margin-top:10px;"><strong>Log</strong></p>'
+            '<pre style="max-height:420px;overflow:auto;padding:10px;background:#0b1220;color:#cbd5e1;border-radius:6px;'
+            'font-size:12px;white-space:pre-wrap;">{}</pre>'
+            '<p style="margin-top:10px;"><strong>Verificações</strong></p>'
+            '<table style="font-size:12px;">{}</table>'
+            '{}{}</div>',
+            obj.cliente.slug, obj.regiao_origem, obj.no_origem, obj.regiao_destino, obj.no_destino,
+            _MIGRACAO_CORES.get(obj.status, '#6a1b9a'), obj.get_status_display(),
+            format_html(' · ponto sem volta em {:%d/%m %H:%M:%S}', obj.ponto_sem_volta_em) if obj.ponto_sem_volta_em else '',
+            format_html('<p style="color:#b71c1c;white-space:pre-wrap;"><strong>Motivo:</strong> {}</p>', obj.mensagem_erro)
+            if obj.mensagem_erro else '',
+            residuais,
+            obj.log or '—',
+            mark_safe(linhas_gates),
+            interromper, recarregar,
+        )
+
+
 @admin.register(Cliente)
 class ClienteAdmin(ModelAdmin):
     list_display = ['slug', 'nome', 'subdominio', 'plano', 'status_badge', 'isento_cobranca', 'col_versao_erp', 'criado_em']
     list_filter = ['status', 'plano', 'host', 'isento_cobranca', 'atualizacao_automatica_agente']
     search_fields = ['slug', 'nome', 'cnpj', 'email_contato']
-    readonly_fields = ['id', 'criado_em', 'atualizado_em', 'status_badge', 'painel_acesso', 'acoes_provisionamento', 'badge_isencao', 'lista_backups', 'acoes_versoes', 'acoes_plano_sync', 'versao_atual']
+    readonly_fields = ['id', 'criado_em', 'atualizado_em', 'status_badge', 'painel_acesso', 'acoes_provisionamento', 'badge_isencao', 'lista_backups', 'acoes_versoes', 'acoes_plano_sync', 'versao_atual', 'migracao_servidor']
     filter_horizontal = ['modulos_ativos', 'versoes_permitidas']
     actions = [acao_reprovisionar, acao_destruir]
     inlines = [ProvisionamentoLogInline, AtualizacaoVersaoInline, SincronizacaoVersoesAgenteInline]
@@ -213,7 +516,7 @@ class ClienteAdmin(ModelAdmin):
             'id', 'slug', 'nome', 'cnpj', 'email_contato', 'telefone', 'observacoes', 'criado_em', 'atualizado_em',
         ]}),
         ('Acesso e Infraestrutura', {'classes': ['tab'], 'fields': [
-            'painel_acesso', 'host', 'versao_erp', 'stack_path', 'subdominio', 'dominio_custom',
+            'painel_acesso', 'host', 'migracao_servidor', 'versao_erp', 'stack_path', 'subdominio', 'dominio_custom',
         ]}),
         ('Plano e Faturamento', {'classes': ['tab'], 'fields': [
             'plano', 'modulos_ativos', 'tema_site', 'acoes_plano_sync',
@@ -232,9 +535,19 @@ class ClienteAdmin(ModelAdmin):
     class Media:
         js = ('registry/abas_cliente.js',)
 
+    def get_readonly_fields(self, request, obj=None):
+        # Durante a migração de servidor o cadastro inteiro fica somente leitura: trocar host,
+        # status, plano ou módulos dispararia operações no stack que a migração está movendo.
+        if obj is not None and _migracao_ativa(obj):
+            return [f.name for f in self.model._meta.fields] + [
+                f.name for f in self.model._meta.many_to_many
+            ] + list(self.readonly_fields)
+        return super().get_readonly_fields(request, obj)
+
     def get_urls(self):
         urls = super().get_urls()
         return [
+            path('<pk>/migrar/', self.admin_site.admin_view(self._view_migrar), name='registry_cliente_migrar'),
             path('<pk>/reprovisionar/', self.admin_site.admin_view(self._view_reprovisionar), name='registry_cliente_reprovisionar'),
             path('<pk>/destruir/', self.admin_site.admin_view(self._view_destruir), name='registry_cliente_destruir'),
             path('<pk>/reenviar-boas-vindas/', self.admin_site.admin_view(self._view_reenviar_boas_vindas), name='registry_cliente_reenviar_boas_vindas'),
@@ -252,10 +565,72 @@ class ClienteAdmin(ModelAdmin):
             path('<pk>/backups/<int:backup_id>/interromper/', self.admin_site.admin_view(self._view_interromper_backup), name='registry_cliente_backup_interromper'),
         ] + urls
 
+    def _view_migrar(self, request, pk):
+        from django.contrib import messages
+        from . import migracao
+        cliente = get_object_or_404(Cliente.objects.select_related('host'), pk=pk)
+        regiao_atual = cliente.host.regiao_id if cliente.host else None
+        hosts = HostInfraestrutura.objects.filter(ativo=True, regiao__ativo=True).exclude(
+            regiao_id=regiao_atual).select_related('regiao').order_by('regiao__nome', 'nome')
+        if request.method == 'POST':
+            destino = get_object_or_404(hosts, pk=request.POST.get('host'))
+            if (request.POST.get('confirmacao') or '').strip() != cliente.slug:
+                messages.error(request, 'Confirmação incorreta: digite exatamente o slug do cliente.')
+                return redirect(f"{request.path}?host={destino.pk}")
+            try:
+                m = migracao.iniciar(cliente, destino, request.user)
+            except migracao.Recusa as exc:
+                messages.error(request, f'Migração recusada (nada foi alterado): {exc}')
+                return redirect(f"{request.path}?host={destino.pk}")
+            except Exception as exc:
+                messages.error(request, f'Não foi possível iniciar a migração: {exc}')
+                return redirect(f"{request.path}?host={destino.pk}")
+            messages.success(request, f'Migração de "{cliente.slug}" iniciada. Acompanhe abaixo.')
+            return redirect('admin:registry_migracaocliente_change', m.pk)
+
+        destino = hosts.filter(pk=request.GET.get('host')).first() if request.GET.get('host') else None
+        gates = []
+        aprovado = False
+        if destino is not None:
+            resultados, _ = migracao.gates_manager(cliente, destino)
+            gates = sorted(resultados.items())
+            aprovado = all(g['ok'] for _, g in gates)
+        context = {
+            **self.admin_site.each_context(request),
+            'title': 'Migrar servidor', 'cliente': cliente, 'hosts': hosts,
+            'destino': destino, 'gates': gates, 'aprovado': aprovado,
+        }
+        return render(request, 'registry/admin_migrar.html', context)
+
+    def migracao_servidor(self, obj):
+        if not obj.pk:
+            return '—'
+        from django.urls import reverse
+        ativa = _migracao_ativa(obj)
+        if ativa:
+            url = reverse('admin:registry_migracaocliente_change', args=[ativa.pk])
+            return format_html(
+                '<p style="margin:0;padding:8px 12px;background:#ede7f6;border-left:4px solid #6a1b9a;font-size:13px;">'
+                '🚚 <strong>Migração em andamento</strong> ({}): {} → {}. O cadastro está somente leitura. '
+                '<a href="{}">Acompanhar</a></p>',
+                ativa.get_status_display(), ativa.regiao_origem, ativa.regiao_destino, url,
+            )
+        historico = MigracaoCliente.objects.filter(cliente=obj)[:5]
+        linhas = format_html_join_migracoes(historico)
+        url = reverse('admin:registry_cliente_migrar', args=[obj.pk])
+        return format_html(
+            '<a href="{}" style="display:inline-block;padding:6px 14px;background:#6a1b9a;color:#fff;border-radius:4px;'
+            'text-decoration:none;font-size:13px;">🚚 Migrar servidor</a>{}',
+            url, linhas,
+        )
+    migracao_servidor.short_description = 'Migração de servidor'
+
     def _view_reprovisionar(self, request, pk):
         from django.contrib import messages
         from .tasks import task_provisionar_cliente
         cliente = get_object_or_404(Cliente, pk=pk)
+        if _bloqueado_por_migracao(request, cliente):
+            return redirect('admin:registry_cliente_change', pk)
         cliente.logs.all().delete()
         task_provisionar_cliente.delay(str(cliente.pk))
         messages.success(request, f'Re-provisionamento disparado para "{cliente.slug}".')
@@ -265,6 +640,8 @@ class ClienteAdmin(ModelAdmin):
         from django.contrib import messages
         from .provisioning import MotorProvisionamento
         cliente = get_object_or_404(Cliente, pk=pk)
+        if _bloqueado_por_migracao(request, cliente):
+            return redirect('admin:registry_cliente_change', pk)
         slug = cliente.slug
         MotorProvisionamento(cliente).destruir()
         messages.success(request, f'Cliente "{slug}" destruído — stack, volumes e arquivos removidos.')
@@ -284,6 +661,8 @@ class ClienteAdmin(ModelAdmin):
         from django.contrib import messages
 
         cliente = get_object_or_404(Cliente, pk=pk)
+        if _bloqueado_por_migracao(request, cliente):
+            return redirect('admin:registry_cliente_change', pk)
         slug = cliente.slug
         modulos = ','.join(m.slug for m in cliente.modulos_ativos.all()) or 'financeiro,tarefas'
         tema = cliente.tema_site or 'loja'
@@ -658,6 +1037,8 @@ class ClienteAdmin(ModelAdmin):
         from django.contrib import messages
         from .tasks import task_iniciar_backup_cliente
         cliente = get_object_or_404(Cliente, pk=pk)
+        if _bloqueado_por_migracao(request, cliente):
+            return redirect('admin:registry_cliente_change', pk)
         backup = BackupCliente.objects.create(cliente=cliente)
         task_iniciar_backup_cliente.delay(str(cliente.pk), backup.pk)
         messages.success(request, f'Backup iniciado para "{cliente.slug}". Acompanhe o console abaixo.')
@@ -757,6 +1138,8 @@ class ClienteAdmin(ModelAdmin):
         from .tasks import task_restaurar_cliente
         cliente = get_object_or_404(Cliente, pk=pk)
         backup = get_object_or_404(BackupCliente, pk=backup_id, cliente=cliente)
+        if _bloqueado_por_migracao(request, cliente):
+            return redirect('admin:registry_cliente_change', pk)
         if backup.status != 'concluido':
             messages.error(request, 'Apenas backups concluídos podem ser restaurados.')
             return redirect('admin:registry_cliente_change', pk)
@@ -803,6 +1186,8 @@ class ClienteAdmin(ModelAdmin):
         if request.method != 'POST':
             return JsonResponse({'ok': False, 'motivo': 'metodo'}, status=405)
         backup = get_object_or_404(BackupCliente, pk=backup_id, cliente__pk=pk)
+        if backup.origem == 'migracao':
+            return JsonResponse({'ok': False, 'motivo': 'migracao'}, status=409)
         restaurando = backup.restaurando
         if not (backup.status == 'em_andamento' or restaurando):
             return JsonResponse({'ok': False, 'motivo': 'nao_ativa'}, status=409)
@@ -812,9 +1197,9 @@ class ClienteAdmin(ModelAdmin):
             return JsonResponse({'ok': False, 'motivo': 'recente', 'sem_atividade_s': sem_atividade}, status=409)
         motivo = f'Interrompida manualmente: sem atividade há {sem_atividade}s.'
         if restaurando:
-            from .tasks import _scale_web
-            LogOperacao(backup.pk, 'log_restauracao').linha(f'ERRO: {motivo} Religando o web…')
-            _scale_web(backup.cliente.slug, 1)
+            from .tasks import _religar_app
+            LogOperacao(backup.pk, 'log_restauracao').linha(f'ERRO: {motivo} Religando o web e o cron…')
+            _religar_app(backup.cliente.slug, backup.replicas_restauracao)
             BackupCliente.objects.filter(pk=backup.pk).update(
                 restaurando=False, progresso=100, mensagem_restauracao=motivo,
             )

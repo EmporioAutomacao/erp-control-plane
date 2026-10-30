@@ -75,14 +75,16 @@ Cada etapa de provisionamento é registrada em `ProvisionamentoLog` via `MotorPr
 | `Cliente` | `registry_cliente` | Representa um cliente da plataforma |
 | `Plano` | `registry_plano` | Planos comerciais com limites de recursos |
 | `Modulo` | `registry_modulo` | Módulos ativáveis no ERP (ver tabela abaixo) |
-| `HostInfraestrutura` | `registry_hostinfraestrutura` | Nós do Swarm por região |
+| `Regiao` | `registry_regiao` | Regiões de placement cadastráveis no admin (Infraestrutura → Regiões). PK `slug` = valor do label `node.labels.region`; imutável após salvar, `PROTECT` contra exclusão com hosts. `anapolis`/`brasilia` criadas na migration `0024` |
+| `HostInfraestrutura` | `registry_hostinfraestrutura` | Nós do Swarm por região. Sinalizador `status_conexao` (online/atencao/offline/nao_verificado) calculado por `registry/hosts.py` a partir do `docker node inspect` (manager) e do ping do worker do CP no nó (`task_pingar_host` → `agente_respondeu_em`, disco, nº de clientes); `task_verificar_hosts` a cada 5 min (migration `0029`), ao abrir o host e no botão Verificar agora. `regiao` é FK para `Regiao` na coluna `regiao` (migration `0025`); use `host.regiao_id` para o slug. Só a região é usada pelo CP — os demais campos são informativos |
 | `ProvisionamentoLog` | `registry_provisionamentolog` | Log por etapa do provisionamento |
 | `AtualizacaoVersao` | `registry_atualizacaoversao` | Histórico de upgrades de versão |
 | `VerificacaoSaude` | `registry_verificacao_saude` | Snapshots de health check |
 | `ConfiguracaoEmail` | `registry_configuracaoemail` | Singleton com credenciais SMTP (pk=1 sempre) |
 | `ConfiguracaoAtualizacao` | `registry_configuracaoatualizacao` | Singleton (pk=1) da tela Verificar Atualizações: repositório Docker Hub do CP, usuário/token (criptografado, opcionais), status da conexão, versão disponível em cache e registro da última atualização iniciada pelo painel |
 | `ConfiguracaoArmazenamento` | `registry_configuracaoarmazenamento` | Singleton (pk=1) com a conexão S3/RustFS dos backups (endpoint, bucket, access key, secret key **criptografada**) e o sinalizador `status_conexao` |
-| `BackupCliente` | `registry_backupcliente` | Registro de cada backup por cliente (status, progresso, caminho do arquivo) |
+| `BackupCliente` | `registry_backupcliente` | Registro de cada backup por cliente (status, progresso, caminho do arquivo, `sha256`, `replicas_restauracao`). Origem `migracao` = gerado por uma migração de servidor (fora da retenção) |
+| `MigracaoCliente` | `registry_migracaocliente` | Migração do stack de um cliente para outro nó (máquina de estados em `registry/migracao.py`). Uma ativa por cliente (constraint `migracao_unica_ativa_por_cliente`). `ponto_sem_volta_em` preenchido = destino aberto, sem volta automática. Spec: `docs/registry/migracao-cliente-entre-servidores.md` |
 | `InstalacaoAgente` | `registry_instalacaoagente` | Cache das `SyncInstallation` do ERP de um cliente (uma por loja/máquina) — versão do SyncAgent/PDV instalada. Reconciliado por `registry.cp_pull.ColetorVersoes` |
 
 ### Módulos disponíveis (`registry/fixtures/initial_data.json`)
@@ -118,19 +120,22 @@ Todos os módulos têm `preco_mensal=0.00` — a cobrança é feita pelo plano. 
 | `task_atualizar_versao` | Atualiza imagem Docker de uma instância ativa |
 | `task_suspender_cliente` | Escala `{slug}_web` para 0 réplicas |
 | `task_reativar_cliente` | Escala `{slug}_web` para 1 réplica |
-| `task_verificar_saude_todas` | Dispara health check em todos os clientes ativos/trial |
+| `task_verificar_saude_todas` | Dispara health check em todos os clientes ativos/trial. Agendada a cada 10 min pela migration `0030` |
 | `task_verificar_saude_cliente` | Faz GET `/health/`, grava `VerificacaoSaude` e — de graça, do corpo `{"version": ...}` — atualiza `Cliente.versao_erp_detectada` |
 | `task_coletar_versoes_cliente` | Consulta `GET /v1/cp/status` (fallback `/health/`) e grava a versão do ERP em execução + reconcilia `InstalacaoAgente`. Ver `registry.cp_pull.ColetorVersoes` |
-| `task_coletar_versoes_todas` | Dispara `task_coletar_versoes_cliente` em todos os clientes ativos/trial. Agendar no django-celery-beat (ex.: a cada 30 min), como o health check |
+| `task_coletar_versoes_todas` | Dispara `task_coletar_versoes_cliente` em todos os clientes ativos/trial. Agendada a cada 30 min pela migration `0030` |
 | `task_enviar_email_boas_vindas` | Renderiza e envia o e-mail HTML de boas-vindas |
 | `task_backup_clientes` | Gera `.tar.gz` do `CLIENTES_BASE_PATH` e mantém N versões |
 | `task_iniciar_backup_cliente` | Etapa do manager: lê o config do cliente e despacha `task_backup_cliente` para a fila do nó do cliente (`registry/nos.py`). É o que o botão do admin chama. |
 | `task_backup_cliente` | Roda **no nó do cliente** (fila `no.<hostname>`): pg_dump + mídia (`/app/media`) + config (recebido por argumento). Envia o `.tar.gz` ao bucket S3 (RustFS) e mantém 3 backups por cliente. |
 | `task_restaurar_cliente` | Etapa do manager: escala web=0 e despacha `task_restaurar_no` para a fila do nó. |
 | `task_restaurar_no` | Roda no nó: baixa o backup do bucket, restaura DB via psql e mídia via container alpine. Sempre aciona `task_finalizar_restauracao`, mesmo com erro. |
-| `task_verificar_armazenamento` | Testa a conexão com o bucket e atualiza o sinalizador de `ConfiguracaoArmazenamento`. Agendar no django-celery-beat (ex.: a cada 15 min), como o health check |
-| `task_verificar_atualizacao` | Consulta o Docker Hub e grava a versão disponível do CP (Configurações > Verificar Atualizações). Agendar no django-celery-beat (ex.: a cada 6 h) |
-| `task_finalizar_restauracao` | Etapa do manager: reinicia web=1 e libera o backup. |
+| `task_verificar_armazenamento` | Testa a conexão com o bucket e atualiza o sinalizador de `ConfiguracaoArmazenamento`. Agendada a cada 15 min pela migration `0030` |
+| `task_verificar_atualizacao` | Consulta o Docker Hub e grava a versão disponível do CP (Configurações > Verificar Atualizações). Agendada a cada 6 h pela migration `0030` |
+| `task_finalizar_restauracao` | Etapa do manager: devolve web **e cron** às réplicas de antes (`replicas_app`; sem ele, web=1) e libera o backup. |
+| `task_migracao_iniciar` / `task_migracao_avancar` | Manager: disparam as sondas e recebem o resultado de cada etapa da migração de servidor (`registry/migracao.py::avancar`). Eventos fora de hora são ignorados |
+| `task_migracao_sondar` / `task_migracao_manifesto` / `task_migracao_teste_interno` | Nó (`no.<hostname>`): gates G5/G9–G11, inventário exato (linhas por tabela, migrations, arquivos+hash dos volumes) e `/health/` por dentro do container antes de expor no Traefik |
+| `task_vigiar_migracoes` | Beat a cada 1 min (criado pela migration `0027`): etapa parada antes do ponto sem volta → volta para a origem; depois → `exige_intervencao` |
 
 ### Infraestrutura por cliente
 
@@ -266,13 +271,26 @@ Em produção (Linux/Docker) o prefork padrão funciona normalmente — não adi
 - Limitação: se o worker do nó não estiver rodando, a task fica na fila e (na restauração) o web do cliente permanece em 0 réplicas até o agente voltar.
 - **Console ao vivo** (tela do Cliente, aba Backups): `BackupCliente.log`/`log_restauracao` recebem uma linha por etapa (`registry/log_operacao.py::LogOperacao`, `.update()` + `Concat`, nunca `save(update_fields=)`) e `atividade_em` é o heartbeat. Comandos longos (pg_dump, docker cp, compactação, upload/download, psql) rodam via `rodar_com_pulso()` numa **thread** — **todo acesso ao banco fica na thread principal** (a thread só executa o comando; a `ConfiguracaoArmazenamento` é resolvida antes). O JS está em `registry/console_backup.py` (polling de `…/backups/<id>/status/`: `log`, `decorrido_s`, `sem_atividade_s`, `aguardando_worker`, `sem_inicio`, `ativo_operacao`). Estados: ● executando (<30 s sem atividade), ⚠ possível travamento (≥30 s), ✖ provavelmente travado + **Interromper** (≥120 s; `POST …/interromper/`, na restauração religa o web). Abre via `?acompanhar=<id>[&op=restauracao]` ou quando há operação ativa; ao terminar atualiza só a tabela (`#bk-tabela`). Dump compactado com gzip **nível 6** (o 9 levava dezenas de segundos). Doc: `docs/registry/release-console-backup-ao-vivo.md`.
 - Guia completo (deploy, verificação, troubleshooting): `docs/registry/backup-multi-no.md`.
+- **Volumes:** `registry/volumes.py` sempre roda `docker volume inspect` antes de montar um volume (`docker run/create -v` criaria um vazio). Restauração confere o `sha256` do backup antes de tocar no banco e espera o Postgres aceitar conexão **TCP** (`pg_pronto`; o servidor temporário do initdb só escuta socket).
+- **Comandos de Swarm só no manager:** `registry/swarm.py` (réplicas, scale, label do Traefik, nós por região). Postgres/volumes só no nó: `registry/volumes.py`.
+
+### Migração de servidor
+
+Botão **🚚 Migrar servidor** (aba Acesso e Infraestrutura → `/<pk>/migrar/`). Orquestração em `registry/migracao.py`; spec, achados, gates G1–G13 e runbook em `docs/registry/migracao-cliente-entre-servidores.md`. Regras que o código garante e os testes (`registry/tests/test_migracao.py`) cobrem:
+
+- O destino sobe por `MotorProvisionamento.executar(modo_migracao=True)`: `stack-migracao.yml` com web/cron em 0 e `traefik.enable=false` (o `stack.yml` em disco continua o normal); exige os 3 segredos no `.env` (`SEGREDOS_ENV`); não mexe em status/`data_ativacao`; não espera o web.
+- **Nunca expor um ERP vazio nem voltar ao banco antigo depois de expor:** o SyncAgent trata `401 refresh_token_invalid` como definitivo e exige novo código de ativação (`pdv-local/.../ErpActivationClient.cs`).
+- Ponto sem volta = `definir_traefik(web, True)` em `abrir()`; `ponto_sem_volta_em` é gravado antes.
+- Com migração ativa: cadastro do cliente somente leitura e views de backup/restaurar/reprovisionar/destruir/aplicar recusam (`_bloqueado_por_migracao`); `task_suspender/reativar/atualizar_versao` se reagendam (5 min).
+- Volumes residuais nunca são apagados automaticamente (`volumes_residuais`).
 
 O `task_backup_cliente` cria um `.tar.gz` (em `CP_BACKUP_DIR/clientes/{slug}/` no nó, até o envio ao bucket) contendo três entradas:
 
 | Entrada no arquivo | Origem | Conteúdo |
 |---|---|---|
 | `db.sql` | `docker exec {slug}_db pg_dump --clean --if-exists` | Dump completo do PostgreSQL (inclui pgvector/RAG) |
-| `media/` | `docker cp {slug}_web:/app/media/.` | Arquivos enviados pelos usuários |
+| `media/` | volume `{slug}_media` via container auxiliar (`registry/volumes.py`) — funciona com o web parado | Arquivos enviados pelos usuários |
+| `backups/` | volume `{slug}_backups` (idem) | Backups internos do ERP |
 | `config/` | `CLIENTES_BASE_PATH/{slug}/` | `.env` e `stack.yml` do cliente |
 
 **Retenção:** 3 backups por cliente (arquivos e registros no banco), **apenas entre backups `origem='automatico'`**. O excedente é removido automaticamente. Backups `origem='manual'` (ver "Importar backup" abaixo) nunca entram nessa contagem nem são apagados por ela.
@@ -338,7 +356,7 @@ Doc: `docs/registry/versao-atual-clientes.md`. Contraparte de leitura do `cp_pus
 - **Lado ERP:** `sync_api/cp_status.py::CpStatusAPIView` (repo `erp`) — devolve `erp_version` (`settings.VERSION`) + lista de `SyncInstallation` (`agent_version`, `last_seen_at`, `connectivity` leve por frescor). Rota fora do `/v1/sync/` (canal interno, não é o contrato produto).
 - **ERP antigo (sem a rota):** 404 → `ColetorVersoes` faz fallback pro `GET /health/` público, que só tem a versão do ERP; as instalações ficam indisponíveis até o ERP ser atualizado.
 - **SyncAgent × PDV:** o ERP conhece **um** número por instalação (`agent_version`). O painel mostra duas linhas (SyncAgent e PDV Local) com o mesmo valor — `pdv-local` é um artefato único. Uma versão separada do app PDV exigiria o agente reportá-la no heartbeat (mudança em `pdv-local` + `erp`).
-- **Disparo:** botão 🔄 no admin (`task_coletar_versoes_cliente`) + task agendada `task_coletar_versoes_todas`. **Criar o `PeriodicTask` no admin do django-celery-beat** (ex.: crontab a cada 30 min) — não há schedule em código, igual ao health check. `task_verificar_saude_cliente` também atualiza `versao_erp_detectada` de graça (lê o corpo de `/health/`).
+- **Disparo:** botão 🔄 no admin (`task_coletar_versoes_cliente`) + task agendada `task_coletar_versoes_todas`. Agendada pela migration `0030` (a cada 30 min; health check a cada 10 min). **Regra:** toda verificação periódica nova nasce agendada por data migration (`get_or_create` sem duplicar nem reativar o que já existe), nunca "crie à mão no admin" — foi assim que produção ficou sem status/versões atualizando. `task_verificar_saude_cliente` também atualiza `versao_erp_detectada` de graça (lê o corpo de `/health/`).
 
 ### Empresa e Estoque iniciais (`CP_CLIENTE_CNPJ` + `seed_cliente_inicial`)
 
