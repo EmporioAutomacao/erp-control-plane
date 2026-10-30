@@ -41,6 +41,23 @@ _STATUS_ASSINATURA_MAP = {
 }
 
 
+MANTER_SINCRONIZACOES = 30
+
+
+def podar_sincronizacoes(cliente_id, manter=MANTER_SINCRONIZACOES):
+    """Retencao do historico de SincronizacaoVersoesAgente: so os `manter`
+    registros mais recentes do cliente. ha_novidade() so precisa do ultimo
+    concluido -- ele fica, porque o mais recente de todos sempre fica e, se
+    ele for erro, o concluido anterior so cai depois de 30 erros seguidos
+    (ai reenviar e o certo)."""
+    antigos = (
+        SincronizacaoVersoesAgente.objects.filter(cliente_id=cliente_id)
+        .order_by('-iniciada_em', '-pk')
+        .values_list('pk', flat=True)[manter:]
+    )
+    return SincronizacaoVersoesAgente.objects.filter(pk__in=list(antigos)).delete()[0]
+
+
 def _mensagem_erro_http_amigavel(response):
     """Categoriza em pt-BR os erros conhecidos que o erp devolve nos canais
     /v1/cp/*:sync (401 unauthorized / 409 not_linked_to_cp / 409
@@ -104,6 +121,27 @@ class SincronizadorVersoes:
             for versao in self._versoes_a_enviar()
         ]
         return {'cliente_id': str(self.cliente.id), 'packages': packages}
+
+    @staticmethod
+    def _normalizar(packages):
+        return sorted(packages or [], key=lambda p: str(p.get('version', '')))
+
+    def ha_novidade(self):
+        """True se o conjunto a enviar difere do ultimo envio CONCLUIDO para
+        este cliente: versao nova, versao removida/aposentada (o ERP precisa
+        aposentar) ou metadado corrigido (url, sha256, erp_minimo, notas).
+        Sem nenhum envio concluido ainda, sempre ha novidade. Usado pelo push
+        automatico pra nao reenviar o mesmo pacote a cada save do catalogo."""
+        ultimo = (
+            SincronizacaoVersoesAgente.objects
+            .filter(cliente=self.cliente, status='concluida')
+            .order_by('-iniciada_em', '-pk')
+            .values_list('versoes_enviadas', flat=True)
+            .first()
+        )
+        if ultimo is None:
+            return True
+        return self._normalizar(self._montar_payload()['packages']) != self._normalizar(ultimo)
 
     def _log(self, linha):
         """Adiciona uma linha ao log e PERSISTE na hora -- e isso que faz o
@@ -180,6 +218,7 @@ class SincronizadorVersoes:
         registro.log = '\n'.join(self._linhas)
         registro.concluida_em = timezone.now()
         registro.save(update_fields=['status', 'resposta_http_status', 'mensagem_erro', 'concluida_em', 'log'])
+        podar_sincronizacoes(self.cliente.pk)
         return registro
 
     # -- helpers de log --------------------------------------------------------

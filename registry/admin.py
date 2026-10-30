@@ -1,6 +1,7 @@
 import os
 from django import forms
 from django.contrib import admin
+from django.forms.models import BaseInlineFormSet
 from django.db.models import Count, Q
 from django.http import FileResponse, Http404, JsonResponse
 from django.urls import path
@@ -233,9 +234,34 @@ def _sync_badge(status):
     )
 
 
+class _UltimosRegistrosFormSet(BaseInlineFormSet):
+    """Histórico somente leitura limitado aos registros mais recentes.
+
+    Cada linha de um inline vai no POST do change form (id + FK ocultos); com
+    centenas de logs/sincronizações o salvar do Cliente estourava
+    DATA_UPLOAD_MAX_NUMBER_FIELDS (TooManyFieldsSent).
+    """
+    limite = 30
+    ordem = None
+
+    def get_queryset(self):
+        if not hasattr(self, '_ultimos'):
+            qs = super().get_queryset()
+            if self.ordem:
+                qs = qs.order_by(*self.ordem)
+            self._ultimos = qs[:self.limite]
+        return self._ultimos
+
+
+def _formset_ultimos(*ordem):
+    return type('UltimosRegistrosFormSet', (_UltimosRegistrosFormSet,), {'ordem': ordem or None})
+
+
 class ProvisionamentoLogInline(admin.TabularInline):  # noqa: keep django TabularInline (unfold doesn't override it)
     tab = True
     model = ProvisionamentoLog
+    formset = _formset_ultimos('-iniciado_em', '-pk')
+    verbose_name_plural = 'Logs de provisionamento (últimos 30)'
     extra = 0
     readonly_fields = ['etapa', 'status_colorido', 'mensagem', 'iniciado_em', 'concluido_em']
     fields = ['etapa', 'status_colorido', 'mensagem', 'iniciado_em', 'concluido_em']
@@ -254,6 +280,7 @@ class ProvisionamentoLogInline(admin.TabularInline):  # noqa: keep django Tabula
 class AtualizacaoVersaoInline(admin.TabularInline):
     tab = True
     model = AtualizacaoVersao
+    formset = _formset_ultimos()
     extra = 0
     readonly_fields = ['versao_anterior', 'versao_nova', 'status', 'iniciada_em', 'concluida_em']
     can_delete = False
@@ -262,6 +289,7 @@ class AtualizacaoVersaoInline(admin.TabularInline):
 class SincronizacaoVersoesAgenteInline(admin.TabularInline):
     tab = True
     model = SincronizacaoVersoesAgente
+    formset = _formset_ultimos()
     extra = 0
     fields = ['iniciada_em', 'status_badge', 'iniciada_por', 'versoes_fmt', 'resposta_http_status', 'log_fmt', 'concluida_em']
     readonly_fields = fields
@@ -2002,7 +2030,8 @@ class ConfiguracaoAtualizacaoAdmin(ModelAdmin):
         urls = super().get_urls()
         return [
             path('verificar/', self.admin_site.admin_view(self._view_verificar), name='registry_configuracaoatualizacao_verificar'),
-            path('verificar-agora/', self.admin_site.admin_view(self._view_verificar_agora), name='registry_configuracaoatualizacao_verificar_agora'),
+            path('andamento/', self.admin_site.admin_view(self._view_andamento), name='registry_configuracaoatualizacao_andamento'),
+            path('verificar-agora/',self.admin_site.admin_view(self._view_verificar_agora), name='registry_configuracaoatualizacao_verificar_agora'),
             path('atualizar/<str:versao>/', self.admin_site.admin_view(self._view_atualizar), name='registry_configuracaoatualizacao_atualizar'),
         ] + urls
 
@@ -2183,26 +2212,92 @@ class ConfiguracaoAtualizacaoAdmin(ModelAdmin):
         )
     status_badge.short_description = 'Docker Hub'
 
-    def info_atualizacao(self, obj):
+    def _andamento(self, obj):
+        """`(estado, html)` do bloco Andamento — usado na renderização e no polling (`andamento/`)."""
         from django.utils import timezone
+        from django.utils.timesince import timesince
         from . import atualizacoes
         if not obj or not obj.atualizacao_container:
-            return 'Nenhuma atualização foi iniciada pelo painel.'
+            return 'nenhuma', 'Nenhuma atualização foi iniciada pelo painel.'
         estado = atualizacoes.estado_atualizacao(obj)
         rotulo, cor = _ATZ_ESTADO_ROTULOS.get(estado['estado'], _ATZ_ESTADO_ROTULOS['desconhecido'])
         quem = obj.atualizacao_iniciada_por.get_username() if obj.atualizacao_iniciada_por_id else '—'
-        quando = timezone.localtime(obj.atualizacao_iniciada_em).strftime('%d/%m/%Y %H:%M') if obj.atualizacao_iniciada_em else '—'
+
+        def data_hora(dt):
+            return timezone.localtime(dt).strftime('%d/%m/%Y %H:%M:%S') if dt else '—'
+
+        inicio = obj.atualizacao_iniciada_em or estado['iniciado_em']
+        fim = estado['terminado_em']
+        if fim:
+            rotulo_fim = 'Concluída em' if estado['estado'] == 'concluida' else 'Terminou em'
+            linha_fim = format_html(
+                '<tr><td style="padding:2px 18px 2px 0;color:#6b7280;">{}</td><td>{} <span style="color:#6b7280;font-size:12px;">(duração: {})</span></td></tr>',
+                rotulo_fim, data_hora(fim), timesince(inicio, fim) if inicio else '—',
+            )
+        elif estado['estado'] == 'em_andamento' and inicio:
+            linha_fim = format_html(
+                '<tr><td style="padding:2px 18px 2px 0;color:#6b7280;">Decorrido</td><td>{}</td></tr>',
+                timesince(inicio),
+            )
+        else:
+            linha_fim = ''
         log = format_html(
-            '<pre style="margin-top:8px;max-height:220px;overflow:auto;background:#0f172a;color:#e2e8f0;padding:10px;'
+            '<pre id="atz-log" style="margin-top:8px;max-height:320px;overflow:auto;background:#0f172a;color:#e2e8f0;padding:10px;'
             'border-radius:6px;font-size:12px;white-space:pre-wrap;">{}</pre>', estado['log'],
         ) if estado['log'] else ''
         aviso = format_html(
             '<div style="margin-top:6px;font-size:12px;color:#92400e;">Lembre-se de ajustar <code>CP_VERSION={}</code> no stack do Portainer.</div>',
             obj.atualizacao_alvo,
         ) if estado['estado'] in ('em_andamento', 'concluida') and obj.atualizacao_tag_anterior != 'latest' else ''
+        html = format_html(
+            '<table style="border-collapse:collapse;font-size:14px;">'
+            '<tr><td style="padding:2px 18px 2px 0;color:#6b7280;">Versão</td><td><strong>{}</strong></td></tr>'
+            '<tr><td style="padding:2px 18px 2px 0;color:#6b7280;">Situação</td><td>{}</td></tr>'
+            '<tr><td style="padding:2px 18px 2px 0;color:#6b7280;">Iniciada em</td><td>{} por {}</td></tr>'
+            '{}</table>{}{}',
+            obj.atualizacao_alvo, _atz_pill(rotulo, cor), data_hora(inicio), quem, linha_fim, aviso, log,
+        )
+        return estado['estado'], html
+
+    def _view_andamento(self, request):
+        """JSON do bloco Andamento; a tela consulta a cada poucos segundos enquanto a atualização está em andamento."""
+        if not self.has_view_permission(request):
+            raise Http404
+        estado, html = self._andamento(ConfiguracaoAtualizacao.obter())
+        return JsonResponse({'estado': estado, 'html': str(html)})
+
+    def info_atualizacao(self, obj):
+        import json
+        from django.urls import reverse
+        estado, html = self._andamento(obj)
+        if not obj or not obj.atualizacao_container:
+            return html
+        # Atualiza sozinho enquanto em andamento. Quando o web é trocado a consulta falha por instantes (segue tentando);
+        # ao terminar, recarrega a página uma vez para mostrar a nova "Versão atual".
+        script = (
+            '(function(){'
+            'var url=' + json.dumps(reverse('admin:registry_configuracaoatualizacao_andamento')) + ';'
+            'var estado=' + json.dumps(estado) + ';var viuAndamento=estado==="em_andamento";'
+            'function $(i){return document.getElementById(i);}'
+            'function fimDoLog(){var l=$("atz-log");if(l)l.scrollTop=l.scrollHeight;}'
+            'function nota(t){var n=$("atz-polling");if(n)n.textContent=t;}'
+            'function hora(){return new Date().toLocaleTimeString("pt-BR");}'
+            'fimDoLog();if(!viuAndamento)return;'
+            'function consultar(){'
+            'fetch(url,{credentials:"same-origin",cache:"no-store"}).then(function(r){'
+            'if(!r.ok)throw new Error(r.status);return r.json();}).then(function(d){'
+            '$("atz-andamento").innerHTML=d.html;fimDoLog();'
+            'if(d.estado==="em_andamento"){nota("● atualizando sozinho — consultado às "+hora());setTimeout(consultar,3000);}'
+            'else{nota("Atualização terminada — recarregando a página…");setTimeout(function(){location.reload();},1500);}'
+            '}).catch(function(){nota("⚠ painel indisponível (provavelmente reiniciando com a nova versão) — tentando de novo… "+hora());'
+            'setTimeout(consultar,5000);});}'
+            'nota("● atualizando sozinho");setTimeout(consultar,3000);'
+            '})();'
+        )
         return format_html(
-            'Para a versão <strong>{}</strong>, iniciada em {} por {}: {}{}{}',
-            obj.atualizacao_alvo, quando, quem, _atz_pill(rotulo, cor), aviso, log,
+            '<div id="atz-andamento">{}</div><div id="atz-polling" style="margin-top:6px;font-size:12px;color:#6b7280;"></div>'
+            '<script>{}</script>',
+            html, mark_safe(script),
         )
     info_atualizacao.short_description = 'Andamento'
 

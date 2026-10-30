@@ -277,6 +277,35 @@ class EstadoAtualizacaoTests(SimpleTestCase):
         with patch('registry.atualizacoes._docker', falso):
             self.assertEqual(atualizacoes.estado_atualizacao(cfg)['estado'], 'concluida')
 
+    @override_settings(TIME_ZONE='America/Sao_Paulo')
+    def test_datas_do_auxiliar_e_horario_local_no_log(self):
+        cfg = _cfg(atualizacao_container='cp-atualizador-x', atualizacao_alvo='0.0.44')
+
+        def falso(*args, timeout=30):
+            if args[0] == 'inspect':
+                return SimpleNamespace(returncode=0, stderr='', stdout=(
+                    'exited|0|2026-10-30T15:00:01.123456789Z|2026-10-30T15:04:31.5Z'))
+            return SimpleNamespace(returncode=0, stderr='', stdout=(
+                '2026-10-30T15:00:02.000000001Z ==> cp_celery\nsem timestamp'))
+
+        with patch('registry.atualizacoes._docker', falso):
+            e = atualizacoes.estado_atualizacao(cfg)
+        self.assertEqual(e['estado'], 'concluida')
+        self.assertEqual(timezone.localtime(e['iniciado_em']).strftime('%H:%M:%S'), '12:00:01')
+        self.assertEqual(timezone.localtime(e['terminado_em']).strftime('%H:%M:%S'), '12:04:31')
+        self.assertEqual(e['log'], '12:00:02  ==> cp_celery\nsem timestamp')
+
+    def test_em_andamento_sem_terminado_em(self):
+        def falso(*args, timeout=30):
+            out = 'running|0|2026-10-30T15:00:01Z|0001-01-01T00:00:00Z' if args[0] == 'inspect' else ''
+            return SimpleNamespace(returncode=0, stderr='', stdout=out)
+
+        with patch('registry.atualizacoes._docker', falso):
+            e = atualizacoes.estado_atualizacao(_cfg(atualizacao_container='cp-atualizador-x'))
+        self.assertEqual(e['estado'], 'em_andamento')
+        self.assertIsNotNone(e['iniciado_em'])
+        self.assertIsNone(e['terminado_em'])
+
 
 @override_settings(VERSION='0.0.43')
 class AdminAtualizacaoTests(TestCase):
@@ -430,6 +459,27 @@ class AdminAtualizacaoTests(TestCase):
         self.assertContains(resp, 'Falhou')
         self.assertContains(resp, 'linha de log')
         self.assertContains(resp, 'atz_admin')
+
+    def test_andamento_em_execucao_se_atualiza_sozinho(self):
+        self._salvar()
+        ConfiguracaoAtualizacao.objects.filter(pk=1).update(
+            atualizacao_alvo='0.0.44', atualizacao_container='cp-atualizador-x',
+            atualizacao_iniciada_em=timezone.now(), atualizacao_iniciada_por=self.user,
+        )
+        change = reverse('admin:registry_configuracaoatualizacao_change', args=[1])
+        url = reverse('admin:registry_configuracaoatualizacao_andamento')
+        with patch('registry.atualizacoes._docker', _docker_falso(estado='running|0')),                 patch('registry.atualizacoes.swarm_manager', return_value=True):
+            self.assertContains(self.c.get(change), url)
+            dados = self.c.get(url).json()
+        self.assertEqual(dados['estado'], 'em_andamento')
+        self.assertIn('Em andamento', dados['html'])
+        self.assertIn('Iniciada em', dados['html'])
+        self.assertIn('linha de log', dados['html'])
+
+    def test_andamento_sem_atualizacao(self):
+        self._salvar()
+        dados = self.c.get(reverse('admin:registry_configuracaoatualizacao_andamento')).json()
+        self.assertEqual(dados['estado'], 'nenhuma')
 
 
 @override_settings(VERSION='0.0.43')

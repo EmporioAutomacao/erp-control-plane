@@ -263,27 +263,57 @@ def montar_script(repositorio, versao, servicos):
     return '\n'.join(linhas)
 
 
+_RE_INSTANTE_DOCKER = re.compile(r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d+)?Z$')
+
+
+def _instante_docker(texto):
+    """RFC 3339 do Docker (UTC, nanossegundos) → datetime aware; None para vazio ou o zero do Go (`0001-...`)."""
+    import datetime
+    m = _RE_INSTANTE_DOCKER.match((texto or '').strip())
+    if not m or m.group(1).startswith('0001-'):
+        return None
+    return datetime.datetime.fromisoformat(m.group(1)).replace(tzinfo=datetime.timezone.utc)
+
+
+def _log_com_horario(texto):
+    """Troca o timestamp de `docker logs --timestamps` pela hora local (HH:MM:SS) no início de cada linha."""
+    linhas = []
+    for linha in texto.splitlines():
+        instante, _, resto = linha.partition(' ')
+        quando = _instante_docker(instante)
+        linhas.append(f'{timezone.localtime(quando):%H:%M:%S}  {resto}' if quando else linha)
+    return '\n'.join(linhas)
+
+
 def estado_atualizacao(cfg):
-    """`{estado, log}`; estado: nenhuma | em_andamento | concluida | falhou | desconhecido."""
+    """`{estado, log, iniciado_em, terminado_em}`; estado: nenhuma | em_andamento | concluida | falhou | desconhecido.
+
+    `iniciado_em`/`terminado_em` vêm do container auxiliar (None se não houver)."""
+    vazio = {'log': '', 'iniciado_em': None, 'terminado_em': None}
     if not cfg or not cfg.atualizacao_container:
-        return {'estado': 'nenhuma', 'log': ''}
+        return {'estado': 'nenhuma', **vazio}
     try:
-        r = _docker('inspect', cfg.atualizacao_container, '--format', '{{.State.Status}}|{{.State.ExitCode}}', timeout=15)
+        r = _docker(
+            'inspect', cfg.atualizacao_container, '--format',
+            '{{.State.Status}}|{{.State.ExitCode}}|{{.State.StartedAt}}|{{.State.FinishedAt}}', timeout=15,
+        )
     except (OSError, subprocess.SubprocessError):
-        return {'estado': 'desconhecido', 'log': ''}
+        return {'estado': 'desconhecido', **vazio}
     if r.returncode != 0:
         # auxiliar removido: se a versão em execução já é a alvo, deu certo
         concluida = cfg.atualizacao_alvo and cfg.atualizacao_alvo == versao_atual()
-        return {'estado': 'concluida' if concluida else 'desconhecido', 'log': ''}
-    status, _, codigo = r.stdout.strip().partition('|')
+        return {'estado': 'concluida' if concluida else 'desconhecido', **vazio}
+    status, codigo, iniciado, terminado = (r.stdout.strip().split('|') + ['', '', ''])[:4]
     try:
-        log = _docker('logs', '--tail', '30', cfg.atualizacao_container, timeout=15)
-        texto = (log.stdout + log.stderr).strip()
+        log = _docker('logs', '--timestamps', '--tail', '60', cfg.atualizacao_container, timeout=15)
+        texto = _log_com_horario((log.stdout + log.stderr).strip())
     except (OSError, subprocess.SubprocessError):
         texto = ''
+    resultado = {'log': texto, 'iniciado_em': _instante_docker(iniciado), 'terminado_em': None}
     if status in ('running', 'created', 'restarting'):
-        return {'estado': 'em_andamento', 'log': texto}
-    return {'estado': 'concluida' if codigo == '0' else 'falhou', 'log': texto}
+        return {'estado': 'em_andamento', **resultado}
+    resultado['terminado_em'] = _instante_docker(terminado)
+    return {'estado': 'concluida' if codigo == '0' else 'falhou', **resultado}
 
 
 def iniciar_atualizacao(cfg, versao, usuario):

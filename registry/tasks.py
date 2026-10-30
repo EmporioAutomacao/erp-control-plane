@@ -79,7 +79,12 @@ def task_sincronizar_versoes_agente(self, cliente_id, iniciada_por_id=None, com_
       `.delay(str(pk), iniciada_por_id=request.user.id, com_retry=False)`.
       Passa por task (nao mais sincrono) so pra gravar o log linha a linha e o
       admin mostrar "ao vivo" via polling; NAO retenta (o operador ve o erro na
-      hora e reclica se quiser)."""
+      hora e reclica se quiser).
+
+    O push automatico so envia quando ha novidade em relacao ao ultimo envio
+    concluido (SincronizadorVersoes.ha_novidade) -- sem isso cada save do
+    catalogo reenviava o mesmo pacote a todos os clientes automaticos. O botao
+    manual sempre envia (serve pra reenviar a um ERP que perdeu o estado)."""
     from django.contrib.auth import get_user_model
     from .cp_push import SincronizadorVersoes
     from .models import Cliente
@@ -93,7 +98,11 @@ def task_sincronizar_versoes_agente(self, cliente_id, iniciada_por_id=None, com_
     if iniciada_por_id:
         iniciada_por = get_user_model().objects.filter(pk=iniciada_por_id).first()
 
-    registro = SincronizadorVersoes(cliente, iniciada_por=iniciada_por).sincronizar()
+    sincronizador = SincronizadorVersoes(cliente, iniciada_por=iniciada_por)
+    if not iniciada_por_id and not sincronizador.ha_novidade():
+        logger.info('Versoes do agente de %s ja enviadas; push automatico ignorado.', cliente.slug)
+        return
+    registro = sincronizador.sincronizar()
     if registro.status == 'erro' and com_retry:
         raise self.retry(exc=Exception(registro.mensagem_erro or 'Falha ao sincronizar versoes.'))
 

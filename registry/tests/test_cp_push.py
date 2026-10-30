@@ -298,6 +298,84 @@ class SincronizarLogTests(_Base):
         self.assertNotEqual(reg.log, "")
 
 
+class SoEnviaComNovidadeTests(_Base):
+    """Push automatico so sai quando o pacote difere do ultimo envio concluido."""
+
+    OK = {"synced": 1, "retired": 0, "skipped": []}
+
+    def _rodar_task(self, cliente, **kwargs):
+        with patch("requests.post", return_value=_FakeResp(200, self.OK)) as post:
+            task_sincronizar_versoes_agente.apply(args=(str(cliente.pk),), kwargs=kwargs)
+        return post
+
+    def test_primeiro_envio_sempre_sai(self):
+        cliente = self._cliente("n-primeiro", auto=True)
+        _versao("1.5.0")
+        self.assertEqual(self._rodar_task(cliente).call_count, 1)
+
+    def test_mesmo_pacote_nao_reenvia_nem_cria_registro(self):
+        cliente = self._cliente("n-igual", auto=True)
+        v = _versao("1.5.0")
+        self._rodar_task(cliente)
+        v.release_notes = v.release_notes  # save do catálogo sem mudança real
+        v.save()
+        self.assertEqual(self._rodar_task(cliente).call_count, 0)
+        self.assertEqual(SincronizacaoVersoesAgente.objects.filter(cliente=cliente).count(), 1)
+
+    def test_versao_nova_reenvia(self):
+        cliente = self._cliente("n-nova", auto=True)
+        _versao("1.5.0")
+        self._rodar_task(cliente)
+        _versao("1.6.0")
+        self.assertEqual(self._rodar_task(cliente).call_count, 1)
+
+    def test_versao_aposentada_reenvia(self):
+        cliente = self._cliente("n-aposentada", auto=True)
+        _versao("1.5.0")
+        v = _versao("1.6.0")
+        self._rodar_task(cliente)
+        VersaoAgente.objects.filter(pk=v.pk).update(ativo=False)
+        self.assertEqual(self._rodar_task(cliente).call_count, 1)
+
+    def test_metadado_corrigido_reenvia(self):
+        cliente = self._cliente("n-sha", auto=True)
+        v = _versao("1.5.0")
+        self._rodar_task(cliente)
+        VersaoAgente.objects.filter(pk=v.pk).update(sha256="b" * 64)
+        self.assertEqual(self._rodar_task(cliente).call_count, 1)
+
+    def test_ultimo_envio_com_erro_nao_conta(self):
+        cliente = self._cliente("n-erro", auto=True)
+        _versao("1.5.0")
+        with patch("requests.post", side_effect=requests.exceptions.ConnectionError()):
+            SincronizadorVersoes(cliente).sincronizar()
+        self.assertEqual(self._rodar_task(cliente).call_count, 1)
+
+    def test_botao_manual_sempre_envia(self):
+        user = User.objects.create_user("manual-forca")
+        cliente = self._cliente("n-manual", auto=True)
+        _versao("1.5.0")
+        self._rodar_task(cliente)
+        post = self._rodar_task(cliente, iniciada_por_id=user.id, com_retry=False)
+        self.assertEqual(post.call_count, 1)
+
+
+class RetencaoSincronizacoesTests(_Base):
+    def test_guarda_so_as_30_ultimas_por_cliente(self):
+        cliente = self._cliente("r-ret")
+        outro = self._cliente("r-outro")
+        SincronizacaoVersoesAgente.objects.bulk_create(
+            SincronizacaoVersoesAgente(cliente=cliente, status="concluida") for _ in range(40)
+        )
+        SincronizacaoVersoesAgente.objects.create(cliente=outro, status="concluida")
+        with patch("requests.post", return_value=_FakeResp(200, {"synced": 0, "retired": 0, "skipped": []})):
+            reg = SincronizadorVersoes(cliente).sincronizar()
+        restantes = SincronizacaoVersoesAgente.objects.filter(cliente=cliente)
+        self.assertEqual(restantes.count(), 30)
+        self.assertTrue(restantes.filter(pk=reg.pk).exists())  # o envio atual fica
+        self.assertEqual(SincronizacaoVersoesAgente.objects.filter(cliente=outro).count(), 1)
+
+
 class SincronizarTaskEViewTests(_Base):
     @patch("registry.cp_push.SincronizadorVersoes")
     def test_task_com_retry_false_nao_retenta(self, MockSinc):
