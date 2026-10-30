@@ -41,7 +41,7 @@
 
 - `registry.HostInfraestrutura`
   - nos do Docker Swarm por regiao (`anapolis`, `brasilia`);
-  - guarda `swarm_node_id`, `ip`, `tipo`, `cpu_total`, `ram_gb_total`;
+  - guarda `swarm_node_id`, `ip`, `tipo`; CPUs/memoria (`cpus_swarm`, `ram_bytes_swarm`, do Swarm) e disco (`disco_*_bytes`, do worker do CP no no) sao coletados pela verificacao de status, nao digitados (migration `0032`);
   - associado ao `Tenant` via FK; o placement do stack usa `node.labels.region == regiao`.
 
 - `registry.Tenant`

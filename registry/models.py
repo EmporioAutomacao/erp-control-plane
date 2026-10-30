@@ -85,12 +85,11 @@ class HostInfraestrutura(models.Model):
         Regiao, on_delete=models.PROTECT, db_column='regiao', related_name='hosts',
         verbose_name='Região',
     )
-    cpu_total = models.PositiveIntegerField()
-    ram_gb_total = models.PositiveIntegerField()
     ativo = models.BooleanField(default=True)
     observacoes = models.TextField(blank=True)
 
     # Sinalizador de saúde (registry/hosts.py): Swarm (manager) + resposta do worker do CP no nó.
+    # CPUs/memória (Swarm) e disco (worker) também vêm dessa verificação — não são digitados.
     STATUS_CHOICES = [
         ('online', 'Online'),
         ('atencao', 'Atenção'),
@@ -103,9 +102,9 @@ class HostInfraestrutura(models.Model):
     no_hostname = models.CharField('hostname do nó', max_length=100, blank=True)
     agente_respondeu_em = models.DateTimeField('worker do CP respondeu em', null=True, blank=True)
     disco_livre_bytes = models.BigIntegerField(null=True, blank=True)
-    disco_total_bytes = models.BigIntegerField(null=True, blank=True)
-    cpus_swarm = models.FloatField('CPUs (Swarm)', null=True, blank=True)
-    ram_bytes_swarm = models.BigIntegerField('RAM (Swarm)', null=True, blank=True)
+    disco_total_bytes = models.BigIntegerField('Disco', null=True, blank=True)
+    cpus_swarm = models.FloatField('CPUs', null=True, blank=True)
+    ram_bytes_swarm = models.BigIntegerField('Memória', null=True, blank=True)
     containers_clientes = models.PositiveIntegerField('containers de clientes', null=True, blank=True)
 
     class Meta:

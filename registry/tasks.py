@@ -718,6 +718,7 @@ def task_restaurar_no(self, cliente_id, backup_id, replicas_app=None, migracao_i
                 continue
             resultado = rodar_com_pulso(
                 log, f'Restauração de {rotulo}', restaurar_pasta_no_volume, slug, volume, pasta,
+                criar_se_ausente=bool(migracao_id),
             )
             if resultado.returncode != 0:
                 stderr = (resultado.stderr or b'').decode(errors='replace').strip()
@@ -896,6 +897,44 @@ def task_migracao_sondar(migracao_id, lado):
     except Exception as exc:
         dados['erro'] = str(exc)
     task_migracao_avancar.apply_async(args=[migracao_id, 'sonda', dados], queue='celery')
+
+
+@shared_task
+def task_migracao_limpar_residuais(migracao_id):
+    """Nó dos resíduos (fila `no.<volumes_residuais.no>`): remove os volumes que a migração deixou.
+
+    Recusa se rodar no nó errado ou se houver container do cliente em execução aqui (o cliente
+    voltou para este nó depois). O que não sair continua em `volumes_residuais`."""
+    import subprocess
+    from .models import MigracaoCliente
+    from .volumes import remover_volume
+
+    m = MigracaoCliente.objects.select_related('cliente').get(pk=migracao_id)
+    slug = m.cliente.slug
+    residuais = m.volumes_residuais or {}
+    log = _log_migracao(migracao_id)
+    hostname = _hostname_local()
+    if hostname != residuais.get('no'):
+        log.linha(f'Limpeza recusada: rodou em {hostname}, não em {residuais.get("no")}.')
+        return
+    rodando = subprocess.run(
+        ['docker', 'ps', '--filter', f'label=com.docker.stack.namespace={slug}', '--format', '{{.Names}}'],
+        capture_output=True, text=True, timeout=30,
+    )
+    if rodando.returncode != 0 or (rodando.stdout or '').strip():
+        motivo = (rodando.stdout or '').split() or [(rodando.stderr or '').strip()[:200]]
+        log.linha(f'Limpeza recusada: há containers do cliente rodando em {hostname} ({", ".join(motivo)}).')
+        return
+    restantes = []
+    for nome in residuais.get('volumes') or []:
+        ok, detalhe = remover_volume(nome)
+        log.linha(f'Volume {nome}: {detalhe}.')
+        if not ok:
+            restantes.append(nome)
+    MigracaoCliente.objects.filter(pk=migracao_id).update(
+        volumes_residuais={'no': residuais.get('no'), 'volumes': restantes} if restantes else None,
+    )
+    log.linha(f'Limpeza em {hostname} terminada' + (f'; ficaram: {", ".join(restantes)}.' if restantes else '.'))
 
 
 @shared_task

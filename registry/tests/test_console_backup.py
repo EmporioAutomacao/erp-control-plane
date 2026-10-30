@@ -11,9 +11,9 @@ from django.urls import reverse
 from django.utils import timezone
 
 from registry import storage_backup
-from registry.admin import ClienteAdmin, ProvisionamentoLogInline
+from registry.admin import ClienteAdmin, SincronizacaoVersoesAgenteInline
 from registry.log_operacao import LogOperacao, Progresso, fmt_bytes, rodar_com_pulso, tamanho_pasta
-from registry.models import BackupCliente, Cliente, Plano, ProvisionamentoLog
+from registry.models import BackupCliente, Cliente, Plano, SincronizacaoVersoesAgente
 from registry.tasks import task_backup_cliente, task_restaurar_no
 from registry.tests.helpers_storage import instalar_fake_bucket
 
@@ -480,33 +480,33 @@ class AbasDoClienteTests(_Base):
         self.assertIn('registry/abas_cliente.js', html)
 
     def test_historico_grande_nao_estoura_o_limite_de_campos_do_post(self):
-        # Regressão: centenas de logs viravam milhares de campos ocultos e o
-        # salvar do Cliente caía em TooManyFieldsSent.
-        ProvisionamentoLog.objects.bulk_create(
-            ProvisionamentoLog(cliente=self.cliente, etapa=f'etapa-{i}', status='concluido') for i in range(600)
+        # Regressão: centenas de sincronizações viravam milhares de campos ocultos
+        # e o salvar do Cliente caía em TooManyFieldsSent.
+        SincronizacaoVersoesAgente.objects.bulk_create(
+            SincronizacaoVersoesAgente(cliente=self.cliente, status='concluida') for _ in range(600)
         )
-        ultimo = ProvisionamentoLog.objects.filter(cliente=self.cliente).order_by('-pk').first()
+        ultimo = SincronizacaoVersoesAgente.objects.create(cliente=self.cliente, status='concluida')
+        p = 'sincronizacoes_versoes'
         html = self.c.get(reverse('admin:registry_cliente_change', args=[self.pk])).content.decode()
-        self.assertIn('name="logs-TOTAL_FORMS" value="30"', html)
-        self.assertIn('name="logs-29-id" value="', html)
-        self.assertNotIn('name="logs-30-id"', html)
+        self.assertIn(f'name="{p}-TOTAL_FORMS" value="30"', html)
+        self.assertIn(f'name="{p}-29-id" value="', html)
+        self.assertNotIn(f'name="{p}-30-id"', html)
         self.assertIn(f'value="{ultimo.pk}"', html)
 
         from django.contrib.admin.sites import site
-        inline = ProvisionamentoLogInline(Cliente, site)
-        request = SimpleNamespace(user=self.user)
-        FormSet = inline.get_formset(request, self.cliente)
+        inline = SincronizacaoVersoesAgenteInline(Cliente, site)
+        FormSet = inline.get_formset(SimpleNamespace(user=self.user), self.cliente)
         ids = [o.pk for o in FormSet(instance=self.cliente).get_queryset()]
         self.assertEqual(ids[0], ultimo.pk)  # mais recente primeiro
-        data = {'logs-TOTAL_FORMS': '30', 'logs-INITIAL_FORMS': '30',
-                'logs-MIN_NUM_FORMS': '0', 'logs-MAX_NUM_FORMS': '1000'}
+        data = {f'{p}-TOTAL_FORMS': '30', f'{p}-INITIAL_FORMS': '30',
+                f'{p}-MIN_NUM_FORMS': '0', f'{p}-MAX_NUM_FORMS': '1000'}
         for i, pk in enumerate(ids):
-            data[f'logs-{i}-id'] = str(pk)
-            data[f'logs-{i}-cliente'] = str(self.cliente.pk)
+            data[f'{p}-{i}-id'] = str(pk)
+            data[f'{p}-{i}-cliente'] = str(self.cliente.pk)
         fs = FormSet(data, instance=self.cliente)
         self.assertTrue(fs.is_valid(), fs.errors)
         fs.save()
-        self.assertEqual(ProvisionamentoLog.objects.filter(cliente=self.cliente).count(), 600)
+        self.assertEqual(SincronizacaoVersoesAgente.objects.filter(cliente=self.cliente).count(), 601)
 
     def test_pagina_de_adicionar_tambem_funciona(self):
         r = self.c.get(reverse('admin:registry_cliente_add'))

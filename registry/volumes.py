@@ -49,13 +49,57 @@ def copiar_volume_para_pasta(slug, volume, destino, timeout=600):
         subprocess.run(['docker', 'rm', '-f', cid], capture_output=True, timeout=60)
 
 
-def restaurar_pasta_no_volume(slug, volume, origem, timeout=600):
+def criar_volume(slug, volume):
+    """Cria o volume local com o rótulo do stack (o mesmo que o `docker stack deploy` põe)."""
+    return subprocess.run(
+        ['docker', 'volume', 'create', '--label', f'com.docker.stack.namespace={slug}', nome_volume(slug, volume)],
+        capture_output=True, timeout=60,
+    )
+
+
+_ESTADOS_EM_USO = ('running', 'restarting', 'paused')
+
+
+def remover_volume(nome, timeout=120):
+    """Remove o volume `nome` deste nó. (ok, detalhe).
+
+    Recusa se algum container em execução o monta. Containers parados que o referenciam
+    (tarefas antigas do Swarm, que ficam no histórico do nó) são removidos antes — sem isso o
+    `docker volume rm` falha com "volume is in use".
+    """
+    if subprocess.run(['docker', 'volume', 'inspect', nome], capture_output=True, timeout=30).returncode != 0:
+        return True, 'já não existia'
+    ps = subprocess.run(
+        ['docker', 'ps', '-a', '--filter', f'volume={nome}', '--format', '{{.ID}} {{.State}}'],
+        capture_output=True, text=True, timeout=30,
+    )
+    if ps.returncode != 0:
+        return False, f'docker ps falhou: {(ps.stderr or "").strip()[:200]}'
+    containers = [linha.split() for linha in (ps.stdout or '').splitlines() if linha.strip()]
+    em_uso = [c[0] for c in containers if len(c) > 1 and c[1] in _ESTADOS_EM_USO]
+    if em_uso:
+        return False, f'em uso por container em execução ({", ".join(em_uso)})'
+    if containers:
+        subprocess.run(['docker', 'rm', '-f', *[c[0] for c in containers]], capture_output=True, timeout=timeout)
+    r = subprocess.run(['docker', 'volume', 'rm', nome], capture_output=True, text=True, timeout=timeout)
+    if r.returncode != 0:
+        return False, (r.stderr or '').strip()[:300] or f'código {r.returncode}'
+    return True, 'removido'
+
+
+def restaurar_pasta_no_volume(slug, volume, origem, timeout=600, criar_se_ausente=False):
     """Substitui o conteúdo do volume pelo de `origem` (limpa e copia por `docker cp`).
 
-    O volume precisa existir (foi criado pelo stack). Devolve o `CompletedProcess` do primeiro
-    passo que falhar ou o do `docker cp`.
+    O volume precisa existir (foi criado pelo stack). `criar_se_ausente=True` só na migração de
+    servidor: o destino sobe com web/cron em 0 réplicas, e o Docker só cria `media`/`backups`
+    no nó quando um container que os monta inicia — lá o volume vazio é o esperado. Devolve o
+    `CompletedProcess` do primeiro passo que falhar ou o do `docker cp`.
     """
     alvo = f'{nome_volume(slug, volume)}:/dados'
+    if not volume_existe(slug, volume) and criar_se_ausente:
+        criado = criar_volume(slug, volume)
+        if criado.returncode != 0:
+            return criado
     if not volume_existe(slug, volume):
         return subprocess.CompletedProcess(
             args=['docker', 'volume', 'inspect', nome_volume(slug, volume)], returncode=1,

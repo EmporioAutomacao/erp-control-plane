@@ -25,7 +25,7 @@ class _Base(TestCase):
     def setUp(self):
         Regiao.objects.create(slug='hostinger', nome='Hostinger')
         self.host = HostInfraestrutura.objects.create(
-            nome='Hostinger8vCPU32gb400gb', ip='10.8.0.2', regiao_id='hostinger', cpu_total=8, ram_gb_total=32,
+            nome='Hostinger8vCPU32gb400gb', ip='10.8.0.2', regiao_id='hostinger',
             agente_respondeu_em=timezone.now(), disco_livre_bytes=300, disco_total_bytes=400,
         )
         self.no = _no()
@@ -141,8 +141,7 @@ class StatusTests(_Base):
 class TasksTests(_Base):
     def test_verificacao_periodica_pede_ping_na_fila_do_no(self):
         from registry.tasks import task_verificar_hosts
-        HostInfraestrutura.objects.create(nome='inativo', ip='10.0.0.9', regiao_id='anapolis', cpu_total=1,
-                                          ram_gb_total=1, ativo=False)
+        HostInfraestrutura.objects.create(nome='inativo', ip='10.0.0.9', regiao_id='anapolis', ativo=False)
         with patch('registry.tasks.task_pingar_host.apply_async') as ping:
             task_verificar_hosts()
         ping.assert_called_once_with(args=[self.host.pk, 'srv-hostinger'], queue='no.srv-hostinger', expires=240)
@@ -193,6 +192,33 @@ class AdminTests(_Base):
         self.assertIn('id="host-badge"', html)
         self.assertIn('Verificar agora', html)
         self.assertIn('Worker do CP respondeu', html)
+
+    def test_formulario_nao_pede_cpu_nem_memoria(self):
+        html = self.c.get(reverse('admin:registry_hostinfraestrutura_change', args=[self.host.pk])).content.decode()
+        self.assertNotIn('name="cpu_total"', html)
+        self.assertNotIn('name="ram_gb_total"', html)
+        self.assertNotIn('name="cpus_swarm"', html)
+
+    def test_lista_mostra_cpus_memoria_e_disco_coletados(self):
+        HostInfraestrutura.objects.filter(pk=self.host.pk).update(
+            cpus_swarm=8, ram_bytes_swarm=32 * 1024 ** 3,
+            disco_livre_bytes=300 * 1024 ** 3, disco_total_bytes=400 * 1024 ** 3,
+        )
+        html = self.c.get(reverse('admin:registry_hostinfraestrutura_changelist')).content.decode()
+        self.assertIn('32.0 GB', html)
+        self.assertIn('300.0 GB livres de 400.0 GB', html)
+
+    def test_lista_sem_coleta_mostra_traco_e_disco_baixo_em_vermelho(self):
+        from registry.admin import HostInfraestruturaAdmin
+        from django.contrib.admin.sites import site
+        admin_host = HostInfraestruturaAdmin(HostInfraestrutura, site)
+        vazio = HostInfraestrutura(nome='x', ip='10.0.0.1', regiao_id='hostinger')
+        self.assertEqual((admin_host.cpus_lista(vazio), admin_host.memoria_lista(vazio), admin_host.disco_lista(vazio)),
+                         ('—', '—', '—'))
+        cheio = HostInfraestrutura(nome='y', ip='10.0.0.1', regiao_id='hostinger', cpus_swarm=4,
+                                   disco_livre_bytes=10, disco_total_bytes=400)
+        self.assertEqual(admin_host.cpus_lista(cheio), '4')
+        self.assertIn('#b71c1c', admin_host.disco_lista(cheio))
 
     def test_verificar_json(self):
         with patch('registry.tasks.task_pingar_host.apply_async'):

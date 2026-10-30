@@ -208,7 +208,8 @@ def avaliar_sondas(sondas):
         return r
     existentes = destino.get('volumes_existentes') or []
     r['G9'] = {'ok': not existentes, 'detalhe': (
-        f'O destino já tem os volumes {", ".join(existentes)} (resíduo de outra migração?). Remova antes.'
+        f'O destino já tem os volumes {", ".join(existentes)} (resíduo de outra migração?). Remova antes '
+        f'(🧹 Remover agora, na página da migração que os deixou).'
         if existentes else 'Destino sem volumes do cliente.')}
     banco = int(origem.get('banco_bytes') or 0)
     volumes = sum(int(v or 0) for v in (origem.get('volumes_bytes') or {}).values())
@@ -590,6 +591,34 @@ def finalizar_reversao(migracao_id):
     if transicionar(migracao_id, 'revertendo', 'revertida', concluida_em=timezone.now(), volumes_residuais=residuais):
         extra = f' Volumes criados em {m.no_destino} ficaram para limpeza.' if residuais else ''
         log(migracao_id, f'REVERTIDA: o cliente continua na origem, com os dados de antes.{extra}')
+
+
+def limpar_residuais(migracao_id, usuario=None):
+    """Pede ao worker do nó dos resíduos a remoção dos volumes que a migração deixou.
+
+    Levanta `Recusa` se a migração ainda estiver ativa, se não houver resíduos, se o cliente
+    tiver outra operação em andamento ou se o banco do cliente estiver rodando justamente no
+    nó dos resíduos (seriam os dados em uso, não sobra)."""
+    from .nos import fila_do_no, hostname_do_no
+    from .tasks import task_migracao_limpar_residuais
+    m = _modelo().objects.select_related('cliente').get(pk=migracao_id)
+    residuais = m.volumes_residuais or {}
+    if m.ativa:
+        raise Recusa('a migração ainda está em andamento')
+    if not residuais.get('volumes') or not residuais.get('no'):
+        raise Recusa('não há volumes residuais registrados')
+    ocupado = operacao_ativa(m.cliente)
+    if ocupado:
+        raise Recusa(ocupado)
+    atual = hostname_do_no(m.cliente.slug, 'db')
+    if not atual:
+        raise Recusa(f'não foi possível confirmar onde {m.cliente.slug}_db roda agora')
+    if atual == residuais['no']:
+        raise Recusa(f'{m.cliente.slug}_db está rodando em {atual}: esses volumes são os dados em uso')
+    quem = getattr(usuario, 'username', '') or 'usuário'
+    log(migracao_id, f'Limpeza dos volumes residuais pedida por {quem}: {", ".join(residuais["volumes"])} '
+                     f'em {residuais["no"]} (o cliente roda em {atual}).')
+    task_migracao_limpar_residuais.apply_async(args=[migracao_id], queue=fila_do_no(residuais['no']))
 
 
 def interromper(migracao_id, usuario=None):

@@ -65,9 +65,9 @@ class _Base(TestCase):
         self.plano = Plano.objects.create(slug='basico-mig', nome='Basico Mig', preco_mensal='0.00')
         self.regiao_b = Regiao.objects.create(slug='hostinger', nome='Hostinger')
         self.host_a = HostInfraestrutura.objects.create(
-            nome='host-a', ip='10.0.0.1', regiao_id='anapolis', cpu_total=4, ram_gb_total=8)
+            nome='host-a', ip='10.0.0.1', regiao_id='anapolis')
         self.host_b = HostInfraestrutura.objects.create(
-            nome='host-b', ip='10.0.0.2', regiao=self.regiao_b, cpu_total=8, ram_gb_total=32)
+            nome='host-b', ip='10.0.0.2', regiao=self.regiao_b)
         self.cliente = Cliente.objects.create(
             slug='acme', nome='Acme', cnpj='11.222.333/0001-44', email_contato='acme@example.com',
             subdominio='acme.ararasuite.com.br', plano=self.plano, host=self.host_a, status='ativo',
@@ -592,6 +592,22 @@ class AdminTests(_Base):
         self.c.post(reverse('admin:registry_migracaocliente_interromper', args=[self.m.pk]))
         self.assertEqual(MigracaoCliente.objects.get(pk=self.m.pk).status, 'falhou_sem_alteracao')
 
+    def test_pagina_da_migracao_atualiza_so_as_partes_sem_recarregar(self):
+        self._com_migracao_ativa()
+        html = self.c.get(reverse('admin:registry_migracaocliente_change', args=[self.m.pk])).content.decode()
+        self.assertNotIn('location.reload', html)
+        for parte in ('mig-cabecalho', 'mig-log', 'mig-verificacoes', 'mig-acoes'):
+            self.assertIn(f'id="{parte}"', html)
+        self.assertIn(reverse('admin:registry_migracaocliente_andamento', args=[self.m.pk]), html)
+
+        MigracaoCliente.objects.filter(pk=self.m.pk).update(log='[02:40:09] linha <nova>')
+        d = self.c.get(reverse('admin:registry_migracaocliente_andamento', args=[self.m.pk])).json()
+        self.assertTrue(d['ativa'])
+        self.assertEqual(d['log'], '[02:40:09] linha <nova>')  # texto cru: o JS usa textContent
+        self.assertIn('acme', d['cabecalho'])
+        self.assertIn('Interromper e voltar para a origem', d['acoes'])
+        self.assertIn('<table', d['verificacoes'])
+
 
 class TasksAdiadasTests(_Base):
     def test_suspender_durante_a_migracao_e_adiado(self):
@@ -611,7 +627,7 @@ class ModoMigracaoProvisionamentoTests(TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         plano = Plano.objects.create(slug='basico-prov', nome='Basico Prov', preco_mensal='0.00')
-        host = HostInfraestrutura.objects.create(nome='h', ip='10.0.0.9', regiao_id='brasilia', cpu_total=1, ram_gb_total=1)
+        host = HostInfraestrutura.objects.create(nome='h', ip='10.0.0.9', regiao_id='brasilia')
         self.cliente = Cliente.objects.create(
             slug='acme', nome='Acme', cnpj='11.222.333/0001-44', email_contato='acme@example.com',
             subdominio='acme.ararasuite.com.br', plano=plano, host=host, status='suspenso', versao_erp='0.0.143',
@@ -661,6 +677,149 @@ class ModoMigracaoProvisionamentoTests(TestCase):
         self.cliente.refresh_from_db()
         self.assertEqual(self.cliente.status, 'suspenso')
         self.assertIsNone(self.cliente.data_ativacao)
+
+
+class LimparResiduaisTests(_Base):
+    VOLUMES = ['acme_pgdata', 'acme_media', 'acme_backups']
+
+    def _revertida(self):
+        self.iniciar()
+        MigracaoCliente.objects.filter(pk=self.m.pk).update(
+            status='revertida', volumes_residuais={'no': 'no-b', 'volumes': self.VOLUMES})
+        return self.recarregar()
+
+    def _pedir(self, onde_roda='no-a'):
+        with patch('registry.nos.hostname_do_no', return_value=onde_roda), \
+                patch('registry.tasks.task_migracao_limpar_residuais.apply_async') as enviar:
+            migracao.limpar_residuais(self.m.pk, self.user)
+        return enviar
+
+    def test_envia_para_a_fila_do_no_dos_residuos(self):
+        self._revertida()
+        enviar = self._pedir()
+        enviar.assert_called_once_with(args=[self.m.pk], queue='no.no-b')
+        self.assertIn('Limpeza dos volumes residuais pedida por mig', self.recarregar().log)
+
+    def test_recusa_se_o_banco_do_cliente_roda_no_no_dos_residuos(self):
+        self._revertida()
+        with self.assertRaisesMessage(migracao.Recusa, 'dados em uso'):
+            self._pedir(onde_roda='no-b')
+
+    def test_recusa_sem_saber_onde_o_cliente_roda(self):
+        self._revertida()
+        with self.assertRaises(migracao.Recusa):
+            self._pedir(onde_roda=None)
+
+    def test_recusa_com_migracao_ativa(self):
+        self.iniciar()
+        MigracaoCliente.objects.filter(pk=self.m.pk).update(volumes_residuais={'no': 'no-b', 'volumes': self.VOLUMES})
+        with self.assertRaisesMessage(migracao.Recusa, 'em andamento'):
+            self._pedir()
+
+    def _rodar_no_no(self, hostname='no-b', rodando='', remover=lambda nome: (True, 'removido')):
+        from registry.tasks import task_migracao_limpar_residuais
+        with patch.dict('os.environ', {'NODE_HOSTNAME': hostname}), \
+                patch('registry.volumes.remover_volume', side_effect=remover) as rm, \
+                patch('subprocess.run', return_value=SimpleNamespace(returncode=0, stdout=rodando, stderr='')):
+            task_migracao_limpar_residuais(self.m.pk)
+        return rm
+
+    def test_no_remove_tudo_e_zera_os_residuais(self):
+        self._revertida()
+        rm = self._rodar_no_no()
+        self.assertEqual([c.args[0] for c in rm.call_args_list], self.VOLUMES)
+        m = self.recarregar()
+        self.assertIsNone(m.volumes_residuais)
+        self.assertIn('Limpeza em no-b terminada.', m.log)
+
+    def test_no_mantem_o_que_nao_saiu(self):
+        self._revertida()
+        self._rodar_no_no(remover=lambda nome: (nome != 'acme_media', 'em uso'))
+        self.assertEqual(self.recarregar().volumes_residuais, {'no': 'no-b', 'volumes': ['acme_media']})
+
+    def test_no_errado_ou_cliente_rodando_aqui_nao_remove_nada(self):
+        self._revertida()
+        self.assertFalse(self._rodar_no_no(hostname='no-a').called)
+        self.assertFalse(self._rodar_no_no(rodando='acme_db.1.x\n').called)
+        self.assertEqual(self.recarregar().volumes_residuais['volumes'], self.VOLUMES)
+
+    def test_admin_mostra_o_botao_e_pede_a_limpeza(self):
+        self._revertida()
+        c = Client()
+        c.force_login(self.user)
+        url = reverse('admin:registry_migracaocliente_change', args=[self.m.pk])
+        self.assertIn('Remover agora', c.get(url).content.decode())
+        with patch('registry.nos.hostname_do_no', return_value='no-a'), \
+                patch('registry.tasks.task_migracao_limpar_residuais.apply_async') as enviar:
+            r = c.post(reverse('admin:registry_migracaocliente_limpar_residuais', args=[self.m.pk]))
+        enviar.assert_called_once()
+        self.assertEqual(r.url, url + '?limpando=1')
+
+
+class RemoverVolumeTests(SimpleTestCase):
+    def _rodar(self, containers):
+        from registry import volumes
+        chamadas = []
+
+        def fake_run(cmd, **_):
+            chamadas.append(cmd)
+            if cmd[:3] == ['docker', 'ps', '-a']:
+                return SimpleNamespace(returncode=0, stdout=containers, stderr='')
+            return SimpleNamespace(returncode=0, stdout='', stderr='')
+
+        with patch('registry.volumes.subprocess.run', side_effect=fake_run):
+            return volumes.remover_volume('acme_media'), chamadas
+
+    def test_container_em_execucao_impede(self):
+        (ok, detalhe), chamadas = self._rodar('abc running\n')
+        self.assertFalse(ok)
+        self.assertIn('em execução', detalhe)
+        self.assertFalse(any(c[:3] == ['docker', 'volume', 'rm'] for c in chamadas))
+
+    def test_tarefas_paradas_saem_antes_do_volume(self):
+        (ok, _), chamadas = self._rodar('abc exited\ndef created\n')
+        self.assertTrue(ok)
+        self.assertIn(['docker', 'rm', '-f', 'abc', 'def'], chamadas)
+        self.assertEqual(chamadas[-1], ['docker', 'volume', 'rm', 'acme_media'])
+
+
+class RestaurarVolumeNoDestinoTests(SimpleTestCase):
+    """O destino sobe com web/cron em 0: o Docker não cria media/backups no nó (nenhum container
+    os montou). Na migração o volume é criado vazio; fora dela, ausência continua sendo erro."""
+
+    def _rodar(self, existe_inicial, **kw):
+        from registry import volumes
+        estado = {'existe': existe_inicial}
+        chamadas = []
+
+        def fake_run(cmd, **_):
+            chamadas.append(cmd)
+            if cmd[:3] == ['docker', 'volume', 'inspect']:
+                return SimpleNamespace(returncode=0 if estado['existe'] else 1, stdout=b'', stderr=b'')
+            if cmd[:3] == ['docker', 'volume', 'create']:
+                estado['existe'] = True
+            return SimpleNamespace(returncode=0, stdout=b'cid', stderr=b'')
+
+        with patch('registry.volumes.subprocess.run', side_effect=fake_run):
+            r = volumes.restaurar_pasta_no_volume('demo', 'media', '/tmp/x', **kw)
+        return r, chamadas
+
+    def test_migracao_cria_o_volume_ausente_com_o_rotulo_do_stack(self):
+        r, chamadas = self._rodar(False, criar_se_ausente=True)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn(['docker', 'volume', 'create', '--label', 'com.docker.stack.namespace=demo', 'demo_media'],
+                      chamadas)
+        self.assertTrue(any(c[:2] == ['docker', 'cp'] for c in chamadas))
+
+    def test_restauracao_normal_continua_recusando_volume_ausente(self):
+        r, chamadas = self._rodar(False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('não existe neste nó', r.stderr.decode())
+        self.assertFalse(any(c[:3] == ['docker', 'volume', 'create'] for c in chamadas))
+
+    def test_volume_existente_nao_e_recriado(self):
+        _, chamadas = self._rodar(True, criar_se_ausente=True)
+        self.assertFalse(any(c[:3] == ['docker', 'volume', 'create'] for c in chamadas))
 
 
 class TasksDoNoTests(_Base):

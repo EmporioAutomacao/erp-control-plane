@@ -131,6 +131,7 @@ Necessárias para a migração e aproveitadas pelo backup/restauração comuns:
 - Restauração comum para e religa também o `cron` e devolve as réplicas originais (A2, A4).
 - SHA-256 gravado no backup e conferido no download (A9).
 - `executar(modo_migracao=...)`: réplicas 0, Traefik desligado, preserva status/data e exige o `.env` (A5, A6).
+- Com web/cron em 0 o Docker só cria no destino o volume do `_db`; `media`/`backups` não existem lá. A restauração da migração cria esses volumes vazios (`criar_se_ausente=True`, rótulo `com.docker.stack.namespace`) antes de copiar. Fora da migração, volume ausente continua sendo aviso. Os volumes que a migração deixa (destino numa volta, origem numa conclusão) saem pelo botão 🧹 Remover agora da página da migração, com as travas descritas no `CLAUDE.md` (cliente não pode rodar no nó dos resíduos; container em execução usando o volume impede). Achado em produção (0.0.53, `demo` anapolis → hostinger: "volume demo_media não existe neste nó"; voltou para a origem intacta).
 
 ## 7. Pré-requisitos de um servidor novo
 

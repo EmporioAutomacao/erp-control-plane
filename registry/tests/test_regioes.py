@@ -8,7 +8,7 @@ from registry.provisioning import MotorProvisionamento
 
 
 def _host(regiao, nome='host-1'):
-    return HostInfraestrutura.objects.create(nome=nome, ip='10.0.0.1', regiao=regiao, cpu_total=8, ram_gb_total=32)
+    return HostInfraestrutura.objects.create(nome=nome, ip='10.0.0.1', regiao=regiao)
 
 
 class RegiaoModeloTests(TestCase):

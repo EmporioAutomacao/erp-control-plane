@@ -79,11 +79,12 @@ def _host_pill(status, elemento_id=''):
 
 @admin.register(HostInfraestrutura)
 class HostInfraestruturaAdmin(ModelAdmin):
-    list_display = ['nome', 'status_lista', 'regiao', 'tipo', 'ip', 'cpu_total', 'ram_gb_total', 'verificado_quando', 'ativo']
+    list_display = ['nome', 'status_lista', 'regiao', 'tipo', 'ip', 'cpus_lista', 'memoria_lista', 'disco_lista',
+                    'verificado_quando', 'ativo']
     list_filter = ['status_conexao', 'regiao', 'tipo', 'ativo']
     readonly_fields = ['status_painel', 'botao_verificar']
     fieldsets = [
-        ('Cadastro', {'fields': ['nome', 'regiao', 'tipo', 'ip', 'swarm_node_id', 'cpu_total', 'ram_gb_total', 'ativo', 'observacoes']}),
+        ('Cadastro', {'fields': ['nome', 'regiao', 'tipo', 'ip', 'swarm_node_id', 'ativo', 'observacoes']}),
         ('Status', {'fields': ['status_painel', 'botao_verificar']}),
     ]
 
@@ -132,6 +133,27 @@ class HostInfraestruturaAdmin(ModelAdmin):
         from django.utils.timesince import timesince
         return f'há {timesince(obj.verificado_em)}' if obj.verificado_em else '—'
 
+    # CPUs/memória vêm do Swarm e disco do worker do CP no nó (registry/hosts.py) — nada é digitado.
+    @admin.display(description='CPUs', ordering='cpus_swarm')
+    def cpus_lista(self, obj):
+        return f'{obj.cpus_swarm:g}' if obj.cpus_swarm else '—'
+
+    @admin.display(description='Memória', ordering='ram_bytes_swarm')
+    def memoria_lista(self, obj):
+        from .log_operacao import fmt_bytes
+        return fmt_bytes(obj.ram_bytes_swarm) if obj.ram_bytes_swarm else '—'
+
+    @admin.display(description='Disco', ordering='disco_total_bytes')
+    def disco_lista(self, obj):
+        from .hosts import DISCO_LIVRE_MINIMO
+        from .log_operacao import fmt_bytes
+        if not obj.disco_total_bytes or obj.disco_livre_bytes is None:
+            return '—'
+        texto = f'{fmt_bytes(obj.disco_livre_bytes)} livres de {fmt_bytes(obj.disco_total_bytes)}'
+        if obj.disco_livre_bytes / obj.disco_total_bytes < DISCO_LIVRE_MINIMO:
+            return format_html('<span style="color:#b71c1c;font-weight:600;">{}</span>', texto)
+        return texto
+
     @admin.display(description='Status')
     def status_painel(self, obj):
         if not obj or not obj.pk:
@@ -146,8 +168,8 @@ class HostInfraestruturaAdmin(ModelAdmin):
 
         linhas = [
             ('Nó no Swarm', f'{obj.no_hostname or "—"} ({obj.swarm_node_id or "sem ID"})'),
-            ('CPU / RAM no Swarm', (f'{obj.cpus_swarm:g} CPUs / {fmt_bytes(obj.ram_bytes_swarm)}'
-                                    if obj.cpus_swarm else '—') + f' (cadastrado: {obj.cpu_total} CPUs / {obj.ram_gb_total} GB)'),
+            ('CPUs / Memória', f'{obj.cpus_swarm:g} CPUs / {fmt_bytes(obj.ram_bytes_swarm)}'
+                               if obj.cpus_swarm else '—'),
             ('Disco do Docker', f'{fmt_bytes(obj.disco_livre_bytes)} livres de {fmt_bytes(obj.disco_total_bytes)}'
                                 if obj.disco_total_bytes else '—'),
             ('Clientes neste nó', '—' if obj.containers_clientes is None else str(obj.containers_clientes)),
@@ -183,7 +205,7 @@ class HostInfraestruturaAdmin(ModelAdmin):
             '<a href="{}" style="display:inline-block;padding:6px 14px;background:#0369a1;color:#fff;border-radius:4px;'
             'text-decoration:none;font-size:13px;">🔌 Verificar agora</a>'
             '<p style="margin-top:6px;font-size:12px;color:#6b7280;">Também é verificado automaticamente a cada 5 minutos. '
-            'Online exige o nó Ready/Active no Swarm e o worker do CP respondendo nele.</p>',
+            'CPUs, memória e disco são coletados nessa verificação (Swarm e worker do CP no nó). Online exige o nó Ready/Active no Swarm e o worker do CP respondendo nele.</p>',
             reverse('admin:registry_hostinfraestrutura_verificar_agora', args=[obj.pk]),
         )
 
@@ -238,30 +260,21 @@ class _UltimosRegistrosFormSet(BaseInlineFormSet):
     """Histórico somente leitura limitado aos registros mais recentes.
 
     Cada linha de um inline vai no POST do change form (id + FK ocultos); com
-    centenas de logs/sincronizações o salvar do Cliente estourava
-    DATA_UPLOAD_MAX_NUMBER_FIELDS (TooManyFieldsSent).
+    centenas de sincronizações o salvar do Cliente estourava
+    DATA_UPLOAD_MAX_NUMBER_FIELDS (TooManyFieldsSent). Os logs de provisionamento
+    não precisam: são uma linha por etapa (MotorProvisionamento._log).
     """
     limite = 30
-    ordem = None
 
     def get_queryset(self):
         if not hasattr(self, '_ultimos'):
-            qs = super().get_queryset()
-            if self.ordem:
-                qs = qs.order_by(*self.ordem)
-            self._ultimos = qs[:self.limite]
+            self._ultimos = super().get_queryset()[:self.limite]
         return self._ultimos
-
-
-def _formset_ultimos(*ordem):
-    return type('UltimosRegistrosFormSet', (_UltimosRegistrosFormSet,), {'ordem': ordem or None})
 
 
 class ProvisionamentoLogInline(admin.TabularInline):  # noqa: keep django TabularInline (unfold doesn't override it)
     tab = True
     model = ProvisionamentoLog
-    formset = _formset_ultimos('-iniciado_em', '-pk')
-    verbose_name_plural = 'Logs de provisionamento (últimos 30)'
     extra = 0
     readonly_fields = ['etapa', 'status_colorido', 'mensagem', 'iniciado_em', 'concluido_em']
     fields = ['etapa', 'status_colorido', 'mensagem', 'iniciado_em', 'concluido_em']
@@ -280,7 +293,7 @@ class ProvisionamentoLogInline(admin.TabularInline):  # noqa: keep django Tabula
 class AtualizacaoVersaoInline(admin.TabularInline):
     tab = True
     model = AtualizacaoVersao
-    formset = _formset_ultimos()
+    formset = _UltimosRegistrosFormSet
     extra = 0
     readonly_fields = ['versao_anterior', 'versao_nova', 'status', 'iniciada_em', 'concluida_em']
     can_delete = False
@@ -289,7 +302,7 @@ class AtualizacaoVersaoInline(admin.TabularInline):
 class SincronizacaoVersoesAgenteInline(admin.TabularInline):
     tab = True
     model = SincronizacaoVersoesAgente
-    formset = _formset_ultimos()
+    formset = _UltimosRegistrosFormSet
     extra = 0
     fields = ['iniciada_em', 'status_badge', 'iniciada_por', 'versoes_fmt', 'resposta_http_status', 'log_fmt', 'concluida_em']
     readonly_fields = fields
@@ -453,7 +466,36 @@ class MigracaoClienteAdmin(ModelAdmin):
         return [
             path('<pk>/interromper/', self.admin_site.admin_view(self._view_interromper),
                  name='registry_migracaocliente_interromper'),
+            path('<pk>/andamento/', self.admin_site.admin_view(self._view_andamento),
+                 name='registry_migracaocliente_andamento'),
+            path('<pk>/limpar-residuais/', self.admin_site.admin_view(self._view_limpar_residuais),
+                 name='registry_migracaocliente_limpar_residuais'),
         ] + super().get_urls()
+
+    def _view_limpar_residuais(self, request, pk):
+        from django.contrib import messages
+        from django.urls import reverse
+        from . import migracao
+        if request.method != 'POST':
+            return redirect('admin:registry_migracaocliente_change', pk)
+        if not request.user.is_superuser:
+            raise Http404
+        m = get_object_or_404(MigracaoCliente, pk=pk)
+        try:
+            migracao.limpar_residuais(m.pk, request.user)
+        except migracao.Recusa as exc:
+            messages.error(request, f'Limpeza recusada (nada foi removido): {exc}.')
+        else:
+            messages.success(request, 'Limpeza enviada ao worker do nó; o resultado aparece no log abaixo.')
+            return redirect(reverse('admin:registry_migracaocliente_change', args=[pk]) + '?limpando=1')
+        return redirect('admin:registry_migracaocliente_change', pk)
+
+    def _view_andamento(self, request, pk):
+        """JSON das partes do painel; a tela consulta enquanto a migração está ativa e troca só o que mudou."""
+        if not self.has_view_permission(request):
+            raise Http404
+        m = get_object_or_404(MigracaoCliente.objects.select_related('cliente'), pk=pk)
+        return JsonResponse({'ativa': m.ativa, 'log': m.log or '—', **{k: str(v) for k, v in self._partes(m).items()}})
 
     def _view_interromper(self, request, pk):
         from django.contrib import messages
@@ -472,8 +514,8 @@ class MigracaoClienteAdmin(ModelAdmin):
         cor = _MIGRACAO_CORES.get(obj.status, '#6a1b9a')
         return format_html('<strong style="color:{};">{}</strong>', cor, obj.get_status_display())
 
-    @admin.display(description='Migração')
-    def painel(self, obj):
+    def _partes(self, obj):
+        """HTML das partes do painel que mudam durante a migração (o log vai à parte, como texto)."""
         from django.urls import reverse
         gates = (obj.verificacoes or {}).get('gates') or {}
         linhas_gates = ''.join(
@@ -483,49 +525,86 @@ class MigracaoClienteAdmin(ModelAdmin):
         )
         interromper = ''
         if obj.status in MigracaoCliente.STATUS_ANTES_DO_PONTO_SEM_VOLTA:
-            # A página já está dentro do <form> do admin: o POST é montado por JS (CSRF do cookie).
             interromper = format_html(
                 '<button type="button" data-url="{}" style="margin-top:12px;padding:6px 14px;background:#ba2121;'
-                'color:#fff;border:0;border-radius:4px;" onclick="interromperMigracao(this.dataset.url)">'
-                '⏹ Interromper e voltar para a origem</button>{}',
+                'color:#fff;border:0;border-radius:4px;" '
+                'onclick="postarMigracao(this.dataset.url, \'Interromper e voltar o cliente para a origem?\')">'
+                '⏹ Interromper e voltar para a origem</button>',
                 reverse('admin:registry_migracaocliente_interromper', args=[obj.pk]),
-                mark_safe(
-                    '<script>function interromperMigracao(url) {'
-                    ' if (!confirm("Interromper e voltar o cliente para a origem?")) return;'
-                    ' var f = document.createElement("form"); f.method = "post"; f.action = url;'
-                    ' var t = document.createElement("input"); t.type = "hidden"; t.name = "csrfmiddlewaretoken";'
-                    ' t.value = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || "";'
-                    ' f.appendChild(t); document.body.appendChild(f); f.submit(); }</script>'
-                ),
             )
-        recarregar = mark_safe('<script>setTimeout(function(){location.reload();}, 5000);</script>') if obj.ativa else ''
         residuais = ''
         if obj.volumes_residuais:
+            no, volumes = obj.volumes_residuais.get('no'), ' '.join(obj.volumes_residuais.get('volumes') or [])
+            limpar = ''
+            if not obj.ativa:
+                limpar = format_html(
+                    ' <button type="button" data-url="{}" data-pergunta="{}" style="margin-left:8px;padding:3px 10px;'
+                    'background:#6a1b9a;color:#fff;border:0;border-radius:4px;font-size:12px;" '
+                    'onclick="postarMigracao(this.dataset.url, this.dataset.pergunta)">🧹 Remover agora</button>',
+                    reverse('admin:registry_migracaocliente_limpar_residuais', args=[obj.pk]),
+                    f'Apagar de vez os volumes {volumes} do nó {no}? O cliente não roda lá; não há como desfazer.',
+                )
             residuais = format_html(
-                '<p><strong>Volumes residuais</strong> em <code>{}</code> (remover à mão quando quiser): <code>{}</code></p>',
-                obj.volumes_residuais.get('no'), ' '.join(obj.volumes_residuais.get('volumes') or []),
+                '<p><strong>Volumes residuais</strong> em <code>{}</code>: <code>{}</code>{}</p>', no, volumes, limpar,
             )
-        return format_html(
-            '<div style="font-size:13px;line-height:1.6;">'
-            '<p><strong>{}</strong>: {} ({}) → {} ({}) · status <strong style="color:{};">{}</strong>'
-            '{}</p>'
-            '{}'
-            '{}'
-            '<p style="margin-top:10px;"><strong>Log</strong></p>'
-            '<pre style="max-height:420px;overflow:auto;padding:10px;background:#0b1220;color:#cbd5e1;border-radius:6px;'
-            'font-size:12px;white-space:pre-wrap;">{}</pre>'
-            '<p style="margin-top:10px;"><strong>Verificações</strong></p>'
-            '<table style="font-size:12px;">{}</table>'
-            '{}{}</div>',
+        cabecalho = format_html(
+            '<p><strong>{}</strong>: {} ({}) → {} ({}) · status <strong style="color:{};">{}</strong>{}</p>{}{}',
             obj.cliente.slug, obj.regiao_origem, obj.no_origem, obj.regiao_destino, obj.no_destino,
             _MIGRACAO_CORES.get(obj.status, '#6a1b9a'), obj.get_status_display(),
             format_html(' · ponto sem volta em {:%d/%m %H:%M:%S}', obj.ponto_sem_volta_em) if obj.ponto_sem_volta_em else '',
             format_html('<p style="color:#b71c1c;white-space:pre-wrap;"><strong>Motivo:</strong> {}</p>', obj.mensagem_erro)
             if obj.mensagem_erro else '',
             residuais,
-            obj.log or '—',
-            mark_safe(linhas_gates),
-            interromper, recarregar,
+        )
+        verificacoes = format_html('<table style="font-size:12px;"><tbody>{}</tbody></table>', mark_safe(linhas_gates))
+        return {'cabecalho': cabecalho, 'verificacoes': verificacoes, 'acoes': interromper}
+
+    @admin.display(description='Migração')
+    def painel(self, obj):
+        import json
+        from django.urls import reverse
+        partes = self._partes(obj)
+        # A página já está dentro do <form> do admin: os POSTs (Interromper, Remover resíduos) são montados por
+        # JS (CSRF do cookie). Enquanto ativa, consulta `andamento/` e troca só a parte que mudou; o log rola só
+        # se já estava no fim.
+        script = (
+            '(function(){'
+            'window.postarMigracao=function(url,pergunta){'
+            'if(!confirm(pergunta))return;'
+            'var f=document.createElement("form");f.method="post";f.action=url;'
+            'var t=document.createElement("input");t.type="hidden";t.name="csrfmiddlewaretoken";'
+            't.value=(document.cookie.match(/csrftoken=([^;]+)/)||[])[1]||"";'
+            'f.appendChild(t);document.body.appendChild(f);f.submit();};'
+            'var log=document.getElementById("mig-log");log.scrollTop=log.scrollHeight;'
+            # Depois do "Remover agora" (?limpando=1) acompanha até o worker do nó escrever o fim da limpeza.
+            'var fimLimpeza=/Limpeza (em .* terminada|recusada)/g;'
+            'function nFim(t){return (t.match(fimLimpeza)||[]).length;}'
+            'var limpando=location.search.indexOf("limpando=1")>=0,n0=nFim(log.textContent),limite=Date.now()+180000;'
+            'function seguir(d){return d.ativa||(limpando&&nFim(d.log)<=n0&&Date.now()<limite);}'
+            'if(!' + json.dumps(obj.ativa) + '&&!limpando)return;'
+            'var url=' + json.dumps(reverse('admin:registry_migracaocliente_andamento', args=[obj.pk])) + ';'
+            'function troca(id,html){var e=document.getElementById(id);if(e.innerHTML!==html)e.innerHTML=html;}'
+            'function consultar(){'
+            'fetch(url,{credentials:"same-origin",cache:"no-store"}).then(function(r){'
+            'if(!r.ok)throw new Error(r.status);return r.json();}).then(function(d){'
+            'if(log.textContent!==d.log){var fim=log.scrollHeight-log.scrollTop-log.clientHeight<20;'
+            'log.textContent=d.log;if(fim)log.scrollTop=log.scrollHeight;}'
+            'troca("mig-cabecalho",d.cabecalho);troca("mig-verificacoes",d.verificacoes);troca("mig-acoes",d.acoes);'
+            'if(seguir(d))setTimeout(consultar,3000);'
+            '}).catch(function(){setTimeout(consultar,5000);});}'
+            'setTimeout(consultar,3000);'
+            '})();'
+        )
+        return format_html(
+            '<div style="font-size:13px;line-height:1.6;">'
+            '<div id="mig-cabecalho">{}</div>'
+            '<p style="margin-top:10px;"><strong>Log</strong></p>'
+            '<pre id="mig-log" style="max-height:420px;overflow:auto;padding:10px;background:#0b1220;color:#cbd5e1;'
+            'border-radius:6px;font-size:12px;white-space:pre-wrap;">{}</pre>'
+            '<p style="margin-top:10px;"><strong>Verificações</strong></p>'
+            '<div id="mig-verificacoes">{}</div>'
+            '<div id="mig-acoes">{}</div><script>{}</script></div>',
+            partes['cabecalho'], obj.log or '—', partes['verificacoes'], partes['acoes'], mark_safe(script),
         )
 
 
