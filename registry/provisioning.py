@@ -168,9 +168,11 @@ class MotorProvisionamento:
             check=True,
         )
         versoes.registrar_versao_vista(self.cliente.pk, versao_nova)
-        self._aguardar_servico(f'{slug}_web', timeout=120)
-        if CHECK_HTTP_HEALTH:
-            self._aguardar_http(f'https://{subdominio}/health/', timeout=120)
+        # Fora do ar o web fica em 0 e continua assim: não há o que esperar. As migrations rodam ao religar.
+        if not self._fora_do_ar():
+            self._aguardar_servico(f'{slug}_web', timeout=120)
+            if CHECK_HTTP_HEALTH:
+                self._aguardar_http(f'https://{subdominio}/health/', timeout=120)
         # Só depois do web, que roda as migrations no entrypoint: o cron nunca
         # fica com código antigo contra o schema novo (era o que matava o loop).
         self.sincronizar_servico_cron(versao_nova)
@@ -201,7 +203,7 @@ class MotorProvisionamento:
                 '--label', f'com.docker.stack.namespace={slug}',
                 '--container-label', f'com.docker.stack.namespace={slug}',
                 '--network', f'{slug}_internal',
-                '--replicas', '1',
+                '--replicas', '0' if self._fora_do_ar() else '1',
                 '--restart-condition', 'any', '--restart-delay', '60s', '--restart-window', '120s',
                 '--entrypoint', ' '.join(CRON_COMANDO),
             ]
@@ -245,10 +247,15 @@ class MotorProvisionamento:
             shutil.rmtree(cliente_dir)
         self.cliente.delete()
 
+    def _fora_do_ar(self):
+        from .models import Cliente
+        return self.cliente.status in Cliente.STATUS_FORA_DO_AR
+
     def suspender(self):
         subprocess.run(['docker', 'service', 'scale', f'{self.cliente.slug}_web=0'], check=True)
         # Cliente suspenso não pode continuar disparando WhatsApp/e-mail pelo cron.
-        subprocess.run(['docker', 'service', 'scale', f'{self.cliente.slug}_cron=0'], capture_output=True)
+        if self._spec_servico(f'{self.cliente.slug}_cron', obrigatorio=False) is not None:
+            subprocess.run(['docker', 'service', 'scale', f'{self.cliente.slug}_cron=0'], check=True)
 
     def reativar(self):
         subprocess.run(['docker', 'service', 'scale', f'{self.cliente.slug}_web=1'], check=True)

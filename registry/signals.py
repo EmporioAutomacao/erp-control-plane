@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
@@ -70,6 +71,28 @@ def _cliente_plano_ou_status_alterado(sender, instance, created, **kwargs):
 
     from .tasks import task_sincronizar_plano_cliente
     task_sincronizar_plano_cliente.delay(str(instance.pk))
+
+
+@receiver(post_save, sender='registry.Cliente')
+def _cliente_entrou_ou_saiu_do_ar(sender, instance, created, **kwargs):
+    """Status mudou no admin entre "no ar" e "fora do ar" -> para ou religa web e cron.
+
+    O on_commit importa: o admin salva dentro de uma transacao e a task confere
+    o status gravado, que ainda seria o antigo se ela rodasse antes do commit.
+    Cliente nunca implantado nao cai aqui: o status anterior e de provisionamento."""
+    if created:
+        return
+    from .tasks import task_reativar_cliente, task_suspender_cliente
+
+    anterior = getattr(instance, '_status_anterior', None)
+    if anterior in sender.STATUS_NO_AR and instance.status in sender.STATUS_FORA_DO_AR:
+        task = task_suspender_cliente
+    elif anterior in sender.STATUS_FORA_DO_AR and instance.status in sender.STATUS_NO_AR:
+        task = task_reativar_cliente
+    else:
+        return
+    cliente_id = str(instance.pk)
+    transaction.on_commit(lambda: task.delay(cliente_id))
 
 
 def versoes_permitidas_changed(sender, instance, action, **kwargs):

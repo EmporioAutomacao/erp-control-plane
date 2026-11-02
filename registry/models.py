@@ -128,6 +128,10 @@ class Cliente(models.Model):
         ('erro_provisao', 'Erro no Provisionamento'),
         ('atualizando', 'Atualizando'),
     ]
+    # Passar de um grupo para o outro no admin para ou religa web e cron (registry/signals.py).
+    # Os demais status são de provisionamento e não mexem em réplicas.
+    STATUS_NO_AR = ('ativo', 'trial', 'atualizando')
+    STATUS_FORA_DO_AR = ('suspenso', 'cancelado', 'trial_expirado')
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     slug = models.SlugField(unique=True)

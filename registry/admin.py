@@ -699,7 +699,18 @@ class ClienteAdmin(ModelAdmin):
     ]
 
     class Media:
-        js = ('registry/abas_cliente.js',)
+        js = ('registry/abas_cliente.js', 'registry/confirma_status_cliente.js')
+
+    def save_model(self, request, obj, form, change):
+        from django.contrib import messages
+        super().save_model(request, obj, form, change)
+        if not change or 'status' not in form.changed_data:
+            return
+        anterior = form.initial.get('status')
+        if anterior in Cliente.STATUS_NO_AR and obj.status in Cliente.STATUS_FORA_DO_AR:
+            self.message_user(request, f'{obj.slug}: o site e o cron estão sendo tirados do ar. Os dados são mantidos.', level=messages.WARNING)
+        elif anterior in Cliente.STATUS_FORA_DO_AR and obj.status in Cliente.STATUS_NO_AR:
+            self.message_user(request, f'{obj.slug}: o site e o cron estão sendo religados.', level=messages.SUCCESS)
 
     def get_readonly_fields(self, request, obj=None):
         # Durante a migração de servidor o cadastro inteiro fica somente leitura: trocar host,

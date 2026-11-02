@@ -14,6 +14,7 @@ class MotorProvisionamentoImagemTests(SimpleTestCase):
             pk='cliente-id',
             slug='acme',
             subdominio='acme.ararasuite.com.br',
+            status='ativo',
         )
 
     def test_stack_usa_repositorio_ararasuite_erp_e_versao_informada(self):
@@ -113,7 +114,7 @@ SPEC_WEB = {
 class ServicoCronTests(SimpleTestCase):
     def setUp(self):
         self.motor = MotorProvisionamento.__new__(MotorProvisionamento)
-        self.motor.cliente = SimpleNamespace(pk='cliente-id', slug='acme', subdominio='acme.ararasuite.com.br')
+        self.motor.cliente = SimpleNamespace(pk='cliente-id', slug='acme', subdominio='acme.ararasuite.com.br', status='ativo')
 
     def _fake_run(self, servicos):
         chamadas = []

@@ -141,32 +141,44 @@ def task_sincronizar_plano_cliente(self, cliente_id):
         raise self.retry(exc=Exception(resultado['mensagem']))
 
 
-@shared_task
-def task_suspender_cliente(cliente_id):
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def task_suspender_cliente(self, cliente_id):
+    """Para web e cron. O status já foi gravado no admin e não é alterado aqui (pode ser cancelado)."""
     if _adiar_se_migrando(task_suspender_cliente, cliente_id, [cliente_id]):
         return
     from .models import Cliente
     from .provisioning import MotorProvisionamento
 
     cliente = Cliente.objects.get(pk=cliente_id)
-    MotorProvisionamento(cliente).suspender()
-    cliente.status = 'suspenso'
-    cliente.data_suspensao = timezone.now().date()
-    cliente.save(update_fields=['status', 'data_suspensao'])
+    # Pode ter sido adiada ou retentada: quem manda é o status de agora.
+    if cliente.status not in Cliente.STATUS_FORA_DO_AR:
+        return
+    try:
+        MotorProvisionamento(cliente).suspender()
+    except Exception as exc:
+        logger.error('Falha ao tirar %s do ar: %s', cliente.slug, exc)
+        raise self.retry(exc=exc)
+    if cliente.status == 'suspenso':
+        Cliente.objects.filter(pk=cliente_id).update(data_suspensao=timezone.now().date())
 
 
-@shared_task
-def task_reativar_cliente(cliente_id):
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def task_reativar_cliente(self, cliente_id):
+    """Religa web e cron. O status já foi gravado no admin e não é alterado aqui (pode ser trial)."""
     if _adiar_se_migrando(task_reativar_cliente, cliente_id, [cliente_id]):
         return
     from .models import Cliente
     from .provisioning import MotorProvisionamento
 
     cliente = Cliente.objects.get(pk=cliente_id)
-    MotorProvisionamento(cliente).reativar()
-    cliente.status = 'ativo'
-    cliente.data_suspensao = None
-    cliente.save(update_fields=['status', 'data_suspensao'])
+    if cliente.status not in Cliente.STATUS_NO_AR:
+        return
+    try:
+        MotorProvisionamento(cliente).reativar()
+    except Exception as exc:
+        logger.error('Falha ao religar %s: %s', cliente.slug, exc)
+        raise self.retry(exc=exc)
+    Cliente.objects.filter(pk=cliente_id).update(data_suspensao=None)
 
 
 DIAS_RETENCAO_SAUDE = 30

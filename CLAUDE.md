@@ -118,8 +118,8 @@ Todos os módulos têm `preco_mensal=0.00` — a cobrança é feita pelo plano. 
 |---|---|
 | `task_provisionar_cliente` | Disparo automático via signal ao criar `Cliente` |
 | `task_atualizar_versao` | Atualiza imagem Docker de uma instância ativa |
-| `task_suspender_cliente` | Escala `{slug}_web` para 0 réplicas |
-| `task_reativar_cliente` | Escala `{slug}_web` para 1 réplica |
+| `task_suspender_cliente` | Escala `{slug}_web` e `{slug}_cron` para 0. Disparada pelo signal ao salvar um status de `Cliente.STATUS_FORA_DO_AR` vindo de `STATUS_NO_AR`. Não altera o status |
+| `task_reativar_cliente` | Escala `{slug}_web` e `{slug}_cron` para 1. Disparada pelo signal na transição inversa. Não altera o status |
 | `task_verificar_saude_todas` | Apaga `VerificacaoSaude` com mais de 30 dias (`DIAS_RETENCAO_SAUDE`) e dispara health check em todos os clientes ativos/trial. Agendada pela migration `0030` (10 min) e passada a **15 min** pela `0033` (só se ainda estava nos 10 min do padrão) |
 | `task_verificar_saude_cliente` | Faz GET `/health/`, grava `VerificacaoSaude` (HTTP de erro guarda o código real; sem resposta = `status_http=0` e `latencia_ms=None`; envia User-Agent `AraraSuite-CP/<versão>` — o Cloudflare devolve 403 ao `Python-urllib` padrão) e — de graça, do corpo `{"version": ...}` — atualiza `Cliente.versao_erp_detectada` |
 | `task_coletar_versoes_cliente` | Consulta `GET /v1/cp/status` (fallback `/health/`) e grava a versão do ERP em execução + reconcilia `InstalacaoAgente`. Ver `registry.cp_pull.ColetorVersoes` |
@@ -336,6 +336,10 @@ O botão **"Aplicar Configurações"** (`_view_aplicar_modulos`) atualiza via `d
 ### Página de serviço indisponível (catch-all do Traefik)
 
 Host sem roteador cai no roteador `cp-indisponivel` (labels do `web` em `stack-prod.yml`, prioridade 1). O `replacepath` troca qualquer caminho por `/_indisponivel/`, respondido por `registry/pagina_indisponivel.py`, **primeiro** item de `MIDDLEWARE` (antes do `ALLOWED_HOSTS`, sem banco). Publicar a imagem antes de aplicar as labels. Só cobre o que o ERP não responde; os erros do ERP no ar ficam nos templates do ERP. Middleware `errors` do Traefik, se vier, só com 502–504: 4xx/500 trocaria o JSON da API de que o SyncAgent depende. Doc: `docs/registry/pagina-indisponivel.md`.
+
+### Status do Cliente controla as réplicas
+
+Salvar no admin um status de `Cliente.STATUS_NO_AR` (ativo, trial, atualizando) para `STATUS_FORA_DO_AR` (suspenso, cancelado, trial_expirado) para web e cron; o caminho inverso religa (`signals._cliente_entrou_ou_saiu_do_ar`, com `confirma_status_cliente.js` pedindo confirmação; o JS espelha as duas listas). Regras: disparar em `transaction.on_commit` (a task confere o status gravado); as tasks nunca alteram o status; status de provisionamento não mexem em réplicas (cliente pode não ter serviço). Cron criado com o cliente fora do ar nasce em 0 e `atualizar_versao` não espera o web em 0. `.update()` não dispara o signal. **Re-provisionar** sobe o stack com 1 réplica e marca `ativo`: religa de propósito. Doc: `docs/registry/status-cliente-no-ar.md`.
 
 ### `SITE_URL` da instância (URL pública do ERP)
 
