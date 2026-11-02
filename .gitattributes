@@ -1,0 +1,2 @@
+# A imagem é gerada da árvore de trabalho: entrypoint com CRLF não executa no Linux.
+*.sh text eol=lf

@@ -7,6 +7,9 @@ until pg_isready -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "$POSTGRES_U
 done
 echo "[CP] PostgreSQL disponível."
 
+# Trava anti-downgrade: com set -e, versão mais antiga que a registrada não sobe.
+python manage.py guarda_versao verificar
+python manage.py guarda_versao registrar
 python manage.py migrate --noinput
 # Só cria Planos/Módulos ausentes — loaddata sobrescrevia edições do admin (preços) a cada boot
 python manage.py carregar_dados_iniciais

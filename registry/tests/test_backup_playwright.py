@@ -42,6 +42,10 @@ def _make_tar_bytes(members):
 @override_settings(CELERY_TASK_ALWAYS_EAGER=True, CELERY_TASK_EAGER_PROPAGATES=True)
 class BackupClientePlaywrightTests(PlaywrightAdminTestCase):
     def setUp(self):
+        # O subprocess falso destes testes só conhece os comandos do backup.
+        p = patch('registry.versoes.tag_em_execucao', return_value='')
+        p.start()
+        self.addCleanup(p.stop)
         self.user = get_user_model().objects.create_superuser(
             username='admin_backup_pw',
             email='admin-backup-pw@example.com',

@@ -187,9 +187,9 @@ HTML puro com estilos inline (compatível com clientes de e-mail). Visual dark m
 
 - Singleton; o item da sidebar redireciona direto ao formulário. Mostra **versão atual** (`settings.VERSION`), **versão disponível** (maior tag `X.Y.Z` do repositório no Docker Hub, comparação numérica) e a situação (Atualizado / Atualização disponível / Não foi possível verificar / Não verificado), atualizadas ao vivo ao abrir a tela (`verificar/`, cache de 60 s; **Verificar agora** força).
 - A lista de tags de `emporioautomacao/ararasuite-cp` é **pública**: usuário/token do Docker Hub são opcionais (token criptografado, nunca reexibido).
-- **Botão Atualizar** (`atualizar/<versao>/`: GET confirma, POST executa; **só superusuário**): lógica em `registry/atualizacoes.py`. Um **container auxiliar destacado** (imagem atual do `web`, `docker.sock` + `/root/.docker`) roda `docker service update --with-registry-auth --update-failure-action rollback --detach=false --image <repo>:<versão>` em `celery` → `beat` → `agente-no` → `web` (web por último; `db`/`redis` nunca). Recusa downgrade/mesma versão, versão inexistente no Docker Hub, ambiente sem Swarm manager, stack não identificado e atualização em andamento. Em dev (sem Swarm) o botão não aparece.
+- **Botão Atualizar** (`atualizar/<versao>/`: GET confirma, POST executa; **só superusuário**): lógica em `registry/atualizacoes.py`. Um **container auxiliar destacado** (imagem atual do `web`, `docker.sock` + `/root/.docker`) roda `docker service update --with-registry-auth --update-failure-action pause --detach=false --image <repo>:<versão>` em `celery` → `beat` → `agente-no` → `web` (web por último; `db`/`redis` nunca). Recusa downgrade/mesma versão, versão inexistente no Docker Hub, ambiente sem Swarm manager, stack não identificado e atualização em andamento. Em dev (sem Swarm) o botão não aparece.
 - O log fica no container auxiliar (`cp-atualizador-<versão>-<ts>`, sem `--rm`) e a tela mostra Em andamento / Concluída / Falhou, iniciada/concluída em (data e hora, duração) e as últimas linhas com a hora local de cada uma (`docker logs --timestamps`). Enquanto em andamento o bloco **se atualiza sozinho** (`andamento/`, JSON a cada 3 s; tolera o web fora do ar durante a troca e recarrega a página ao terminar).
-- **Depois de atualizar, ajustar `CP_VERSION` no stack do Portainer** — o painel altera os serviços direto no Swarm; um redeploy do stack com `CP_VERSION` antigo desfaria a atualização. **Exceção:** se o `web` roda em `latest` (`atualizacoes.stack_usa_latest`; guarda a tag anterior em `atualizacao_tag_anterior`), o aviso é trocado por "um redeploy com Re-pull image também traz a versão mais recente". Doc: `docs/registry/release-verificar-atualizacoes.md`.
+- **Depois de atualizar, ajustar `CP_VERSION` no stack do Portainer** — o painel altera os serviços direto no Swarm; um redeploy do stack com `CP_VERSION` antigo é recusado no boot (`guarda_versao`) e o painel não sobe até o stack apontar para a versão atual ou maior. **Exceção:** se o `web` roda em `latest` (`atualizacoes.stack_usa_latest`; guarda a tag anterior em `atualizacao_tag_anterior`), o aviso é trocado por "um redeploy com Re-pull image também traz a versão mais recente". Doc: `docs/registry/release-verificar-atualizacoes.md`.
 
 ### ConfiguracaoArmazenamentoAdmin (Configurações > Armazenamento)
 
@@ -273,6 +273,15 @@ Em produção (Linux/Docker) o prefork padrão funciona normalmente — não adi
 - Guia completo (deploy, verificação, troubleshooting): `docs/registry/backup-multi-no.md`.
 - **Volumes:** `registry/volumes.py` sempre roda `docker volume inspect` antes de montar um volume (`docker run/create -v` criaria um vazio). Restauração confere o `sha256` do backup antes de tocar no banco e espera o Postgres aceitar conexão **TCP** (`pg_pronto`; o servidor temporário do initdb só escuta socket).
 - **Comandos de Swarm só no manager:** `registry/swarm.py` (réplicas, scale, label do Traefik, nós por região). Postgres/volumes só no nó: `registry/volumes.py`.
+
+### Trava anti-downgrade
+
+Doc: `docs/registry/trava-anti-downgrade.md`. Nenhum caminho baixa a versão de CP, ERP ou SyncAgent/PDV, e não existe desvio: corrigir uma versão ruim é publicar um número maior.
+
+- **Boot:** `manage.py guarda_versao verificar|registrar` (ERP e CP; tabela `guarda_versao` criada por SQL, porque roda antes do `migrate`). `registrar` vem antes do `migrate`. O cron do ERP troca o entrypoint, então a verificação dele fica em `executar_crons`. **Migrations:** só bloqueia número maior que o último em disco; migration apagada do repositório não pode derrubar cliente (`mercadolivre` 0002–0009).
+- **Painel:** toda tag nova de ERP passa por `registry/versoes.py` (`resolver_versao`/`exigir_sem_downgrade`) antes de gravar arquivo ou chamar o Docker; versão vista passa por `registrar_versao_vista`. `Cliente.versao_erp_maxima` só sobe e `Cliente.versao_erp` não entra na referência (é só o alvo, pode ter sido digitado errado). `latest` só na primeira implantação.
+- **Restauração:** `BackupCliente.versao_erp` + `exigir_restauracao_compativel`, antes de parar o web.
+- **CP:** `--update-failure-action pause`, nunca `rollback`.
 
 ### Migração de servidor
 

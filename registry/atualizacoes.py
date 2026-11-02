@@ -18,12 +18,13 @@ import requests
 from django.conf import settings
 from django.utils import timezone
 
+from .versoes import _tupla, eh_semver
+
 logger = logging.getLogger(__name__)
 
 # `web` por último: é a tela que está disparando a atualização. db/redis nunca são tocados.
 SERVICOS_ORDEM = ['celery', 'beat', 'agente-no', 'web']
 CACHE_SEGUNDOS = 60
-_SEMVER = re.compile(r'^\d+\.\d+\.\d+$')
 _REPOSITORIO = re.compile(r'^[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*$')
 _AUTH_URL = 'https://auth.docker.io/token'
 _REGISTRY_URL = 'https://registry-1.docker.io'
@@ -42,14 +43,6 @@ class ErroAtualizacao(Exception):
 
 def versao_atual():
     return settings.VERSION
-
-
-def eh_semver(tag):
-    return bool(_SEMVER.match(str(tag)))
-
-
-def _tupla(versao):
-    return tuple(int(p) for p in str(versao).split('.'))
 
 
 def tags_semver(tags):
@@ -254,9 +247,10 @@ def montar_script(repositorio, versao, servicos):
     assert eh_semver(versao) and repositorio_valido(repositorio)
     linhas = ['set -e', f'echo "Atualizando o CP para {versao}"']
     for servico in servicos:
+        # `pause`, não `rollback`: depois das migrations, voltar o código seria um downgrade.
         linhas += [
             f'echo "==> {servico}"',
-            f'docker service update --with-registry-auth --update-failure-action rollback '
+            f'docker service update --with-registry-auth --update-failure-action pause '
             f'--detach=false --image {repositorio}:{versao} {servico}',
         ]
     linhas.append('echo "Atualização concluída"')

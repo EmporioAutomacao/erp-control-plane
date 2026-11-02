@@ -8,6 +8,7 @@ from django.urls import path
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.html import escape, format_html, format_html_join, mark_safe
 from unfold.admin import ModelAdmin
+from . import versoes
 from .models import Modulo, Plano, Regiao, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare, ConfiguracaoArmazenamento, ConfiguracaoAtualizacao, BackupCliente, VersaoAgente, SincronizacaoVersoesAgente, InstalacaoAgente, MigracaoCliente
 
 
@@ -392,14 +393,27 @@ def _bloqueado_por_migracao(request, cliente):
     return False
 
 
+def _recusado_por_downgrade(request, cliente):
+    """Recusa o re-provisionamento já na tela, antes de apagar os logs do cliente."""
+    from django.contrib import messages
+    try:
+        versoes.resolver_versao(cliente)
+    except versoes.DowngradeRecusado as exc:
+        messages.error(request, str(exc))
+        return True
+    return False
+
+
 def acao_reprovisionar(modeladmin, request, queryset):
     from .tasks import task_provisionar_cliente
+    enviados = 0
     for cliente in queryset:
-        if _bloqueado_por_migracao(request, cliente):
+        if _bloqueado_por_migracao(request, cliente) or _recusado_por_downgrade(request, cliente):
             continue
         cliente.logs.all().delete()
         task_provisionar_cliente.delay(str(cliente.pk))
-    modeladmin.message_user(request, f'{queryset.count()} cliente(s) enviado(s) para re-provisionamento.')
+        enviados += 1
+    modeladmin.message_user(request, f'{enviados} cliente(s) enviado(s) para re-provisionamento.')
 
 acao_reprovisionar.short_description = 'Re-provisionar cliente(s)'
 
@@ -633,8 +647,28 @@ class MigracaoClienteAdmin(ModelAdmin):
         )
 
 
+class ClienteAdminForm(forms.ModelForm):
+    class Meta:
+        model = Cliente
+        fields = '__all__'
+
+    def clean_versao_erp(self):
+        valor = (self.cleaned_data.get('versao_erp') or '').strip()
+        # Só consulta o Swarm se o campo mudou: um problema lá não pode impedir editar o resto.
+        if self.instance._state.adding or 'versao_erp' not in self.changed_data:
+            return valor
+        try:
+            resolvida = versoes.resolver_versao(self.instance, valor)
+        except versoes.DowngradeRecusado as exc:
+            raise forms.ValidationError(str(exc))
+        if resolvida != (valor or 'latest'):
+            raise forms.ValidationError(f'Informe uma versão X.Y.Z, {resolvida} ou maior.')
+        return valor
+
+
 @admin.register(Cliente)
 class ClienteAdmin(ModelAdmin):
+    form = ClienteAdminForm
     list_display = ['slug', 'nome', 'subdominio', 'plano', 'status_badge', 'isento_cobranca', 'col_versao_erp', 'criado_em']
     list_filter = ['status', 'plano', 'host', 'isento_cobranca', 'atualizacao_automatica_agente']
     search_fields = ['slug', 'nome', 'cnpj', 'email_contato']
@@ -768,7 +802,7 @@ class ClienteAdmin(ModelAdmin):
         from django.contrib import messages
         from .tasks import task_provisionar_cliente
         cliente = get_object_or_404(Cliente, pk=pk)
-        if _bloqueado_por_migracao(request, cliente):
+        if _bloqueado_por_migracao(request, cliente) or _recusado_por_downgrade(request, cliente):
             return redirect('admin:registry_cliente_change', pk)
         cliente.logs.all().delete()
         task_provisionar_cliente.delay(str(cliente.pk))
@@ -1216,6 +1250,12 @@ class ClienteAdmin(ModelAdmin):
                     avisos.append('Não contém db.sql — a restauração não vai recuperar o banco.')
                 if not any(n.startswith('media') for n in nomes):
                     avisos.append('Não contém media/ — a restauração não vai recuperar arquivos de mídia.')
+                versao_backup = ''
+                with tarfile.open(destino, 'r:gz') as tar:
+                    stack = next((n for n in nomes if n.endswith('config/stack.yml')), None)
+                    conteudo = tar.extractfile(stack) if stack else None
+                    if conteudo:
+                        versao_backup = versoes.versao_do_stack(conteudo.read(1024 * 1024).decode('utf-8', 'replace'))
             except tarfile.TarError:
                 destino.unlink()
                 messages.error(request, 'Arquivo inválido: não é um .tar.gz legível.')
@@ -1240,6 +1280,7 @@ class ClienteAdmin(ModelAdmin):
                 progresso=100,
                 arquivo_path=caminho,
                 tamanho_bytes=tamanho,
+                versao_erp=versao_backup,
                 origem='manual',
                 mensagem=' '.join(avisos),
             )
@@ -1282,6 +1323,17 @@ class ClienteAdmin(ModelAdmin):
         if backup.status != 'concluido':
             messages.error(request, 'Apenas backups concluídos podem ser restaurados.')
             return redirect('admin:registry_cliente_change', pk)
+        try:
+            versoes.exigir_restauracao_compativel(cliente, backup.versao_erp)
+        except versoes.DowngradeRecusado as exc:
+            messages.error(request, str(exc))
+            return redirect('admin:registry_cliente_change', pk)
+        if not backup.versao_erp:
+            messages.warning(
+                request,
+                'A versão do ERP deste backup é desconhecida e não pôde ser conferida. Se ele for de uma '
+                'versão mais nova que a atual, o ERP não vai subir até o cliente ser atualizado.',
+            )
         task_restaurar_cliente.delay(str(cliente.pk), backup.pk)
         messages.warning(
             request,
@@ -1542,6 +1594,11 @@ class ClienteAdmin(ModelAdmin):
     def col_versao_erp(self, obj):
         det = obj.versao_erp_detectada or '?'
         alvo = obj.versao_erp or '—'
+        if versoes.regrediu(obj):
+            return format_html(
+                '<span style="color:#b71c1c;font-weight:600;">⚠ Versão regredida: {} <small>(já esteve em {})</small></span>',
+                det, obj.versao_erp_maxima,
+            )
         if obj.versao_erp_detectada and obj.versao_erp and obj.versao_erp_detectada != obj.versao_erp:
             return format_html('<span style="color:#e65100;">{} <small>(alvo {})</small></span>', det, alvo)
         return format_html('{} <small style="color:#999;">(alvo {})</small>', det, alvo)
@@ -1579,6 +1636,15 @@ class ClienteAdmin(ModelAdmin):
             cab += (
                 f'<p style="margin:6px 0 0;padding:8px 12px;background:#fff8e1;border-left:4px solid #f9a825;'
                 f'font-size:12px;color:#5d4037;">⚠ {escape(obj.deteccao_versoes_erro)}</p>'
+            )
+
+        if versoes.regrediu(obj):
+            cab += (
+                '<p style="margin:6px 0 0;padding:8px 12px;background:#ffebee;border-left:4px solid #b71c1c;'
+                f'font-size:12px;color:#b71c1c;">⚠ <strong>Versão regredida:</strong> este ERP roda a '
+                f'{escape(obj.versao_erp_detectada)}, mas já esteve na {escape(obj.versao_erp_maxima)}. '
+                'O painel não faz isso: alguém trocou a imagem por fora. Suba para '
+                f'{escape(obj.versao_erp_maxima)} ou maior.</p>'
             )
 
         erp_det = obj.versao_erp_detectada or '—'
@@ -2267,7 +2333,7 @@ class ConfiguracaoAtualizacaoAdmin(ModelAdmin):
                 depois = (
                     'Como o stack usa a tag latest, um redeploy do stack também traz a versão mais recente.'
                     if usa_latest else
-                    f'Depois, ajuste CP_VERSION={versao} no stack do Portainer, senão um redeploy volta a versão antiga.'
+                    f'Depois, ajuste CP_VERSION={versao} no stack do Portainer: um redeploy com a versão antiga é recusado e o painel não sobe.'
                 )
                 messages.warning(
                     request,

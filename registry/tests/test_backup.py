@@ -310,9 +310,11 @@ class BackupMultiNoTests(SimpleTestCase):
         (cfg / '.env').write_text('X=1', encoding='utf-8')
 
         with patch('registry.nos.hostname_do_no', return_value='worker-1'), \
+                patch('registry.versoes.tag_em_execucao', return_value='0.0.71'), \
                 patch('registry.tasks.task_backup_cliente.apply_async') as apply_async:
             task_iniciar_backup_cliente('cliente-id', 'backup-id')
 
+        self.filter_mock.return_value.update.assert_any_call(versao_erp='0.0.71')
         kwargs = apply_async.call_args.kwargs
         self.assertEqual(kwargs['queue'], 'no.worker-1')
         self.assertEqual(list(kwargs['kwargs']['config_files']), ['.env'])

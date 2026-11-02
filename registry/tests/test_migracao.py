@@ -686,6 +686,7 @@ class ModoMigracaoProvisionamentoTests(TestCase):
         self.addCleanup(p.stop)
         self.run = patch('registry.provisioning.subprocess.run',
                          return_value=SimpleNamespace(returncode=0, stdout='', stderr='')).start()
+        patch('registry.versoes.tag_em_execucao', return_value='').start()
         self.addCleanup(patch.stopall)
 
     def _motor(self):

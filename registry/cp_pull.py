@@ -19,6 +19,7 @@ import urllib.request
 from django.utils import timezone
 
 from .models import Cliente, InstalacaoAgente
+from .versoes import registrar_versao_vista
 
 
 class ColetorVersoes:
@@ -95,6 +96,7 @@ class ColetorVersoes:
             deteccao_versoes_erro=(erro or '')[:300],
             versoes_detectadas_em=quando,
         )
+        registrar_versao_vista(self.cliente.pk, erp_version)
 
     def _reconciliar_instalacoes(self, instalacoes):
         """Full-sync: cria/atualiza as do payload, apaga as que sumiram —

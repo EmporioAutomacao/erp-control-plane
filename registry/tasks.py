@@ -14,18 +14,25 @@ logger = logging.getLogger(__name__)
 def task_provisionar_cliente(self, cliente_id):
     from .models import Cliente
     from .provisioning import MotorProvisionamento
+    from .versoes import DowngradeRecusado
 
     try:
         cliente = Cliente.objects.get(pk=cliente_id)
     except Cliente.DoesNotExist:
         return
 
+    status_anterior = cliente.status
     Cliente.objects.filter(pk=cliente_id).update(status='provisionando')
     cliente.refresh_from_db()
 
     motor = MotorProvisionamento(cliente)
     try:
         motor.executar()
+    except DowngradeRecusado as exc:
+        # Nada foi tocado e retentar não muda a resposta. Um cliente no ar continua como estava.
+        logger.error('Provisionamento de %s recusado: %s', cliente.slug, exc)
+        novo_status = 'erro_provisao' if status_anterior in ('aguardando_provisao', 'provisionando') else status_anterior
+        Cliente.objects.filter(pk=cliente_id).update(status=novo_status)
     except Exception as exc:
         Cliente.objects.filter(pk=cliente_id).update(status='erro_provisao')
         raise self.retry(exc=exc)
@@ -47,6 +54,7 @@ def task_atualizar_versao(self, cliente_id, versao_nova):
         return
     from .models import Cliente, AtualizacaoVersao
     from .provisioning import MotorProvisionamento
+    from .versoes import DowngradeRecusado
 
     cliente = Cliente.objects.get(pk=cliente_id)
     atualizacao = AtualizacaoVersao.objects.create(
@@ -61,6 +69,12 @@ def task_atualizar_versao(self, cliente_id, versao_nova):
         atualizacao.status = 'concluida'
         atualizacao.concluida_em = timezone.now()
         atualizacao.save(update_fields=['status', 'concluida_em'])
+    except DowngradeRecusado as exc:
+        # Retentar não muda a resposta.
+        logger.error('Atualizacao de %s recusada: %s', cliente.slug, exc)
+        atualizacao.status = 'erro'
+        atualizacao.mensagem = str(exc)
+        atualizacao.save(update_fields=['status', 'mensagem'])
     except Exception as exc:
         atualizacao.status = 'erro'
         atualizacao.mensagem = str(exc)
@@ -253,6 +267,7 @@ def task_iniciar_backup_cliente(cliente_id, backup_id, migracao_id=None):
     from .log_operacao import LogOperacao
     from .models import Cliente, BackupCliente
     from .nos import fila_do_cliente
+    from .versoes import versao_implantada
 
     log = LogOperacao(backup_id)
     log.linha('Backup solicitado. Verificando a configuração do armazenamento…')
@@ -268,6 +283,7 @@ def task_iniciar_backup_cliente(cliente_id, backup_id, migracao_id=None):
 
     cliente = Cliente.objects.get(pk=cliente_id)
     cliente_dir = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes')) / cliente.slug
+    BackupCliente.objects.filter(pk=backup_id).update(versao_erp=versao_implantada(cliente))
     log.linha(f'Cliente "{cliente.slug}": lendo o .env e o stack.yml…')
 
     config_files = {}
@@ -578,12 +594,22 @@ def task_restaurar_cliente(self, cliente_id, backup_id):
     from .log_operacao import LogOperacao
     from .models import Cliente, BackupCliente
     from .nos import fila_do_cliente
+    from .versoes import DowngradeRecusado, exigir_restauracao_compativel
 
     cliente = Cliente.objects.get(pk=cliente_id)
     slug = cliente.slug
 
     log = LogOperacao(backup_id, 'log_restauracao')
     log.reiniciar()
+    # Antes de parar o web: uma restauração recusada não derruba o cliente.
+    try:
+        versao_backup = BackupCliente.objects.filter(pk=backup_id).values_list('versao_erp', flat=True).first()
+        exigir_restauracao_compativel(cliente, versao_backup)
+    except DowngradeRecusado as exc:
+        log.linha(f'ERRO: {exc}')
+        BackupCliente.objects.filter(pk=backup_id).update(mensagem_restauracao=str(exc))
+        logger.error('Restauracao de %s recusada: %s', slug, exc)
+        return
     BackupCliente.objects.filter(pk=backup_id).update(restaurando=True, progresso=0)
     replicas_app = None
     try:
@@ -806,6 +832,7 @@ def task_verificar_atualizacao():
 def task_verificar_saude_cliente(cliente_id):
     from . import http_publico
     from .models import Cliente, VerificacaoSaude
+    from .versoes import registrar_versao_vista
     import json
     import urllib.error
     import time
@@ -847,6 +874,7 @@ def task_verificar_saude_cliente(cliente_id):
     )
     if versao_erp:
         Cliente.objects.filter(pk=cliente_id).update(versao_erp_detectada=versao_erp[:20])
+        registrar_versao_vista(cliente_id, versao_erp[:20])
 
 
 # ── Migração de servidor (orquestração em registry/migracao.py) ─────────────

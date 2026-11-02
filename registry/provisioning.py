@@ -10,6 +10,8 @@ from pathlib import Path
 import docker
 from django.utils import timezone
 
+from . import versoes
+
 logger = logging.getLogger(__name__)
 
 CLIENTES_BASE = Path(os.getenv('CLIENTES_BASE_PATH', '/opt/clientes'))
@@ -66,6 +68,12 @@ class MotorProvisionamento:
         O `stack.yml` gravado em disco continua sendo o normal.
         """
         slug = self.cliente.slug
+        # Antes de qualquer escrita: uma recusa deixa o .env, o stack.yml e o stack intocados.
+        try:
+            versao = versoes.resolver_versao(self.cliente)
+        except versoes.DowngradeRecusado as exc:
+            self._log('gerar_stack', 'erro', str(exc))
+            raise
         cliente_dir = CLIENTES_BASE / slug
         cliente_dir.mkdir(parents=True, exist_ok=True)
 
@@ -75,7 +83,6 @@ class MotorProvisionamento:
         self._log('escolher_host', 'concluido', f'Região: {regiao}')
 
         self._log('gerar_stack', 'executando')
-        versao = self.cliente.versao_erp or 'latest'
         subdominio = self.cliente.subdominio
         dominio_custom = self.cliente.dominio_custom or ''
 
@@ -117,6 +124,7 @@ class MotorProvisionamento:
         )
         if result.returncode != 0 and 'AlreadyExists' not in result.stderr:
             raise subprocess.CalledProcessError(result.returncode, result.args, result.stderr)
+        versoes.registrar_versao_vista(self.cliente.pk, versao)
         if modo_migracao:
             self._log('subir_stack', 'concluido', f'Modo migração: região {regiao}, web/cron em 0, Traefik desligado')
             return
@@ -153,11 +161,13 @@ class MotorProvisionamento:
     def atualizar_versao(self, versao_nova):
         slug = self.cliente.slug
         subdominio = self.cliente.subdominio
+        versoes.exigir_sem_downgrade(self.cliente, versao_nova)
         subprocess.run(
             ['docker', 'service', 'update', '--with-registry-auth',
              '--image', f'{ERP_IMAGE}:{versao_nova}', f'{slug}_web'],
             check=True,
         )
+        versoes.registrar_versao_vista(self.cliente.pk, versao_nova)
         self._aguardar_servico(f'{slug}_web', timeout=120)
         if CHECK_HTTP_HEALTH:
             self._aguardar_http(f'https://{subdominio}/health/', timeout=120)
@@ -177,6 +187,8 @@ class MotorProvisionamento:
         """
         slug = self.cliente.slug
         nome = f'{slug}_cron'
+        if versao:
+            versoes.exigir_sem_downgrade(self.cliente, versao)
         spec_web = self._spec_servico(f'{slug}_web')
         container = spec_web['TaskTemplate']['ContainerSpec']
         imagem = f'{ERP_IMAGE}:{versao}' if versao else container['Image'].split('@')[0]
@@ -281,6 +293,7 @@ class MotorProvisionamento:
         return env_vars
 
     def _run_manage(self, slug, versao, env_vars, args):
+        versoes.exigir_sem_downgrade(self.cliente, versao)
         network = f'{slug}_internal'
         env = {**os.environ, **env_vars}
         subprocess.run(

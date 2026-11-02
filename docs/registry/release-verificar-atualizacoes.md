@@ -45,7 +45,7 @@ Por isso o botão dispara um **container auxiliar destacado** (`docker run -d`, 
 `docker.sock` e `/root/.docker`) que executa, em ordem:
 
 ```
-docker service update --with-registry-auth --update-failure-action rollback --detach=false \
+docker service update --with-registry-auth --update-failure-action pause --detach=false \
     --image emporioautomacao/ararasuite-cp:<versão> <stack>_<serviço>
 ```
 
@@ -61,7 +61,8 @@ Falhou* e as últimas linhas. O auxiliar anterior é removido na próxima execu�
 Log manual: `docker logs cp-atualizador-<versão>-<timestamp>`.
 
 > ⚠ **Ajuste `CP_VERSION` no stack do Portainer** para a nova versão depois de atualizar. O painel muda os
-> serviços direto no Swarm; o Portainer continua com a versão antiga e um redeploy do stack **voltaria o CP**.
+> serviços direto no Swarm; o Portainer continua com a versão antiga e um redeploy do stack **é recusado no boot,
+> com o painel fora do ar**, até o stack apontar para a versão atual ou maior (ver `trava-anti-downgrade.md`).
 > A tela e a mensagem de sucesso repetem esse aviso.
 
 ### Stack em `latest` (sem `CP_VERSION` fixo)
@@ -87,7 +88,7 @@ no Portainer.
 
 ## 7. Limites conhecidos
 
-- Rollback automático (`--update-failure-action rollback`) cobre falha de inicialização do serviço, não
-  migrations já aplicadas.
+- Sem rollback automático (`--update-failure-action pause`): voltar o código depois das migrations seria um
+  downgrade. Se a atualização falhar, os serviços ficam pausados e a correção é publicar uma versão maior.
 - Com `agente-no` em muitos nós, a atualização desse serviço roda em sequência pelo Swarm e pode demorar.
 - Se o stack for renomeado sem os labels padrão do Swarm, a atualização é recusada com mensagem clara.

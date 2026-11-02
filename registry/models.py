@@ -149,6 +149,11 @@ class Cliente(models.Model):
         help_text='Lida de GET /health/ (ou /v1/cp/status) da instância. Atualizada '
         'pela verificação de saúde e pela coleta de versões.',
     )
+    versao_erp_maxima = models.CharField(
+        max_length=20, blank=True, editable=False,
+        verbose_name='Maior versão ERP já vista',
+        help_text='Piso da trava anti-downgrade (registry/versoes.py). Só sobe.',
+    )
     versoes_detectadas_em = models.DateTimeField(
         null=True, blank=True, verbose_name='Versões verificadas em',
     )
@@ -579,6 +584,10 @@ class BackupCliente(models.Model):
     criado_em = models.DateTimeField(auto_now_add=True)
     arquivo_path = models.CharField(max_length=500, blank=True)
     tamanho_bytes = models.BigIntegerField(default=0)
+    versao_erp = models.CharField(
+        max_length=20, blank=True, verbose_name='Versão do ERP no backup',
+        help_text='Vazio = desconhecida (backups antigos ou importados sem stack.yml).',
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='em_andamento')
     progresso = models.PositiveSmallIntegerField(default=0)
     restaurando = models.BooleanField(default=False)

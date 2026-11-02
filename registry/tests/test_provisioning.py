@@ -62,6 +62,7 @@ class MotorProvisionamentoImagemTests(SimpleTestCase):
         )
         self.assertIn('SITE_URL: "https://acme.ararasuite.com.br"', stack)
 
+    @patch('registry.provisioning.versoes')
     @patch('registry.models.Cliente.objects.filter')
     @patch('registry.provisioning.CHECK_HTTP_HEALTH', False)
     @patch('registry.provisioning.subprocess.run')
@@ -69,6 +70,7 @@ class MotorProvisionamentoImagemTests(SimpleTestCase):
         self,
         run_mock,
         cliente_filter_mock,
+        _versoes_mock,
     ):
         self.motor._aguardar_servico = lambda *args, **kwargs: None
         versoes_cron = []

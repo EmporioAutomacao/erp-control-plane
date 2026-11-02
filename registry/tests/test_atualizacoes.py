@@ -128,7 +128,7 @@ class MontarScriptTests(SimpleTestCase):
         self.assertEqual([l.split()[-1] for l in updates], servicos)  # web por último
         for l in updates:
             self.assertIn('--with-registry-auth', l)
-            self.assertIn('--update-failure-action rollback', l)
+            self.assertIn('--update-failure-action pause', l)
             self.assertIn('--detach=false', l)
             self.assertIn('--image emporioautomacao/ararasuite-cp:0.0.44', l)
         self.assertTrue(script.startswith('set -e'))

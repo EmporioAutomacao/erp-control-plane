@@ -9,5 +9,8 @@ until pg_isready -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "$POSTGRES_U
   sleep 2
 done
 
+# Trava anti-downgrade: com set -e, versão mais antiga que a registrada não sobe.
+python manage.py guarda_versao verificar
+
 exec celery -A core worker --loglevel=info --concurrency=2 \
   -Q "no.${NODE_HOSTNAME}" -n "agente@${NODE_HOSTNAME}"
