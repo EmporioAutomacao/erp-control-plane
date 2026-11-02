@@ -333,6 +333,10 @@ O botão **"Aplicar Configurações"** (`_view_aplicar_modulos`) atualiza via `d
 
 **Por que isso importa:** se o `subdominio` do cliente for alterado no admin (ex.: migração de domínio de `ararasuite.com.br` para `jfnbrasil.com.br`), apenas atualizar o campo no banco não basta — a label do Traefik no serviço Docker ainda aponta para o domínio antigo. O wildcard DNS do domínio antigo continua roteando tráfego para o container, que agora rejeita o host com `DisallowedHost`. Clicar em "Aplicar Configurações" corrige ALLOWED_HOSTS e a label do Traefik de uma vez.
 
+### Página de serviço indisponível (catch-all do Traefik)
+
+Host sem roteador cai no roteador `cp-indisponivel` (labels do `web` em `stack-prod.yml`, prioridade 1). O `replacepath` troca qualquer caminho por `/_indisponivel/`, respondido por `registry/pagina_indisponivel.py`, **primeiro** item de `MIDDLEWARE` (antes do `ALLOWED_HOSTS`, sem banco). Publicar a imagem antes de aplicar as labels. Só cobre o que o ERP não responde; os erros do ERP no ar ficam nos templates do ERP. Middleware `errors` do Traefik, se vier, só com 502–504: 4xx/500 trocaria o JSON da API de que o SyncAgent depende. Doc: `docs/registry/pagina-indisponivel.md`.
+
 ### `SITE_URL` da instância (URL pública do ERP)
 
 `registry/provisioning.py::site_url_cliente(cliente)` = `https://<subdominio>` — **sempre o subdomínio**, nunca o domínio próprio (o domínio próprio depende de o cliente trocar os nameservers no Cloudflare; um link já enviado com DNS pendente quebraria). Gravado no `.env`/`environment` no provisionamento e reaplicado pelo **"Aplicar Configurações"** (clientes já provisionados só recebem ao clicar no botão). O ERP usa em tudo que sai sem request: link de peça de campanha no WhatsApp, imagens do HTML no e-mail, "abra no navegador", QR do portal de O.S., PDFs por cron. Doc: `docs/registry/site-url-instancias.md`.

@@ -92,7 +92,16 @@ services:
         - "traefik.swarm.network=traefik-public"
         - "traefik.http.routers.ararasuite-cp.rule=Host(`${CP_DOMAIN}`)"
         - "traefik.http.routers.ararasuite-cp.entrypoints=web"
+        - "traefik.http.routers.ararasuite-cp.service=ararasuite-cp"
         - "traefik.http.services.ararasuite-cp.loadbalancer.server.port=8000"
+        # Catch-all: host sem roteador recebe a página de indisponível. O replacepath garante que
+        # nenhum caminho desses hosts alcança o admin. Doc: docs/registry/pagina-indisponivel.md
+        - "traefik.http.routers.cp-indisponivel.rule=HostRegexp(`.+`)"
+        - "traefik.http.routers.cp-indisponivel.priority=1"
+        - "traefik.http.routers.cp-indisponivel.entrypoints=web"
+        - "traefik.http.routers.cp-indisponivel.service=ararasuite-cp"
+        - "traefik.http.routers.cp-indisponivel.middlewares=cp-indisponivel"
+        - "traefik.http.middlewares.cp-indisponivel.replacepath.path=/_indisponivel/"
 
   # ─── Celery Worker ────────────────────────────────────────────────────────
   # Processa tasks assíncronas: provisionamento de clientes, envio de e-mails,

@@ -1,0 +1,68 @@
+{% comment %}
+Página do catch-all do Traefik: responde por qualquer host sem roteador. Doc: docs/registry/pagina-indisponivel.md
+Texto genérico, sem nome de loja, e sem {% static %} nem recurso externo. Mesmo visual de
+core/templates/padrao/erros/base_erro.html do ERP: mudança no visual precisa ser repetida lá.
+{% endcomment %}<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Serviço indisponível · AraraSuite</title>
+  <style>
+    :root {
+      --fundo: #f8fafc; --texto: #0f172a; --suave: #475569; --destaque: #4f46e5;
+      --mancha-1: rgba(99, 102, 241, .22); --mancha-2: rgba(124, 58, 237, .18);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fundo: #0f172a; --texto: #f1f5f9; --suave: #94a3b8; --destaque: #818cf8;
+        --mancha-1: rgba(99, 102, 241, .28); --mancha-2: rgba(168, 85, 247, .22);
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px;
+      overflow: hidden; text-align: center; background: var(--fundo); color: var(--texto);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    .mancha { position: fixed; z-index: -1; border-radius: 50%; filter: blur(48px); animation: flutuar 12s ease-in-out infinite; }
+    .mancha-1 { width: 340px; height: 340px; top: -90px; left: -90px; background: var(--mancha-1); }
+    .mancha-2 { width: 400px; height: 400px; bottom: -130px; right: -110px; background: var(--mancha-2); animation-delay: -6s; }
+    main { max-width: 480px; }
+    main > * { animation: surgir .6s ease-out both; }
+    main > :nth-child(2) { animation-delay: .1s; }
+    main > :nth-child(3) { animation-delay: .2s; }
+    main > :nth-child(4) { animation-delay: .3s; }
+    .ilustracao { width: 96px; height: 96px; margin: 0 auto; color: var(--destaque); }
+    .ilustracao svg { display: block; width: 100%; height: 100%; }
+    h1 { margin: 12px 0 8px; font-size: 1.4rem; }
+    p { margin: 0; color: var(--suave); line-height: 1.5; }
+    .acoes { margin-top: 24px; }
+    .botao {
+      display: inline-block; padding: 10px 20px; border-radius: 8px; font-weight: 600; text-decoration: none;
+      background: var(--destaque); color: #fff; transition: transform .15s ease, box-shadow .15s ease;
+    }
+    @media (prefers-color-scheme: dark) { .botao { color: #0f172a; } }
+    .botao:hover { transform: translateY(-2px); box-shadow: 0 6px 16px var(--mancha-1); }
+    .botao:focus-visible { outline: 2px solid var(--texto); outline-offset: 2px; }
+    .girar { transform-origin: center; transform-box: fill-box; animation: girar 8s linear infinite; }
+    @keyframes surgir { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    @keyframes flutuar { 50% { transform: translate(28px, 22px) scale(1.08); } }
+    @keyframes girar { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="mancha mancha-1" aria-hidden="true"></div>
+  <div class="mancha mancha-2" aria-hidden="true"></div>
+  <main>
+    <div class="ilustracao" aria-hidden="true"><svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"><g class="girar"><circle cx="48" cy="48" r="20"/><path d="M48 12v12M48 72v12M12 48h12M72 48h12M22.5 22.5l8.5 8.5M65 65l8.5 8.5M22.5 73.5l8.5-8.5M65 31l8.5-8.5"/></g></svg></div>
+    <h1>Serviço indisponível ou endereço não encontrado</h1>
+    <p>Confira o endereço digitado. Se ele estiver certo, o serviço pode estar em manutenção: tente novamente em alguns instantes.</p>
+    <div class="acoes"><a class="botao" href="">Tentar novamente</a></div>
+  </main>
+</body>
+</html>

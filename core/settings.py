@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / '.env')
 
-VERSION = '0.0.58'
+VERSION = '0.0.59'
 
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-change-me')
 DEBUG = os.getenv('DEBUG', 'true').lower() in ('1', 'true', 'yes')
@@ -93,6 +93,7 @@ GITHUB_TOKEN = (os.getenv('GITHUB_TOKEN') or '').strip()
 PDV_LOCAL_RELEASE_TOKEN = (os.getenv('PDV_LOCAL_RELEASE_TOKEN') or '').strip()
 
 MIDDLEWARE = [
+    'registry.pagina_indisponivel.PaginaIndisponivelMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
