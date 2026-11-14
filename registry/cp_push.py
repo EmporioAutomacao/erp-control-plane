@@ -183,7 +183,7 @@ class SincronizadorVersoes:
         else:
             self._log('Pacote montado: nenhuma versão — o ERP vai aposentar todos os pacotes deste cliente')
 
-        host = self.cliente.dominio_custom or self.cliente.subdominio
+        host = self.cliente.host_publico
         url = f'https://{host}/v1/cp/agent-packages:sync'
         self._log(f'Destino: POST {url}')
         self._log(f'Enviando (timeout {self.TIMEOUT_SECONDS}s)…')
@@ -297,7 +297,7 @@ class SincronizadorPlano:
         import requests
 
         payload = self._montar_payload()
-        host = self.cliente.dominio_custom or self.cliente.subdominio
+        host = self.cliente.host_publico
         url = f'https://{host}/v1/cp/plano:sync'
 
         try:

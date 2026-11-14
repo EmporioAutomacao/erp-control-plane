@@ -167,7 +167,11 @@ class Cliente(models.Model):
     )
     stack_path = models.CharField(max_length=500, blank=True)
     subdominio = models.CharField(max_length=100, unique=True)
-    dominio_custom = models.CharField(max_length=200, blank=True)
+    dominios_aplicados = models.JSONField(
+        default=list, blank=True, editable=False,
+        help_text='Hostnames publicados no Cloudflare (DNS + ingress do tunnel) no último '
+        '"Aplicar Configurações". É por ele que o CP sabe o que remover quando um domínio sai da lista.',
+    )
 
     TEMA_CHOICES = [
         ('dedetizadora', 'Dedetizadora (verde)'),
@@ -243,10 +247,105 @@ class Cliente(models.Model):
         return f'{self.nome} ({self.slug})'
 
     @property
+    def host_publico(self):
+        """Domínio principal (DominioCliente.principal) ou, sem ele, o subdomínio."""
+        from .dominios import host_publico
+        return host_publico(self)
+
+    @property
     def url(self):
-        if self.dominio_custom:
-            return f'https://{self.dominio_custom}'
-        return f'https://{self.subdominio}'
+        return f'https://{self.host_publico}'
+
+
+class DominioCliente(models.Model):
+    """Domínio próprio de um cliente, além do subdomínio. Publicado pelo "Aplicar Configurações".
+
+    Regras em `registry/dominios.py` e docs/registry/dominios-multiplos.md.
+    """
+    MODO_CHOICES = [
+        ('servir', 'Abre o ERP'),
+        ('redirecionar', 'Redireciona (301) para o principal'),
+    ]
+
+    cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='dominios')
+    dominio = models.CharField(
+        max_length=253, unique=True, verbose_name='Domínio',
+        help_text='Ex.: loja.com.br ou erp.loja.com.br (sem https:// nem caminho).',
+    )
+    modo = models.CharField(
+        max_length=20, choices=MODO_CHOICES, default='servir', verbose_name='Modo',
+        help_text=('Redireciona: o Traefik responde 301/308 para o principal. Não use em domínio onde um SyncAgent/PDV foi ativado: o redirect descarta o token e a sincronização para (401).'),
+    )
+    principal = models.BooleanField(
+        default=False, verbose_name='Principal',
+        help_text='Endereço de acesso do cliente (link, e-mail, health check). No máximo um; '
+        'sem nenhum marcado, vale o subdomínio.',
+    )
+    incluir_www = models.BooleanField(
+        default=True, verbose_name='Incluir www',
+        help_text='Publica também www.<domínio>, redirecionando (301). Desligue em subdomínios '
+        '(erp.loja.com.br) se não quiser www.erp.loja.com.br.',
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Domínio'
+        verbose_name_plural = 'Domínios'
+        ordering = ['-principal', 'dominio']
+        db_table = 'registry_dominiocliente'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['cliente'], condition=models.Q(principal=True),
+                name='dominio_principal_unico_por_cliente',
+            ),
+        ]
+
+    def __str__(self):
+        return self.dominio
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        from . import dominios
+
+        self.dominio = dominios.normalizar(self.dominio)
+        erros = {}
+        if not dominios.formato_valido(self.dominio):
+            erros['dominio'] = 'Informe só o domínio (ex.: loja.com.br), sem https://, caminho ou porta.'
+        elif dominios.da_plataforma(self.dominio):
+            erros['dominio'] = 'Domínios da AraraSuite não entram aqui: o subdomínio do cliente já é publicado.'
+        else:
+            meus = dominios.hostnames_do_dominio(self)
+            if Cliente.objects.filter(subdominio__in=meus).exists():
+                erros['dominio'] = 'Este domínio já é o subdomínio de um cliente.'
+            else:
+                outros = DominioCliente.objects.exclude(pk=self.pk)
+                if self.cliente_id:
+                    outros = outros.exclude(cliente_id=self.cliente_id)
+                ocupados = {n for d in outros for n in dominios.hostnames_do_dominio(d)}
+                conflito = next((n for n in meus if n in ocupados), None)
+                if conflito:
+                    erros['dominio'] = f'{conflito} já está em uso por outro cliente.'
+        if self.principal and self.modo != 'servir':
+            erros['principal'] = 'O domínio principal precisa abrir o ERP (modo "Abre o ERP").'
+        if self.incluir_www and self.dominio.startswith('www.'):
+            self.incluir_www = False
+        if erros:
+            raise ValidationError(erros)
+
+    def get_constraints(self):
+        # Só para a validação do full_clean: o "um principal por cliente" é conferido entre as
+        # linhas enviadas (admin._DominiosFormSet), que também desmarca o principal antigo antes de
+        # gravar. Validar contra o banco aqui impediria trocar o principal num único salvamento.
+        # A constraint do banco continua valendo.
+        return [
+            (modelo, [c for c in restricoes if c.name != 'dominio_principal_unico_por_cliente'])
+            for modelo, restricoes in super().get_constraints()
+        ]
+
+    def save(self, *args, **kwargs):
+        from . import dominios
+        self.dominio = dominios.normalizar(self.dominio)
+        super().save(*args, **kwargs)
 
 
 class ProvisionamentoLog(models.Model):

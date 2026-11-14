@@ -151,6 +151,16 @@
 },
 {
   "model": "registry.modulo",
+  "pk": "parceiros",
+  "fields": {
+    "nome": "Parceiros",
+    "descricao": "Programa de parceiros, indicações, comissões e repasses.",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
   "pk": "rh",
   "fields": {
     "nome": "Recursos Humanos",

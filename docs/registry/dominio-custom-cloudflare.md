@@ -1,5 +1,7 @@
 # Plano: Domínio Custom — Automação via Cloudflare API
 
+> **Substituído na 0.0.61** por [dominios-multiplos.md](dominios-multiplos.md): `Cliente.dominio_custom` virou a lista `DominioCliente` (vários domínios, modo por domínio, remoção automática). Este documento fica como histórico.
+
 - data: 2026-05-22
 - responsavel: James Flavio
 - status: planejado

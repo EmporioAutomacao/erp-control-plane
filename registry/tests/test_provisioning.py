@@ -53,7 +53,7 @@ class MotorProvisionamentoImagemTests(SimpleTestCase):
     def test_site_url_usa_sempre_o_subdominio(self):
         from registry.provisioning import site_url_cliente
 
-        cliente = SimpleNamespace(subdominio='acme.ararasuite.com.br', dominio_custom='acme.com.br')
+        cliente = SimpleNamespace(subdominio='acme.ararasuite.com.br')
         self.assertEqual(site_url_cliente(cliente), 'https://acme.ararasuite.com.br')
 
     def test_stack_propaga_site_url(self):

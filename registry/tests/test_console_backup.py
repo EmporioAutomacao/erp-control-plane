@@ -448,7 +448,7 @@ class AbasDoClienteTests(_Base):
     CAMPOS_ANTES = [
         'id', 'slug', 'nome', 'cnpj', 'email_contato', 'telefone',
         'painel_acesso',
-        'host', 'migracao_servidor', 'versao_erp', 'stack_path', 'subdominio', 'dominio_custom',
+        'host', 'migracao_servidor', 'versao_erp', 'stack_path', 'subdominio',
         'versao_atual',
         'plano', 'modulos_ativos', 'tema_site', 'acoes_plano_sync',
         'atualizacao_automatica_agente', 'versoes_permitidas', 'acoes_versoes',

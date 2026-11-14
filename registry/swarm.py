@@ -131,6 +131,15 @@ def env_do_servico(servico):
     return env
 
 
+def labels_do_servico(servico):
+    """Labels do serviço (`Spec.Labels`, as do Traefik), como dict. Serviço inexistente → erro."""
+    r = _run(['docker', 'service', 'inspect', servico, '--format', '{{json .Spec.Labels}}'])
+    if r.returncode != 0:
+        raise RuntimeError(f'Serviço {servico} não encontrado')
+    import json
+    return json.loads((r.stdout or 'null').strip() or 'null') or {}
+
+
 def definir_traefik(servico, habilitado):
     """Liga/desliga o roteamento do Traefik pelo label do serviço (sem reiniciar o container)."""
     valor = 'true' if habilitado else 'false'

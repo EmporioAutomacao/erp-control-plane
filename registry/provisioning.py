@@ -10,7 +10,7 @@ from pathlib import Path
 import docker
 from django.utils import timezone
 
-from . import versoes
+from . import dominios, versoes
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ class MotorProvisionamento:
 
         self._log('gerar_stack', 'executando')
         subdominio = self.cliente.subdominio
-        dominio_custom = self.cliente.dominio_custom or ''
+        labels_dominios = dominios.labels_traefik(self.cliente)
 
         # Reusar credenciais existentes para não conflitar com o volume pgdata
         env_file = cliente_dir / '.env'
@@ -107,13 +107,13 @@ class MotorProvisionamento:
             # senha_temp logged before deploy so it's preserved even if deploy fails
             self._log('criar_superuser', 'pendente', f'senha_temp:{senha_temp}')
 
-        stack_content = self._gerar_stack_yaml(slug, subdominio, versao, regiao, env_vars, dominio_custom)
+        stack_content = self._gerar_stack_yaml(slug, subdominio, versao, regiao, env_vars, labels_dominios)
         stack_file = cliente_dir / 'stack.yml'
         stack_file.write_text(stack_content)
         if modo_migracao:
             stack_file = cliente_dir / 'stack-migracao.yml'
             stack_file.write_text(self._gerar_stack_yaml(
-                slug, subdominio, versao, regiao, env_vars, dominio_custom, replicas_app=0, traefik=False,
+                slug, subdominio, versao, regiao, env_vars, labels_dominios, replicas_app=0, traefik=False,
             ))
         self._log('gerar_stack', 'concluido')
 
@@ -329,13 +329,9 @@ class MotorProvisionamento:
         subdominio = self.cliente.subdominio
         modulos = ','.join(m.slug for m in self.cliente.modulos_ativos.all()) or 'financeiro,tarefas'
         tema = self.cliente.tema_site or 'loja'
-        dominio_custom = self.cliente.dominio_custom or ''
-
-        allowed_hosts = f'{subdominio},{dominio_custom}' if dominio_custom else subdominio
-        csrf_origins = (
-            f'https://{subdominio},https://{dominio_custom}' if dominio_custom
-            else f'https://{subdominio}'
-        )
+        lista = dominios.do_cliente(self.cliente)
+        allowed_hosts = dominios.allowed_hosts(self.cliente, lista)
+        csrf_origins = dominios.csrf_origins(self.cliente, lista)
 
         db_password = env_existente.get('POSTGRES_PASSWORD') or secrets.token_hex(24)
         secret_key = env_existente.get('DJANGO_SECRET_KEY') or secrets.token_hex(50)
@@ -373,24 +369,11 @@ class MotorProvisionamento:
             'DJANGO_SUPERUSER_PASSWORD': senha_temp,
         }
 
-    def _gerar_stack_yaml(self, slug, subdominio, versao, regiao, env_vars, dominio_custom='',
+    def _gerar_stack_yaml(self, slug, subdominio, versao, regiao, env_vars, labels_dominios=None,
                           replicas_app=1, traefik=True):
+        """`labels_dominios`: labels dos domínios próprios (`dominios.labels_traefik`), valor bruto."""
         env_block = '\n'.join(f'      {k}: "{v}"' for k, v in env_vars.items() if k != 'SLUG')
-        labels_custom = ''
-        if dominio_custom:
-            labels_custom = (
-                # Router apex
-                f'\n        - "traefik.http.routers.{slug}-erp-custom.rule=Host(`{dominio_custom}`)"'
-                f'\n        - "traefik.http.routers.{slug}-erp-custom.entrypoints=web"'
-                f'\n        - "traefik.http.routers.{slug}-erp-custom.service={slug}-erp"'
-                # Router www → redireciona 301 para o apex
-                f'\n        - "traefik.http.routers.{slug}-erp-custom-www.rule=Host(`www.{dominio_custom}`)"'
-                f'\n        - "traefik.http.routers.{slug}-erp-custom-www.entrypoints=web"'
-                f'\n        - "traefik.http.routers.{slug}-erp-custom-www.middlewares={slug}-www-redirect"'
-                f'\n        - "traefik.http.middlewares.{slug}-www-redirect.redirectregex.regex=^https?://www\\\\.(.+)"'
-                f'\n        - "traefik.http.middlewares.{slug}-www-redirect.redirectregex.replacement=https://$${{1}}"'
-                f'\n        - "traefik.http.middlewares.{slug}-www-redirect.redirectregex.permanent=true"'
-            )
+        labels_custom = dominios.labels_yaml(labels_dominios or {})
         return f"""version: "3.8"
 services:
   web:

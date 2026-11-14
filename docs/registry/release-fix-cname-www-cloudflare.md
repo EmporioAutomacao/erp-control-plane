@@ -1,5 +1,7 @@
 # Release: Correção do CNAME `www` na automação Cloudflare
 
+> **Substituído na 0.0.61** por [dominios-multiplos.md](dominios-multiplos.md): `Cliente.dominio_custom` virou a lista `DominioCliente` (vários domínios, modo por domínio, remoção automática). Este documento fica como histórico.
+
 - data: 2026-08-31
 - responsavel: James Flavio
 - status: implementado

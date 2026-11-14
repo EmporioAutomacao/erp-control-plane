@@ -39,7 +39,7 @@ class ColetorVersoes:
         Devolve um dict {'ok': bool, 'erro': str, 'erp_version': str,
         'instalacoes': int} — usado pelo admin/testes.
         """
-        host = self.cliente.dominio_custom or self.cliente.subdominio
+        host = self.cliente.host_publico
         agora = timezone.now()
 
         if not self.cliente.integracao_secret:

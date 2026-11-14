@@ -80,6 +80,7 @@ Cada etapa de provisionamento é registrada em `ProvisionamentoLog` via `MotorPr
 | `ProvisionamentoLog` | `registry_provisionamentolog` | Log por etapa do provisionamento |
 | `AtualizacaoVersao` | `registry_atualizacaoversao` | Histórico de upgrades de versão |
 | `VerificacaoSaude` | `registry_verificacao_saude` | Snapshots de health check (online, código HTTP, latência). **Só o processo automático grava**: admin somente leitura (sem add/change/delete) com botão 🔄 Verificar agora; retenção de 30 dias |
+| `DominioCliente` | `registry_dominiocliente` | Domínios próprios do cliente (aba **Domínios**), além do subdomínio: `modo` servir/redirecionar (301 para o principal), `principal` (no máximo um, sempre servir; sem ele vale o subdomínio → `Cliente.host_publico`/`url`), `incluir_www`. Substituiu `Cliente.dominio_custom` (migration `0035`). `Cliente.dominios_aplicados` guarda o que foi publicado no Cloudflare. Ver "Domínios próprios" abaixo |
 | `ConfiguracaoEmail` | `registry_configuracaoemail` | Singleton com credenciais SMTP (pk=1 sempre) |
 | `ConfiguracaoAtualizacao` | `registry_configuracaoatualizacao` | Singleton (pk=1) da tela Verificar Atualizações: repositório Docker Hub do CP, usuário/token (criptografado, opcionais), status da conexão, versão disponível em cache e registro da última atualização iniciada pelo painel |
 | `ConfiguracaoArmazenamento` | `registry_configuracaoarmazenamento` | Singleton (pk=1) com a conexão S3/RustFS dos backups (endpoint, bucket, access key, secret key **criptografada**) e o sinalizador `status_conexao` |
@@ -177,7 +178,7 @@ HTML puro com estilos inline (compatível com clientes de e-mail). Visual dark m
 - **`painel_acesso`** — tabela com URL, usuário `admin` e senha inicial extraída do `ProvisionamentoLog` etapa `criar_superuser`
 - **`badge_isencao`** — badge visual de situação de cobrança
 - **`acoes_provisionamento`** — botões: ⚙ Aplicar Configurações, ☁ Configurar Cloudflare, Re-provisionar, Destruir (com confirm), ✉ Reenviar Boas-vindas
-- **Página do Cliente em abas (Unfold):** Cadastro · Acesso e Infraestrutura · Plano e Faturamento · Versões · Status e Ações · Backups (fieldsets com `classes: ['tab']`; os campos das antigas 11 seções foram fundidos, sem perder nenhum) e os históricos como abas (`tab = True` nos inlines). `registry/static/registry/abas_cliente.js` lembra a aba e abre **Backups** ao acompanhar uma operação.
+- **Página do Cliente em abas (Unfold):** Cadastro · Acesso e Infraestrutura · Plano e Faturamento · Versões · Status e Ações · Backups (fieldsets com `classes: ['tab']`; os campos das antigas 11 seções foram fundidos, sem perder nenhum) e os históricos como abas (`tab = True` nos inlines). `registry/static/registry/abas_cliente.js` lembra a aba das duas barras (fieldsets dentro de General e inlines em `#tabs-items`), abre o inline que tiver erro de validação e abre **Backups** ao acompanhar uma operação.
 - **`lista_backups`** — seção "Backups" com botão 💾 Novo Backup, **console ao vivo** (ver "Backup completo por cliente"), tabela de histórico com barra de progresso, 📜 Log por backup, links ⬇ Baixar e ↩ Restaurar
 - **`versao_atual`** — seção "Versão Atual": 3 linhas resumo (ERP em execução × alvo, SyncAgent, PDV Local) + tabela de todas as `InstalacaoAgente` (instalação, versão, visto por último, badge de conectividade) + botão 🔄 Verificar versões agora (`/<pk>/coletar-versoes/` → `task_coletar_versoes_cliente`, redireciona com `?coletando=1` e a página recarrega em ~5s). Dados vêm de `registry.cp_pull` — ver seção abaixo.
 - **Ações em lote:** `acao_reprovisionar`, `acao_destruir`
@@ -332,6 +333,17 @@ O botão **"Aplicar Configurações"** (`_view_aplicar_modulos`) atualiza via `d
 ```
 
 **Por que isso importa:** se o `subdominio` do cliente for alterado no admin (ex.: migração de domínio de `ararasuite.com.br` para `jfnbrasil.com.br`), apenas atualizar o campo no banco não basta — a label do Traefik no serviço Docker ainda aponta para o domínio antigo. O wildcard DNS do domínio antigo continua roteando tráfego para o container, que agora rejeita o host com `DisallowedHost`. Clicar em "Aplicar Configurações" corrige ALLOWED_HOSTS e a label do Traefik de uma vez.
+
+### Domínios próprios (vários por cliente)
+
+Doc: `docs/registry/dominios-multiplos.md`. Lógica pura em `registry/dominios.py`, Cloudflare em `registry/cloudflare.py`. Salvar a aba Domínios não publica nada; o **Aplicar Configurações** publica e remove:
+
+- **Env:** `ALLOWED_HOSTS`/`CSRF_TRUSTED_ORIGINS` = subdomínio + domínios `servir`. Os `redirecionar` e os `www.` ficam de fora (o redirect é no Traefik).
+- **Traefik:** routers `{slug}-erp-custom-{dominio com . → _}` (+ `-www`) e middlewares `{slug}-redir-{alvo}`. `dominios.args_reconciliar` lê as labels atuais (`swarm.labels_do_servico`) e dá `--label-rm` em toda label dos prefixos `routers.{slug}-erp-custom`, `middlewares.{slug}-redir-` e o legado `middlewares.{slug}-www-redirect` que não está no desejado. Nunca mexe em `{slug}-erp`. No `stack.yml`, `dominios.labels_yaml` escapa `$` → `$$`.
+- **Cloudflare:** zona achada subindo os níveis (`erp.loja.com.br` → `loja.com.br`). Removidos = `dominios_aplicados − desejados`, nunca hostname que hoje é de outro cliente. CNAME só é apagado se apontar para o nosso tunnel, e a zona nunca é apagada. Falha mantém o removido em `dominios_aplicados` para a próxima tentativa.
+- `SITE_URL` continua sempre o subdomínio. O health check, o `cp_pull`/`cp_push` e o e-mail usam `Cliente.host_publico`.
+- Domínio com acento é gravado em punycode. Trocar o principal num salvamento só funciona (`DominioCliente.get_constraints` tira a constraint do principal do `full_clean`; `_DominiosFormSet.save` desmarca o antigo antes). **Não** pôr em "Redireciona" domínio onde um SyncAgent/PDV foi ativado: o Traefik responde 308, mas o .NET descarta o `Authorization` no redirect (401).
+- Testes: `test_dominios.py`, `test_dominios_playwright.py` e o E2E opcional `test_dominios_swarm_e2e.py` (`CP_E2E_SWARM=1`, Swarm local descartável; passos na doc). Release: `docs/registry/release-dominios-multiplos.md`.
 
 ### Página de serviço indisponível (catch-all do Traefik)
 

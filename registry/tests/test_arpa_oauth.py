@@ -2,7 +2,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from django.test import TestCase
 
-from registry.models import Cliente, Plano
+from registry.models import Cliente, DominioCliente, Plano
 
 
 class ArpaOauthCallbackTests(TestCase):
@@ -65,7 +65,8 @@ class ArpaOauthCallbackTests(TestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_usa_subdominio_mesmo_com_dominio_proprio(self):
-        self._cliente(dominio_custom="loja.com.br")
+        cliente = self._cliente()
+        DominioCliente.objects.create(cliente=cliente, dominio="loja.com.br", principal=True)
         response = self.client.get(self.URL, {"code": "abc", "state": self._state()})
 
         self.assertEqual(urlsplit(response["Location"]).netloc, "loja.ararasuite.com.br")

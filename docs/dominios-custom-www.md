@@ -1,5 +1,7 @@
 # Domínios Custom — Suporte a www
 
+> **Substituído na 0.0.61** por [dominios-multiplos.md](registry/dominios-multiplos.md): `Cliente.dominio_custom` virou a lista `DominioCliente` (vários domínios, modo por domínio, remoção automática). Este documento fica como histórico.
+
 ## Problema
 
 Ao configurar `neodistribuidora.com.br` como domínio custom de um cliente, apenas

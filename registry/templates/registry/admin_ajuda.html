@@ -335,11 +335,11 @@
     <h3>🔑 Acesso ao ERP do cliente</h3>
     <p>Na página do cliente, o painel <strong>"Acesso ao ERP"</strong> exibe:</p>
     <ul>
-      <li><strong>URL</strong> — domínio custom (se configurado) ou subdomínio padrão</li>
+      <li><strong>URL</strong> — domínio principal (aba Domínios, se houver) ou subdomínio padrão</li>
       <li><strong>Usuário</strong> — sempre <code>admin</code></li>
       <li><strong>Senha inicial</strong> — extraída do log etapa <code>criar_superuser</code></li>
     </ul>
-    <p style="margin-top:8px;">O subdomínio padrão (<code>{slug}.ararasuite.com.br</code>) <strong>sempre funciona</strong>, mesmo após ativar domínio custom — use como acesso de emergência.</p>
+    <p style="margin-top:8px;">O subdomínio padrão (<code>{slug}.ararasuite.com.br</code>) <strong>sempre funciona</strong>, mesmo com domínios próprios — use como acesso de emergência.</p>
   </div>
 
   <div class="ajuda-card">
@@ -418,8 +418,9 @@
         <td>
           Atualiza o serviço Docker em execução via <code>docker service update</code>:<br>
           • <code>MODULOS_ATIVOS</code>, <code>TEMA_SITE</code><br>
-          • <code>ALLOWED_HOSTS</code>, <code>CSRF_TRUSTED_ORIGINS</code> (inclui domínio custom)<br>
-          • Labels Traefik para o domínio custom (router adicional <code>{slug}-erp-custom</code>)<br>
+          • <code>ALLOWED_HOSTS</code>, <code>CSRF_TRUSTED_ORIGINS</code> (subdomínio + domínios no modo "Abre o ERP")<br>
+          • Labels Traefik dos domínios próprios (routers <code>{slug}-erp-custom-*</code>), removendo os de domínios que saíram da lista<br>
+          • Cloudflare (DNS + tunnel) de todos os domínios — o mesmo que o botão ☁ abaixo<br>
           Atualiza também o <code>.env</code> do cliente em disco.<br>
           <em>Se o serviço não estiver provisionado, salva só no .env.</em>
         </td>
@@ -428,11 +429,11 @@
       <tr>
         <td><span class="btn-demo" style="background:#0369a1;">☁ Configurar Cloudflare</span></td>
         <td>
-          Chama a API da Cloudflare para o domínio custom:<br>
-          1. Adiciona <code>dominio</code> e <code>www.dominio</code> ao <strong>ingress do Cloudflare Tunnel</strong> (→ <code>traefik_traefik:80</code>)<br>
-          2. Cria/encontra a zona do domínio na conta Cloudflare<br>
-          3. Remove registros A/AAAA conflitantes no apex e no <code>www</code> (se existirem)<br>
-          4. Cria/atualiza <strong>CNAME</strong> <code>@</code> e <code>www</code> → <code>{tunnel-id}.cfargotunnel.com</code> (proxy ativo)<br>
+          Só o Cloudflare, sem mexer no Docker, para todos os domínios da aba <strong>Domínios</strong>:<br>
+          1. Põe cada domínio (e o <code>www.</code>, se marcado) no <strong>ingress do Cloudflare Tunnel</strong> (→ <code>traefik_traefik:80</code>)<br>
+          2. Encontra a zona subindo os níveis (<code>erp.loja.com.br</code> → <code>loja.com.br</code>); sem zona, cria a do domínio<br>
+          3. Remove registros A/AAAA conflitantes e cria/atualiza o <strong>CNAME</strong> → <code>{tunnel-id}.cfargotunnel.com</code> (proxy ativo)<br>
+          4. Domínios que saíram da lista: tira do tunnel e apaga o CNAME <strong>se apontar para o tunnel</strong> (a zona nunca é apagada)<br>
           <em>Idempotente — pode ser executado várias vezes sem problema.</em>
         </td>
         <td><span class="tag-ok">Não</span></td>
@@ -481,63 +482,98 @@
   </div>
 </div>
 
-<!-- ═══ DOMÍNIO CUSTOM ═══ -->
-<p class="ajuda-section-title">Domínio custom</p>
+<!-- ═══ DOMÍNIOS PRÓPRIOS ═══ -->
+<p class="ajuda-section-title">Domínios próprios</p>
 <div class="ajuda-grid">
 
   <div class="ajuda-card">
     <h3>🌐 Como funciona</h3>
     <p>
-      Todo cliente tem um subdomínio padrão: <code>{slug}.ararasuite.com.br</code>.
-      O campo <strong>Domínio custom</strong> (seção Infraestrutura) permite que o cliente use também o próprio domínio — os dois funcionam em paralelo.
+      Todo cliente tem o subdomínio padrão <code>{slug}.ararasuite.com.br</code>, que sempre abre o ERP.
+      Na aba <strong>Domínios</strong> do cliente cadastre quantos domínios próprios quiser — apex
+      (<code>loja.com.br</code>) ou subdomínio do cliente (<code>erp.loja.com.br</code>).
     </p>
-    <p style="margin-top:12px;"><strong>O que o sistema configura automaticamente:</strong></p>
-    <table class="ajuda-table">
-      <tr><th>Componente</th><th>O que é configurado</th></tr>
-      <tr>
-        <td>Django</td>
-        <td><code>ALLOWED_HOSTS</code> e <code>CSRF_TRUSTED_ORIGINS</code> incluem o domínio custom</td>
-      </tr>
-      <tr>
-        <td>Traefik</td>
-        <td>Router <code>{slug}-erp-custom</code> com <code>Host(`dominio`)</code> → mesmo serviço <code>{slug}-erp</code></td>
-      </tr>
-      <tr>
-        <td>Cloudflare Tunnel</td>
-        <td>Ingress rule: <code>dominio</code> → <code>http://traefik_traefik:80</code></td>
-      </tr>
-      <tr>
-        <td>DNS Cloudflare</td>
-        <td>CNAME <code>@</code> → <code>{tunnel-id}.cfargotunnel.com</code> (proxy ativo)</td>
-      </tr>
+    <table class="ajuda-table" style="margin-top:12px;">
+      <tr><th>Campo</th><th>Efeito</th></tr>
+      <tr><td>Modo <strong>Abre o ERP</strong></td><td>Entra no <code>ALLOWED_HOSTS</code>/<code>CSRF_TRUSTED_ORIGINS</code>; router Traefik <code>{slug}-erp-custom-&lt;dominio&gt;</code> → serviço <code>{slug}-erp</code></td></tr>
+      <tr><td>Modo <strong>Redireciona</strong></td><td>O Traefik responde 301 para o endereço principal, mantendo o caminho. Não chega ao Django (fica fora do <code>ALLOWED_HOSTS</code>)</td></tr>
+      <tr><td><strong>Principal</strong></td><td>No máximo um, sempre no modo "Abre o ERP". É o link de acesso, do e-mail de boas-vindas, do health check e das chamadas CP → ERP. Sem principal, vale o subdomínio. O <code>SITE_URL</code> continua sendo o subdomínio</td></tr>
+      <tr><td><strong>Incluir www</strong></td><td>Publica também <code>www.&lt;dominio&gt;</code>, com 301 para o domínio (ou para o principal, no modo Redireciona). Desligue em subdomínios se não quiser <code>www.erp.loja.com.br</code></td></tr>
     </table>
   </div>
 
   <div class="ajuda-card">
-    <h3>📋 Fluxo completo de ativação</h3>
+    <h3>📋 Fluxo</h3>
     <div class="ajuda-step" style="margin-top:4px;">
       <div class="ajuda-step-num">1</div>
-      <div class="ajuda-step-text">Preencha <strong>Domínio custom</strong> (ex: <code>meaempresa.com.br</code>) e <strong>salve</strong>.</div>
+      <div class="ajuda-step-text">Na aba <strong>Domínios</strong>, adicione/edite/remova os domínios e <strong>salve</strong>. O CP avisa que falta aplicar.</div>
     </div>
     <div class="ajuda-step">
       <div class="ajuda-step-num">2</div>
-      <div class="ajuda-step-text">Clique em <strong>⚙ Aplicar Configurações</strong> — Django e Traefik passam a aceitar o domínio (~30s).</div>
+      <div class="ajuda-step-text">Clique em <strong>⚙ Aplicar Configurações</strong>: env, labels do Traefik e Cloudflare (DNS + tunnel) de uma vez. Domínios removidos saem de todos eles.</div>
     </div>
     <div class="ajuda-step">
       <div class="ajuda-step-num">3</div>
-      <div class="ajuda-step-text">Clique em <strong>☁ Configurar Cloudflare</strong> — adiciona o domínio ao tunnel e cria o CNAME no DNS.</div>
-    </div>
-    <div class="ajuda-step">
-      <div class="ajuda-step-num">4</div>
       <div class="ajuda-step-text">
-        <strong>Se a zona foi criada agora:</strong> informe ao cliente os nameservers exibidos na mensagem — ele precisa trocá-los no registrador (Registro.br, GoDaddy, etc.).
-        Propaga em 1–24h.<br>
-        <strong>Se a zona já estava ativa:</strong> o CNAME propaga em segundos e o domínio já funciona.
+        <strong>Se uma zona foi criada agora:</strong> informe ao cliente os nameservers da mensagem — ele troca no registrador (Registro.br, GoDaddy...). Propaga em 1–24h.<br>
+        <strong>Se a zona já existia:</strong> o CNAME propaga em segundos.
       </div>
     </div>
     <div class="ajuda-step">
-      <div class="ajuda-step-num">5</div>
-      <div class="ajuda-step-text">Após propagação, o ERP responde em <code>https://meaempresa.com.br</code> com HTTPS automático pela Cloudflare.</div>
+      <div class="ajuda-step-num">4</div>
+      <div class="ajuda-step-text">Se só o Cloudflare falhou (token, zona), corrija e use <strong>☁ Configurar Cloudflare</strong> — refaz só essa parte, inclusive as remoções pendentes.</div>
+    </div>
+  </div>
+
+  <div class="ajuda-card">
+    <h3>🧭 Exemplos práticos</h3>
+    <table class="ajuda-table">
+      <tr><th>O cliente quer…</th><th>Como cadastrar na aba Domínios</th></tr>
+      <tr>
+        <td>Usar o próprio domínio como endereço oficial</td>
+        <td><code>loja.com.br</code> · Abre o ERP · <strong>Principal</strong> · Incluir www. O <code>www.loja.com.br</code> redireciona para <code>loja.com.br</code>.</td>
+      </tr>
+      <tr>
+        <td>Trocar de domínio sem quebrar links antigos</td>
+        <td>Novo: <code>loja-nova.com.br</code> · Abre o ERP · <strong>Principal</strong>.<br>Antigo: <code>loja.com.br</code> · <strong>Redireciona</strong>. Quem abre o antigo cai no novo, com o mesmo caminho.<br><em>Se algum PDV foi ativado no domínio antigo, deixe o antigo em "Abre o ERP" até reativar o PDV no novo.</em></td>
+      </tr>
+      <tr>
+        <td>Um endereço só para o sistema, separado do site</td>
+        <td><code>erp.loja.com.br</code> · Abre o ERP · Principal · <strong>sem</strong> Incluir www. A zona <code>loja.com.br</code> precisa existir na conta Cloudflare.</td>
+      </tr>
+      <tr>
+        <td>Duas marcas abrindo o mesmo ERP</td>
+        <td><code>marca-a.com.br</code> · Abre o ERP · Principal, e <code>marca-b.com.br</code> · Abre o ERP. Os dois abrem o sistema; o principal é o usado nos e-mails e no health check.</td>
+      </tr>
+      <tr>
+        <td>Deixar de usar um domínio</td>
+        <td>Marque <strong>Remover</strong> na linha, salve e clique em <strong>⚙ Aplicar Configurações</strong>. Sai do Traefik, do <code>ALLOWED_HOSTS</code>, do tunnel e do DNS (só o CNAME que aponta para o tunnel).</td>
+      </tr>
+      <tr>
+        <td>Trocar qual domínio é o principal</td>
+        <td>Desmarque o atual, marque o novo e salve uma vez só. Depois, Aplicar Configurações.</td>
+      </tr>
+    </table>
+    <p style="margin-top:10px;">Acentos são aceitos (<code>lojá.com.br</code>): o CP grava em punycode (<code>xn--loj-gla.com.br</code>), que é como o Cloudflare e o navegador tratam o nome.</p>
+  </div>
+
+  <div class="ajuda-card">
+    <h3>🔎 Como conferir se está no ar</h3>
+    <div class="ajuda-step" style="margin-top:4px;">
+      <div class="ajuda-step-num">1</div>
+      <div class="ajuda-step-text">Aba <strong>Acesso e Infraestrutura</strong> → painel de acesso: a linha <strong>Endereços</strong> lista o subdomínio, cada domínio, o modo e para onde cada <code>www.</code> e cada redirecionamento vão.</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">2</div>
+      <div class="ajuda-step-text">Depois do Aplicar, as mensagens no topo dizem, por domínio, o que foi feito no Cloudflare (CNAME criado/atualizado, zona criada com os nameservers, avisos de certificado). Leia os avisos amarelos.</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">3</div>
+      <div class="ajuda-step-text">No servidor manager: <code>docker service inspect {slug}_web --format '{% templatetag openvariable %}json .Spec.Labels{% templatetag closevariable %}'</code> deve ter um router <code>{slug}-erp-custom-&lt;dominio&gt;</code> por domínio, e nenhum de domínio removido.</div>
+    </div>
+    <div class="ajuda-step">
+      <div class="ajuda-step-num">4</div>
+      <div class="ajuda-step-text">No navegador: <code>https://dominio</code> abre o ERP; <code>https://www.dominio</code> e os domínios em "Redireciona" devem trocar o endereço na barra para o principal.</div>
     </div>
   </div>
 
@@ -545,26 +581,15 @@
     <h3>⚠️ Casos especiais</h3>
     <table class="ajuda-table">
       <tr><th>Situação</th><th>Comportamento</th></tr>
-      <tr>
-        <td>CNAME já aponta para o tunnel correto</td>
-        <td>Nenhuma alteração. Idempotente.</td>
-      </tr>
-      <tr>
-        <td>Existia registro A/AAAA antigo (no apex ou no <code>www</code>)</td>
-        <td>O sistema remove os registros A e AAAA e cria o CNAME automaticamente.</td>
-      </tr>
-      <tr>
-        <td>Já existia um CNAME <code>www</code> apontando para outro host</td>
-        <td>O sistema atualiza o CNAME existente para o tunnel (busca sempre pelo FQDN <code>www.dominio</code>). Antes da v0.0.27 isso falhava com <code>400: record with that host already exists</code>.</td>
-      </tr>
-      <tr>
-        <td>Zona existe em outra conta Cloudflare</td>
-        <td>Cloudflare retorna erro "already exists" — o domínio precisa ser transferido para esta conta.</td>
-      </tr>
-      <tr>
-        <td>Domínio custom removido (campo limpo)</td>
-        <td>"Aplicar Configurações" retira o domínio do <code>ALLOWED_HOSTS</code> e das labels Traefik. O registro DNS e a entrada no tunnel <strong>não são removidos automaticamente</strong> — faça isso manualmente em Cloudflare → Zero Trust → Tunnels.</td>
-      </tr>
+      <tr><td>Subdomínio (<code>erp.loja.com.br</code>) sem a zona <code>loja.com.br</code> no Cloudflare</td><td>O Cloudflare não aceita zona de subdomínio: o CP avisa para cadastrar antes a zona do domínio raiz.</td></tr>
+      <tr><td>Nome dois níveis abaixo da zona (ex.: <code>www.erp.loja.com.br</code>)</td><td>O certificado universal do Cloudflare só cobre <code>loja.com.br</code> e <code>*.loja.com.br</code>: o CP publica, mas avisa que o navegador vai dar erro de certificado. Desligue "Incluir www" em subdomínios.</td></tr>
+      <tr><td>Domínio onde um SyncAgent/PDV foi ativado passa para "Redireciona"</td><td><strong>Não faça.</strong> O Traefik responde 308 (mantém o método), mas o cliente HTTP do agente descarta o token ao seguir o redirect e a sincronização para com 401. Mantenha esse domínio em "Abre o ERP".</td></tr>
+      <tr><td>Existia registro A/AAAA antigo</td><td>Removido; o CNAME para o tunnel é criado.</td></tr>
+      <tr><td>Domínio removido cujo CNAME aponta para outro lugar (ex.: site do cliente)</td><td>O CNAME é mantido e a tela avisa; só sai do tunnel.</td></tr>
+      <tr><td>Domínio passou para outro cliente</td><td>A remoção do cliente antigo não apaga o DNS nem o tunnel do novo dono.</td></tr>
+      <tr><td>Falha no Cloudflare durante a remoção</td><td>O domínio continua registrado como pendente e a remoção é refeita no próximo clique.</td></tr>
+      <tr><td>Zona existe em outra conta Cloudflare</td><td>Cloudflare retorna "already exists" — transfira o domínio para esta conta.</td></tr>
+      <tr><td>Destruir cliente</td><td>Não limpa o Cloudflare: remova os domínios e clique em Aplicar antes de destruir, se quiser limpar DNS/tunnel.</td></tr>
     </table>
   </div>
 
@@ -790,7 +815,7 @@
 </div>
 
 <div class="ajuda-alert">
-  💡 <strong>Diagnóstico rápido:</strong> se um domínio custom não responde, verifique em ordem: (1) o serviço está <strong>Running</strong> no Swarm (<code>docker service ps {slug}_web</code>); (2) as labels Traefik estão aplicadas (<code>docker service inspect {slug}_web</code>); (3) o tunnel tem o hostname no ingress (Cloudflare → Zero Trust → Tunnels → Public Hostnames); (4) o CNAME no DNS aponta para o tunnel.
+  💡 <strong>Diagnóstico rápido:</strong> se um domínio próprio não responde, verifique em ordem: (1) o serviço está <strong>Running</strong> no Swarm (<code>docker service ps {slug}_web</code>); (2) as labels Traefik estão aplicadas (<code>docker service inspect {slug}_web</code>); (3) o tunnel tem o hostname no ingress (Cloudflare → Zero Trust → Tunnels → Public Hostnames); (4) o CNAME no DNS aponta para o tunnel.
 </div>
 
 <!-- ═══ ATUALIZAÇÕES DO CP ═══ -->

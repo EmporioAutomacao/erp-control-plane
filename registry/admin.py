@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.html import escape, format_html, format_html_join, mark_safe
 from unfold.admin import ModelAdmin
 from . import versoes
-from .models import Modulo, Plano, Regiao, HostInfraestrutura, Cliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare, ConfiguracaoArmazenamento, ConfiguracaoAtualizacao, BackupCliente, VersaoAgente, SincronizacaoVersoesAgente, InstalacaoAgente, MigracaoCliente
+from .models import Modulo, Plano, Regiao, HostInfraestrutura, Cliente, DominioCliente, ProvisionamentoLog, AtualizacaoVersao, VerificacaoSaude, ConfiguracaoEmail, ConfiguracaoCloudflare, ConfiguracaoArmazenamento, ConfiguracaoAtualizacao, BackupCliente, VersaoAgente, SincronizacaoVersoesAgente, InstalacaoAgente, MigracaoCliente
 
 
 @admin.register(Modulo)
@@ -271,6 +271,62 @@ class _UltimosRegistrosFormSet(BaseInlineFormSet):
         if not hasattr(self, '_ultimos'):
             self._ultimos = super().get_queryset()[:self.limite]
         return self._ultimos
+
+
+class _DominiosFormSet(BaseInlineFormSet):
+    """Regras entre as linhas: um principal só, e nenhum hostname (com www) repetido."""
+
+    def clean(self):
+        super().clean()
+        from . import dominios
+        principais, vistos = 0, {}
+        for form in self.forms:
+            dados = getattr(form, 'cleaned_data', None)
+            if not dados or dados.get('DELETE') or not dados.get('dominio'):
+                continue
+            principais += 1 if dados.get('principal') else 0
+            for nome in dominios.hostnames_do_dominio(form.instance):
+                if nome in vistos:
+                    raise forms.ValidationError(f'{nome} aparece em mais de um domínio deste cliente.')
+                vistos[nome] = True
+        if principais > 1:
+            raise forms.ValidationError('Marque no máximo um domínio como principal.')
+
+    def save(self, commit=True):
+        # Troca de principal num salvamento só: desmarca o antigo antes de gravar o novo,
+        # senão a constraint dominio_principal_unico_por_cliente recusa o UPDATE/INSERT.
+        if commit:
+            novo = next((
+                f.instance for f in self.forms
+                if getattr(f, 'cleaned_data', None) and f.cleaned_data.get('principal')
+                and not f.cleaned_data.get('DELETE')
+            ), None)
+            if novo is not None:
+                DominioCliente.objects.filter(cliente=self.instance, principal=True).exclude(
+                    pk=novo.pk).update(principal=False)
+        return super().save(commit)
+
+
+class DominioClienteInline(admin.TabularInline):
+    tab = True
+    model = DominioCliente
+    formset = _DominiosFormSet
+    extra = 0
+    fields = ['dominio', 'modo', 'principal', 'incluir_www']
+    verbose_name = 'Domínio próprio'
+    verbose_name_plural = 'Domínios'
+
+    def _editavel(self, obj):
+        return obj is None or not _migracao_ativa(obj)
+
+    def has_add_permission(self, request, obj=None):
+        return self._editavel(obj) and super().has_add_permission(request, obj)
+
+    def has_change_permission(self, request, obj=None):
+        return self._editavel(obj) and super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return self._editavel(obj) and super().has_delete_permission(request, obj)
 
 
 class ProvisionamentoLogInline(admin.TabularInline):  # noqa: keep django TabularInline (unfold doesn't override it)
@@ -675,14 +731,14 @@ class ClienteAdmin(ModelAdmin):
     readonly_fields = ['id', 'criado_em', 'atualizado_em', 'status_badge', 'painel_acesso', 'acoes_provisionamento', 'badge_isencao', 'lista_backups', 'acoes_versoes', 'acoes_plano_sync', 'versao_atual', 'migracao_servidor']
     filter_horizontal = ['modulos_ativos', 'versoes_permitidas']
     actions = [acao_reprovisionar, acao_destruir]
-    inlines = [ProvisionamentoLogInline, AtualizacaoVersaoInline, SincronizacaoVersoesAgenteInline]
+    inlines = [DominioClienteInline, ProvisionamentoLogInline, AtualizacaoVersaoInline, SincronizacaoVersoesAgenteInline]
     # Página dividida em abas (steps) pelo Unfold: cada fieldset com classes=['tab'] vira uma aba.
     fieldsets = [
         ('Cadastro', {'classes': ['tab'], 'fields': [
             'id', 'slug', 'nome', 'cnpj', 'email_contato', 'telefone', 'observacoes', 'criado_em', 'atualizado_em',
         ]}),
         ('Acesso e Infraestrutura', {'classes': ['tab'], 'fields': [
-            'painel_acesso', 'host', 'migracao_servidor', 'versao_erp', 'stack_path', 'subdominio', 'dominio_custom',
+            'painel_acesso', 'host', 'migracao_servidor', 'versao_erp', 'stack_path', 'subdominio',
         ]}),
         ('Plano e Faturamento', {'classes': ['tab'], 'fields': [
             'plano', 'modulos_ativos', 'tema_site', 'acoes_plano_sync',
@@ -711,6 +767,17 @@ class ClienteAdmin(ModelAdmin):
             self.message_user(request, f'{obj.slug}: o site e o cron estão sendo tirados do ar. Os dados são mantidos.', level=messages.WARNING)
         elif anterior in Cliente.STATUS_FORA_DO_AR and obj.status in Cliente.STATUS_NO_AR:
             self.message_user(request, f'{obj.slug}: o site e o cron estão sendo religados.', level=messages.SUCCESS)
+
+    def save_related(self, request, form, formsets, change):
+        from django.contrib import messages
+        super().save_related(request, form, formsets, change)
+        if change and any(fs.model is DominioCliente and fs.has_changed() for fs in formsets):
+            self.message_user(
+                request,
+                f'{form.instance.slug}: domínios alterados. Clique em ⚙ Aplicar Configurações para '
+                'publicá-los (Traefik, Cloudflare e ALLOWED_HOSTS) e remover os que saíram.',
+                level=messages.WARNING,
+            )
 
     def get_readonly_fields(self, request, obj=None):
         # Durante a migração de servidor o cadastro inteiro fica somente leitura: trocar host,
@@ -850,14 +917,12 @@ class ClienteAdmin(ModelAdmin):
         slug = cliente.slug
         modulos = ','.join(m.slug for m in cliente.modulos_ativos.all()) or 'financeiro,tarefas'
         tema = cliente.tema_site or 'loja'
-        dominio_custom = cliente.dominio_custom or ''
         subdominio = cliente.subdominio
+        from . import cloudflare, dominios, swarm
 
-        allowed_hosts = f'{subdominio},{dominio_custom}' if dominio_custom else subdominio
-        csrf_origins = (
-            f'https://{subdominio},https://{dominio_custom}' if dominio_custom
-            else f'https://{subdominio}'
-        )
+        lista_dominios = dominios.do_cliente(cliente)
+        allowed_hosts = dominios.allowed_hosts(cliente, lista_dominios)
+        csrf_origins = dominios.csrf_origins(cliente, lista_dominios)
 
         import secrets
 
@@ -919,29 +984,25 @@ class ClienteAdmin(ModelAdmin):
             # Atualiza a label do router principal (subdomínio padrão) no Traefik
             '--label-add', f'traefik.http.routers.{slug}-erp.rule=Host(`{subdominio}`)',
         ]
-        if dominio_custom:
-            cmd += [
-                # Router apex
-                '--label-add', f'traefik.http.routers.{slug}-erp-custom.rule=Host(`{dominio_custom}`)',
-                '--label-add', f'traefik.http.routers.{slug}-erp-custom.entrypoints=web',
-                '--label-add', f'traefik.http.routers.{slug}-erp-custom.service={slug}-erp',
-                '--label-rm', f'traefik.http.routers.{slug}-erp-custom.tls',
-                # Router www → redirect 301 para o apex
-                '--label-add', f'traefik.http.routers.{slug}-erp-custom-www.rule=Host(`www.{dominio_custom}`)',
-                '--label-add', f'traefik.http.routers.{slug}-erp-custom-www.entrypoints=web',
-                '--label-add', f'traefik.http.routers.{slug}-erp-custom-www.middlewares={slug}-www-redirect',
-                '--label-add', f'traefik.http.middlewares.{slug}-www-redirect.redirectregex.regex=^https?://www\\.(.+)',
-                '--label-add', f'traefik.http.middlewares.{slug}-www-redirect.redirectregex.replacement=https://${{1}}',
-                '--label-add', f'traefik.http.middlewares.{slug}-www-redirect.redirectregex.permanent=true',
-            ]
+        try:
+            labels_atuais = swarm.labels_do_servico(service_name)
+        except Exception as exc:
+            labels_atuais = {}  # serviço inexistente: o update abaixo responde "not found"
+            if 'não encontrado' not in str(exc):
+                messages.warning(
+                    request,
+                    f'Não foi possível ler as labels atuais de {service_name} ({exc}): os domínios foram '
+                    'publicados, mas routers de domínios removidos podem ter ficado. Clique de novo em Aplicar.',
+                )
+        cmd += dominios.args_reconciliar(slug, labels_atuais, dominios.labels_traefik(cliente, lista_dominios))
         cmd.append(service_name)
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.returncode == 0:
                 desc = f'módulos={modulos}, tema={tema}'
-                if dominio_custom:
-                    desc += f', domínio={dominio_custom} (+ {subdominio})'
+                if lista_dominios:
+                    desc += f', domínios={", ".join(d.dominio for d in lista_dominios)} (+ {subdominio})'
                 messages.success(
                     request,
                     f'Configurações aplicadas para "{slug}": {desc}. '
@@ -955,23 +1016,8 @@ class ClienteAdmin(ModelAdmin):
                     MotorProvisionamento(cliente).sincronizar_servico_cron()
                 except Exception as exc:
                     messages.warning(request, f'Falha ao sincronizar o serviço de crons ({slug}_cron): {exc}')
-                if dominio_custom:
-                    try:
-                        cf = self._configurar_dominio_cloudflare(dominio_custom)
-                        if cf['ok']:
-                            if cf['zona_criada']:
-                                ns = ', '.join(cf['nameservers'])
-                                messages.info(
-                                    request,
-                                    f'Zona "{dominio_custom}" criada no Cloudflare. '
-                                    f'Informe ao cliente para trocar os nameservers no registrador para: {ns}',
-                                )
-                            else:
-                                messages.success(request, f'CNAME de "{dominio_custom}" {cf["record"]} no Cloudflare → tunnel "{cf["tunnel_name"]}".')
-                        else:
-                            messages.warning(request, f'Cloudflare: {cf["erro"]}')
-                    except Exception as exc:
-                        messages.warning(request, f'Falha ao configurar Cloudflare: {exc}')
+                if lista_dominios or cliente.dominios_aplicados:
+                    self._mostrar_cloudflare(request, cloudflare.sincronizar(cliente))
             elif 'not found' in result.stderr:
                 messages.info(request, 'Configurações salvas no .env. O cliente ainda não está provisionado — serão aplicadas no próximo provisionamento.')
             else:
@@ -1056,166 +1102,21 @@ class ClienteAdmin(ModelAdmin):
 
     def _view_configurar_cloudflare(self, request, pk):
         from django.contrib import messages
+        from . import cloudflare
         cliente = get_object_or_404(Cliente, pk=pk)
-        if not cliente.dominio_custom:
-            messages.warning(request, 'Nenhum domínio custom configurado para este cliente.')
+        if not cliente.dominios.exists() and not cliente.dominios_aplicados:
+            messages.warning(request, 'Nenhum domínio próprio cadastrado para este cliente.')
             return redirect('admin:registry_cliente_change', pk)
-        try:
-            cf = self._configurar_dominio_cloudflare(cliente.dominio_custom)
-            if cf['ok']:
-                if cf['zona_criada']:
-                    ns = ', '.join(cf['nameservers'])
-                    messages.success(request, f'Zona "{cliente.dominio_custom}" criada no Cloudflare.')
-                    messages.info(request, f'Informe ao cliente para trocar os nameservers no registrador para: {ns}')
-                else:
-                    messages.success(request, f'CNAME de "{cliente.dominio_custom}" {cf["record"]} no Cloudflare → tunnel "{cf["tunnel_name"]}".')
-            else:
-                messages.error(request, f'Cloudflare: {cf["erro"]}')
-        except Exception as exc:
-            messages.error(request, f'Falha ao configurar Cloudflare: {exc}')
+        self._mostrar_cloudflare(request, cloudflare.sincronizar(cliente))
         return redirect('admin:registry_cliente_change', pk)
 
-    def _configurar_dominio_cloudflare(self, dominio):
-        import requests as _requests
-
-        cfg = ConfiguracaoCloudflare.obter()
-        token = (cfg.cf_api_token if cfg else None) or os.getenv('CF_API_TOKEN', '')
-        token = token.strip()
-        if not token:
-            return {'ok': False, 'erro': 'Token Cloudflare não configurado. Acesse Configurações → Cloudflare no admin do CP.'}
-
-        tunnel_name_cfg = (cfg.tunnel_name if cfg else None) or os.getenv('CF_TUNNEL_NAME', '')
-
-        def _cf_raise(r):
-            if not r.ok:
-                try:
-                    erros = r.json().get('errors', [])
-                    msg = erros[0].get('message', r.text) if erros else r.text
-                except Exception:
-                    msg = r.text
-                raise Exception(f'Cloudflare {r.status_code}: {msg}')
-            return r
-
-        auth_headers = {'Authorization': f'Bearer {token}'}
-        json_headers = {**auth_headers, 'Content-Type': 'application/json'}
-        base = 'https://api.cloudflare.com/client/v4'
-
-        r_verify = _requests.get(f'{base}/user/tokens/verify', headers=auth_headers, timeout=10)
-        if not r_verify.ok:
-            return {
-                'ok': False,
-                'erro': (
-                    'CF_API_TOKEN inválido. Verifique: (1) é um API Token, não a Global API Key; '
-                    '(2) tem permissões Zone:Read + DNS:Edit + Account:Cloudflare Tunnel:Edit. '
-                    f'Cloudflare retornou {r_verify.status_code}.'
-                ),
-            }
-
-        # Obtém account ID a partir de uma zona existente (não requer Account:Read)
-        saas_domain = os.getenv('SAAS_DOMAIN', 'ararasuite.com.br')
-        r_zone = _requests.get(f'{base}/zones', params={'name': saas_domain}, headers=auth_headers, timeout=15)
-        if r_zone.ok and r_zone.json().get('result'):
-            account_id = r_zone.json()['result'][0]['account']['id']
-        else:
-            r = _cf_raise(_requests.get(f'{base}/accounts', headers=auth_headers, timeout=15))
-            accounts = r.json()['result']
-            if not accounts:
-                return {'ok': False, 'erro': f'Não foi possível obter o Account ID. Adicione "Account Settings:Read" ao token ou certifique que SAAS_DOMAIN ({saas_domain}) está na conta Cloudflare.'}
-            account_id = accounts[0]['id']
-
-        # Encontra o tunnel ativo
-        params = {'is_deleted': 'false'}
-        if tunnel_name_cfg:
-            params['name'] = tunnel_name_cfg
-        r = _cf_raise(_requests.get(f'{base}/accounts/{account_id}/cfd_tunnel', params=params, headers=auth_headers, timeout=15))
-        tunnels = r.json()['result']
-        if not tunnels:
-            return {'ok': False, 'erro': 'Nenhum Cloudflare Tunnel encontrado. Configure o nome do tunnel em Configurações → Cloudflare.'}
-        tunnel = tunnels[0]
-        tunnel_id = tunnel['id']
-        tunnel_name = tunnel['name']
-
-        # Atualiza ingress do tunnel para incluir o domínio custom
-        r = _cf_raise(_requests.get(f'{base}/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations', headers=auth_headers, timeout=15))
-        config_data = r.json()['result'].get('config', {})
-        ingress = config_data.get('ingress', [])
-
-        www_dominio = f'www.{dominio}'
-        ingress_others = [
-            rule for rule in ingress
-            if rule.get('hostname') and rule['hostname'] not in {dominio, www_dominio}
-        ]
-        catch_all = next((rule for rule in ingress if not rule.get('hostname')), {'service': 'http_status:404'})
-        new_ingress = [
-            {'hostname': dominio,     'service': 'http://traefik_traefik:80'},
-            {'hostname': www_dominio, 'service': 'http://traefik_traefik:80'},
-        ] + ingress_others + [catch_all]
-
-        _cf_raise(_requests.put(
-            f'{base}/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations',
-            json={'config': {**config_data, 'ingress': new_ingress}},
-            headers=json_headers, timeout=15,
-        ))
-
-        # Cria/encontra zona e cria CNAME apontando para o tunnel
-        r = _cf_raise(_requests.get(f'{base}/zones', params={'name': dominio}, headers=auth_headers, timeout=15))
-        zonas = r.json()['result']
-        nameservers = []
-        zona_criada = False
-
-        if zonas:
-            zone_id = zonas[0]['id']
-        else:
-            r = _cf_raise(_requests.post(f'{base}/zones', json={'name': dominio, 'jump_start': False}, headers=json_headers, timeout=15))
-            data = r.json()['result']
-            zone_id = data['id']
-            nameservers = data.get('name_servers', [])
-            zona_criada = True
-
-        tunnel_cname = f'{tunnel_id}.cfargotunnel.com'
-
-        def _upsert_cname(nome_label, nome_fqdn):
-            """Cria/atualiza um CNAME proxied → tunnel, removendo A/AAAA/CNAME
-            conflitantes no mesmo host. A busca é sempre pelo FQDN — a API do
-            Cloudflare ignora labels curtas como 'www'."""
-            # Remove A/AAAA conflitantes (CNAME não coexiste com eles)
-            for tipo in ('A', 'AAAA'):
-                rr = _requests.get(
-                    f'{base}/zones/{zone_id}/dns_records',
-                    params={'type': tipo, 'name': nome_fqdn},
-                    headers=auth_headers, timeout=15,
-                )
-                if rr.ok:
-                    for rec in rr.json().get('result', []):
-                        _cf_raise(_requests.delete(
-                            f'{base}/zones/{zone_id}/dns_records/{rec["id"]}',
-                            headers=auth_headers, timeout=15,
-                        ))
-
-            rr = _cf_raise(_requests.get(
-                f'{base}/zones/{zone_id}/dns_records',
-                params={'type': 'CNAME', 'name': nome_fqdn},
-                headers=auth_headers, timeout=15,
-            ))
-            recs = rr.json()['result']
-            payload = {'type': 'CNAME', 'name': nome_label, 'content': tunnel_cname, 'proxied': True, 'ttl': 1}
-            if recs:
-                if recs[0]['content'] != tunnel_cname or not recs[0].get('proxied'):
-                    _cf_raise(_requests.put(
-                        f'{base}/zones/{zone_id}/dns_records/{recs[0]["id"]}',
-                        json=payload, headers=json_headers, timeout=15,
-                    ))
-                return 'atualizado'
-            _cf_raise(_requests.post(
-                f'{base}/zones/{zone_id}/dns_records',
-                json=payload, headers=json_headers, timeout=15,
-            ))
-            return 'criado'
-
-        record_acao = _upsert_cname('@', dominio)
-        _upsert_cname('www', f'www.{dominio}')
-
-        return {'ok': True, 'zona_criada': zona_criada, 'nameservers': nameservers, 'record': record_acao, 'tunnel_name': tunnel_name}
+    @staticmethod
+    def _mostrar_cloudflare(request, resultado):
+        from django.contrib import messages
+        for nivel, texto in resultado['mensagens']:
+            getattr(messages, nivel)(request, texto)
+        if resultado['erro']:
+            messages.error(request, f'Cloudflare: {resultado["erro"]}')
 
     def _view_backup(self, request, pk):
         from django.contrib import messages
@@ -1435,8 +1336,25 @@ class ClienteAdmin(ModelAdmin):
             '<td style="padding:4px 8px"><code>admin</code></td></tr>'
             '<tr><td style="padding:4px 8px;font-weight:600">Senha inicial</td>'
             '<td style="padding:4px 8px"><code>{senha}</code></td></tr>'
+            '<tr><td style="padding:4px 8px;font-weight:600;vertical-align:top">Endereços</td>'
+            '<td style="padding:4px 8px">{enderecos}</td></tr>'
             '</table>',
-            url=url, senha=senha,
+            url=url, senha=senha, enderecos=self._lista_enderecos(obj),
+        )
+
+    @staticmethod
+    def _lista_enderecos(obj):
+        from . import dominios
+        linhas = [(obj.subdominio, 'subdomínio — abre o ERP')]
+        for d in dominios.do_cliente(obj):
+            desc = 'abre o ERP' if d.modo == dominios.MODO_SERVIR else f'redireciona para {obj.host_publico}'
+            if d.principal:
+                desc = 'principal — ' + desc
+            linhas.append((d.dominio, desc))
+            linhas += [(n, f'redireciona para {d.dominio if d.modo == dominios.MODO_SERVIR else obj.host_publico}')
+                       for n in dominios.hostnames_do_dominio(d) if n != d.dominio]
+        return format_html_join(
+            mark_safe('<br>'), '<code>{}</code> <span style="opacity:.7">({})</span>', linhas,
         )
     painel_acesso.short_description = 'Acesso ao ERP'
 
@@ -1472,13 +1390,13 @@ class ClienteAdmin(ModelAdmin):
         url_cloudflare = reverse('admin:registry_cliente_configurar_cloudflare', args=[obj.pk])
         return format_html(
             '<p style="margin:0 0 10px;padding:8px 12px;background:#fff8e1;border-left:4px solid #f9a825;font-size:12px;color:#5d4037;">'
-            '⚠️ <strong>Salve o formulário antes</strong> de aplicar — o botão lê os módulos, tema e domínio custom já gravados no banco.'
+            '⚠️ <strong>Salve o formulário antes</strong> de aplicar — o botão lê os módulos, tema e domínios já gravados no banco.'
             '</p>'
             '<a href="{}" style="display:inline-block;padding:6px 14px;background:#2e7d32;color:#fff;border-radius:4px;text-decoration:none;font-size:13px;" '
-            'onclick="return confirm(\'O serviço web do cliente será reiniciado para aplicar as configurações (módulos, tema, domínio custom) — leva ~30s. Continuar?\')">⚙ Aplicar Configurações</a>'
+            'onclick="return confirm(\'O serviço web do cliente será reiniciado para aplicar as configurações (módulos, tema, domínios) — leva ~30s. Continuar?\')">⚙ Aplicar Configurações</a>'
             '&nbsp;&nbsp;'
             '<a href="{}" style="display:inline-block;padding:6px 14px;background:#0369a1;color:#fff;border-radius:4px;text-decoration:none;font-size:13px;" '
-            'onclick="return confirm(\'Adicionar domínio custom ao Cloudflare Tunnel e criar CNAME no DNS. Continuar?\')">☁ Configurar Cloudflare</a>'
+            'onclick="return confirm(\'Publicar os domínios no Cloudflare Tunnel e no DNS (e remover os que saíram da lista). Continuar?\')">☁ Configurar Cloudflare</a>'
             '&nbsp;&nbsp;'
             '<a href="{}" style="display:inline-block;padding:6px 14px;background:#417690;color:#fff;border-radius:4px;text-decoration:none;font-size:13px;" '
             'onclick="return confirm(\'ATENÇÃO: Faça backup do banco do cliente ANTES de re-provisionar. Dados podem ser perdidos se houver conflito de volume.\\n\\nConfirma que o backup foi realizado e deseja continuar?\')">Re-provisionar</a>'
