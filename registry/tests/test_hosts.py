@@ -144,7 +144,7 @@ class TasksTests(_Base):
         HostInfraestrutura.objects.create(nome='inativo', ip='10.0.0.9', regiao_id='anapolis', ativo=False)
         with patch('registry.tasks.task_pingar_host.apply_async') as ping:
             task_verificar_hosts()
-        ping.assert_called_once_with(args=[self.host.pk, 'srv-hostinger'], queue='no.srv-hostinger', expires=240)
+        ping.assert_called_once_with(args=[self.host.pk, 'srv-hostinger', True], queue='no.srv-hostinger', expires=240)
 
     def test_ping_grava_disco_e_clientes_e_reavalia(self):
         from registry.tasks import task_pingar_host
@@ -242,3 +242,66 @@ class StacksNoNoTests(SimpleTestCase):
         nomes = 'acme_db.1.x\nacme_web.1.y\nloja_db.1.z\ncp_db.1.w\ncp_web.1.v\n'
         with patch('subprocess.run', return_value=SimpleNamespace(returncode=0, stdout=nomes, stderr='')):
             self.assertEqual(stacks_de_clientes_no_no(ignorar='cp'), 2)
+
+
+class DiscoClientesTests(_Base):
+    def _cliente(self, slug, host):
+        from registry.models import Cliente, Plano
+        plano, _ = Plano.objects.get_or_create(slug='p', defaults={'nome': 'Plano', 'preco_mensal': '0.00'})
+        n = Cliente.objects.count() + 1
+        return Cliente.objects.create(
+            slug=slug, nome=slug, cnpj=f'00.000.000/{n:04d}-00', email_contato=f'{slug}@example.invalid',
+            subdominio=f'{slug}.ararasuite.com.br', plano=plano, status='ativo', versao_erp='0.0.100', host=host,
+        )
+
+    def test_le_saida_do_du_por_volume(self):
+        from registry.volumes import _ler_du_volumes
+        saida = '2048\tloja_pgdata/_data\n10\tloja_media/_data\n4\tminha_loja_backups/_data\n5\t*_media/_data\n'
+        self.assertEqual(_ler_du_volumes(saida), {
+            'loja': {'pgdata': 2048 * 1024, 'media': 10 * 1024},
+            'minha_loja': {'backups': 4 * 1024},
+        })
+
+    def test_grava_so_clientes_do_host(self):
+        outro = HostInfraestrutura.objects.create(nome='outro', ip='10.0.0.3', regiao_id='hostinger')
+        loja = self._cliente('loja', self.host)
+        vazio = self._cliente('vazio', self.host)
+        fora = self._cliente('fora', outro)
+        hosts.registrar_disco_clientes(self.host.pk, {
+            'loja': {'pgdata': 300, 'media': 100}, 'fora': {'pgdata': 999},
+        })
+        for c in (loja, vazio, fora):
+            c.refresh_from_db()
+        self.assertEqual((loja.disco_bytes, loja.disco_detalhe), (400, {'pgdata': 300, 'media': 100}))
+        self.assertIsNone(vazio.disco_bytes)
+        self.assertIsNotNone(vazio.disco_medido_em)
+        self.assertIsNone(fora.disco_medido_em)
+
+    def test_mede_no_maximo_a_cada_30_min(self):
+        from registry.models import Cliente
+        loja = self._cliente('loja', self.host)
+        self.assertTrue(hosts.medir_disco_clientes_agora(self.host.pk))
+        Cliente.objects.filter(pk=loja.pk).update(disco_medido_em=timezone.now() - timedelta(minutes=10))
+        self.assertFalse(hosts.medir_disco_clientes_agora(self.host.pk))
+        Cliente.objects.filter(pk=loja.pk).update(disco_medido_em=timezone.now() - timedelta(minutes=31))
+        self.assertTrue(hosts.medir_disco_clientes_agora(self.host.pk))
+
+    def test_ping_com_medicao_grava_disco_dos_clientes(self):
+        from registry.tasks import task_pingar_host
+        loja = self._cliente('loja', self.host)
+        with patch.dict('os.environ', {'NODE_HOSTNAME': 'srv-hostinger'}),                 patch('registry.volumes.disco_docker', return_value=(100, 400)),                 patch('registry.volumes.stacks_de_clientes_no_no', return_value=1),                 patch('registry.volumes.tamanho_volumes_clientes', return_value={'loja': {'pgdata': 5}}),                 patch('registry.atualizacoes.descobrir_stack', return_value='cp'),                 patch('registry.tasks.task_reavaliar_host.apply_async'):
+            task_pingar_host(self.host.pk, 'srv-hostinger', True)
+        loja.refresh_from_db()
+        self.assertEqual(loja.disco_bytes, 5)
+
+    def test_coluna_da_lista(self):
+        from django.contrib import admin as dj_admin
+        from registry.models import Cliente
+        coluna = dj_admin.site._registry[Cliente].col_disco
+        loja = self._cliente('loja', self.host)
+        self.assertIn('—', coluna(loja))
+        loja.disco_bytes, loja.disco_detalhe = 3 * 1024 ** 3, {'pgdata': 2 * 1024 ** 3, 'media': 1024 ** 3}
+        loja.disco_medido_em = timezone.now()
+        html = coluna(loja)
+        self.assertIn('3.0 GB', html)
+        self.assertIn('Banco: 2.0 GB', html)

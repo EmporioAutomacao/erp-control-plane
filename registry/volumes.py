@@ -10,6 +10,7 @@ a perda dos dados.
 """
 import hashlib
 import os
+import re
 import subprocess
 
 # Volumes de arquivos do stack do cliente: nome no stack -> caminho dentro do web/cron.
@@ -222,20 +223,57 @@ def espaco_livre_docker(timeout=60):
     return disco_docker(timeout)[0]
 
 
-def disco_docker(timeout=60):
-    """(livres, total) em bytes do disco do diretório raiz do Docker deste nó."""
+def _raiz_docker(timeout=60):
     raiz = subprocess.run(['docker', 'info', '--format', '{{.DockerRootDir}}'], capture_output=True, text=True,
                           timeout=timeout)
     if raiz.returncode != 0 or not (raiz.stdout or '').strip():
         raise RuntimeError('Não foi possível descobrir o diretório raiz do Docker')
+    return raiz.stdout.strip()
+
+
+def disco_docker(timeout=60):
+    """(livres, total) em bytes do disco do diretório raiz do Docker deste nó."""
     r = subprocess.run(
-        ['docker', 'run', '--rm', '-v', f'{raiz.stdout.strip()}:/raiz:ro', IMAGEM_AUXILIAR, 'df', '-P', '-k', '/raiz'],
+        ['docker', 'run', '--rm', '-v', f'{_raiz_docker(timeout)}:/raiz:ro', IMAGEM_AUXILIAR, 'df', '-P', '-k', '/raiz'],
         capture_output=True, text=True, timeout=timeout,
     )
     if r.returncode != 0:
         raise RuntimeError(f'df falhou: {(r.stderr or "").strip()[:200]}')
     ultima = (r.stdout or '').strip().splitlines()[-1].split()
     return int(ultima[3]) * 1024, int(ultima[1]) * 1024
+
+
+def tamanho_volumes_clientes(timeout=600):
+    """{slug: {'pgdata': bytes, 'media': bytes, 'backups': bytes}} dos volumes de stack deste nó.
+
+    `du -sk` (espaço ocupado em disco) em `<raiz do Docker>/volumes/<slug>_<volume>/_data`, montado só leitura
+    num container auxiliar. Só entram os volumes que existem; o chamador decide quais slugs interessam.
+    """
+    script = ('cd /v && for d in ' + ' '.join(f'*_{v}' for v in VOLUMES_STACK) +
+              '; do [ -d "$d/_data" ] && du -sk "$d/_data"; done; true')
+    r = subprocess.run(
+        ['docker', 'run', '--rm', '-v', f'{_raiz_docker()}/volumes:/v:ro', IMAGEM_AUXILIAR, 'sh', '-c', script],
+        capture_output=True, text=True, timeout=timeout,
+    )
+    if r.returncode != 0:
+        raise RuntimeError(f'du dos volumes falhou: {(r.stderr or "").strip()[:200]}')
+    return _ler_du_volumes(r.stdout)
+
+
+_SLUG = re.compile(r'[-a-zA-Z0-9_]+')
+
+
+def _ler_du_volumes(saida):
+    tamanhos = {}
+    for linha in (saida or '').splitlines():
+        kb, _, caminho = linha.partition('\t')
+        nome = caminho.strip().split('/')[0]
+        for volume in VOLUMES_STACK:
+            sufixo = f'_{volume}'
+            if nome.endswith(sufixo) and _SLUG.fullmatch(nome[:-len(sufixo)]) and kb.strip().isdigit():
+                tamanhos.setdefault(nome[:-len(sufixo)], {})[volume] = int(kb) * 1024
+                break
+    return tamanhos
 
 
 def stacks_de_clientes_no_no(ignorar=None, timeout=30):

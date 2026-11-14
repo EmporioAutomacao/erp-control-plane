@@ -118,3 +118,29 @@ def registrar_ping(host_id, hostname, livre, total, containers):
         agente_respondeu_em=timezone.now(), disco_livre_bytes=livre, disco_total_bytes=total,
         containers_clientes=containers,
     )
+
+
+INTERVALO_MEDICAO_DISCO_S = 30 * 60
+
+
+def medir_disco_clientes_agora(host_id, agora=None):
+    """O `du` dos volumes percorre todos os arquivos: mede no máximo a cada 30 min por host."""
+    from datetime import timedelta
+    from .models import Cliente
+    limite = (agora or timezone.now()) - timedelta(seconds=INTERVALO_MEDICAO_DISCO_S)
+    return not Cliente.objects.filter(host_id=host_id, disco_medido_em__gte=limite).exists()
+
+
+def registrar_disco_clientes(host_id, tamanhos):
+    """Grava o espaço dos volumes medido no nó nos clientes **deste host**.
+
+    Volumes de outros clientes no mesmo nó (ex.: resíduos de uma migração) não contam: o cliente só recebe a
+    medida do nó em que está hoje. Cliente do host sem volume no nó fica com `disco_bytes=None`.
+    """
+    from .models import Cliente
+    agora = timezone.now()
+    for pk, slug in Cliente.objects.filter(host_id=host_id).values_list('pk', 'slug'):
+        detalhe = tamanhos.get(slug) or {}
+        Cliente.objects.filter(pk=pk).update(
+            disco_bytes=sum(detalhe.values()) if detalhe else None, disco_detalhe=detalhe, disco_medido_em=agora,
+        )

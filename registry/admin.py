@@ -725,7 +725,7 @@ class ClienteAdminForm(forms.ModelForm):
 @admin.register(Cliente)
 class ClienteAdmin(ModelAdmin):
     form = ClienteAdminForm
-    list_display = ['slug', 'nome', 'subdominio', 'plano', 'status_badge', 'isento_cobranca', 'col_versao_erp', 'criado_em']
+    list_display = ['slug', 'nome', 'subdominio', 'plano', 'status_badge', 'isento_cobranca', 'col_versao_erp', 'col_disco', 'criado_em']
     list_filter = ['status', 'plano', 'host', 'isento_cobranca', 'atualizacao_automatica_agente']
     search_fields = ['slug', 'nome', 'cnpj', 'email_contato']
     readonly_fields = ['id', 'criado_em', 'atualizado_em', 'status_badge', 'painel_acesso', 'acoes_provisionamento', 'badge_isencao', 'lista_backups', 'acoes_versoes', 'acoes_plano_sync', 'versao_atual', 'migracao_servidor']
@@ -1532,6 +1532,21 @@ class ClienteAdmin(ModelAdmin):
             return format_html('<span style="color:#e65100;">{} <small>(alvo {})</small></span>', det, alvo)
         return format_html('{} <small style="color:#999;">(alvo {})</small>', det, alvo)
     col_versao_erp.short_description = 'Versão ERP'
+
+    _NOMES_VOLUMES = {'pgdata': 'Banco', 'media': 'Mídia', 'backups': 'Backups do ERP'}
+
+    @admin.display(description='Disco', ordering='disco_bytes')
+    def col_disco(self, obj):
+        from django.utils import timezone
+        from .log_operacao import fmt_bytes
+        if obj.disco_bytes is None:
+            dica = ('Ainda não medido (a medição roda com a verificação dos hosts, a cada 30 min).'
+                    if obj.disco_medido_em is None else 'Nenhum volume do cliente encontrado no nó do host.')
+            return format_html('<span title="{}" style="color:#999;">—</span>', dica)
+        detalhe = obj.disco_detalhe or {}
+        partes = [f'{nome}: {fmt_bytes(detalhe[v])}' for v, nome in self._NOMES_VOLUMES.items() if v in detalhe]
+        partes.append(f'Medido em {timezone.localtime(obj.disco_medido_em).strftime("%d/%m/%Y %H:%M")}')
+        return format_html('<span title="{}">{}</span>', ' · '.join(partes), fmt_bytes(obj.disco_bytes))
 
     _CONN_CORES = {
         'online':   ('#e8f5e9', '#2e7d32', 'online'),

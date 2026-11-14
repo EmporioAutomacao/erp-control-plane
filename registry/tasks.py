@@ -1096,20 +1096,25 @@ def task_verificar_hosts():
 
 
 def _pedir_ping_host(host_id):
+    from .hosts import medir_disco_clientes_agora
     from .models import HostInfraestrutura
     from .nos import fila_do_no
     hostname = HostInfraestrutura.objects.filter(pk=host_id).values_list('no_hostname', flat=True).first()
     if hostname:
         # expira: um nó parado não acumula pings velhos que chegariam todos de uma vez ao voltar
-        task_pingar_host.apply_async(args=[host_id, hostname], queue=fila_do_no(hostname), expires=240)
+        task_pingar_host.apply_async(args=[host_id, hostname, medir_disco_clientes_agora(host_id)],
+                                     queue=fila_do_no(hostname), expires=240)
 
 
 @shared_task
-def task_pingar_host(host_id, hostname_esperado):
-    """Nó: prova que o worker do CP neste nó consome a fila e mede disco e clientes. Reavalia no manager."""
+def task_pingar_host(host_id, hostname_esperado, medir_clientes=False):
+    """Nó: prova que o worker do CP neste nó consome a fila e mede disco e clientes. Reavalia no manager.
+
+    Com `medir_clientes`, mede também o espaço dos volumes de cada cliente (coluna Disco da lista de Clientes).
+    """
     from .atualizacoes import descobrir_stack
-    from .hosts import registrar_ping
-    from .volumes import disco_docker, stacks_de_clientes_no_no
+    from .hosts import registrar_disco_clientes, registrar_ping
+    from .volumes import disco_docker, stacks_de_clientes_no_no, tamanho_volumes_clientes
     hostname = _hostname_local()
     if hostname != hostname_esperado:
         logger.error('Ping do host %s rodou em %s, esperado %s', host_id, hostname, hostname_esperado)
@@ -1124,6 +1129,11 @@ def task_pingar_host(host_id, hostname_esperado):
     except Exception:
         logger.warning('Ping do host %s: não foi possível contar os clientes', host_id, exc_info=True)
     registrar_ping(host_id, hostname, livre, total, containers)
+    if medir_clientes:
+        try:
+            registrar_disco_clientes(host_id, tamanho_volumes_clientes())
+        except Exception:
+            logger.warning('Ping do host %s: não foi possível medir os volumes dos clientes', host_id, exc_info=True)
     task_reavaliar_host.apply_async(args=[host_id], queue='celery')
 
 

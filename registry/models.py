@@ -165,6 +165,11 @@ class Cliente(models.Model):
         max_length=300, blank=True,
         verbose_name='Erro na última coleta de versões',
     )
+    # Espaço dos volumes do stack (pgdata + media + backups) no nó do host, medido pelo ping do host
+    # (registry/hosts.py::registrar_disco_clientes, no máximo a cada 30 min). Não inclui os backups no bucket.
+    disco_bytes = models.BigIntegerField('Disco', null=True, blank=True, editable=False)
+    disco_detalhe = models.JSONField(default=dict, blank=True, editable=False)
+    disco_medido_em = models.DateTimeField('Disco medido em', null=True, blank=True, editable=False)
     stack_path = models.CharField(max_length=500, blank=True)
     subdominio = models.CharField(max_length=100, unique=True)
     dominios_aplicados = models.JSONField(

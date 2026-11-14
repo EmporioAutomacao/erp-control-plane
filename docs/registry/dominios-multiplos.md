@@ -3,6 +3,9 @@
 Substitui o campo único `Cliente.dominio_custom` (docs antigos: `release-dominio-custom.md`,
 `dominio-custom-cloudflare.md`, `../dominios-custom-www.md`).
 
+Passo a passo de operação (zona, e-mail no provedor externo, nameservers, armadilhas):
+[dominio-proprio-email-externo.md](dominio-proprio-email-externo.md).
+
 ## Modelo
 
 `DominioCliente` (`registry_dominiocliente`), inline **Domínios** (aba) na página do Cliente:
