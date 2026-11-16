@@ -87,8 +87,13 @@ def hosts_servidos(cliente, dominios=None):
     return hosts
 
 
+# Nome do web na rede interna da stack: o <slug>_mcp chama http://web:8000 e o Django recusaria
+# (DisallowedHost) sem ele. Só entra no ALLOWED_HOSTS, nunca em CSRF, Cloudflare ou MCP_ALLOWED_HOSTS.
+HOST_INTERNO_WEB = 'web'
+
+
 def allowed_hosts(cliente, dominios=None):
-    return ','.join(hosts_servidos(cliente, dominios))
+    return ','.join([*hosts_servidos(cliente, dominios), HOST_INTERNO_WEB])
 
 
 def csrf_origins(cliente, dominios=None):
@@ -155,13 +160,14 @@ def labels_traefik(cliente, dominios=None):
     return labels
 
 
-def args_reconciliar(slug, atuais, desejadas):
+def args_reconciliar(slug, atuais, desejadas, prefixos=None):
     """Argumentos `docker service update` que levam as labels gerenciadas de `atuais` a `desejadas`.
 
     Remove (`--label-rm`) toda label dos prefixos gerenciados que não está em `desejadas`;
     adiciona (`--label-add`) as desejadas. Labels fora dos prefixos nunca são tocadas.
+    `prefixos`: os do serviço reconciliado (padrão: os dos domínios próprios do web).
     """
-    prefixos = prefixos_gerenciados(slug)
+    prefixos = prefixos or prefixos_gerenciados(slug)
     args = []
     for chave_label in sorted(atuais or {}):
         if chave_label.startswith(prefixos) and chave_label not in desejadas:

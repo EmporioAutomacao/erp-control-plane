@@ -11,6 +11,16 @@
 },
 {
   "model": "registry.modulo",
+  "pk": "agents",
+  "fields": {
+    "nome": "Agentes (Servidor MCP)",
+    "descricao": "Acesso dos agentes de IA (Hermes) ao ERP por ferramentas MCP auditadas (serviço <slug>_mcp). Opt-in por cliente: fora de qualquer plano.",
+    "preco_mensal": "0.00",
+    "ativo": true
+  }
+},
+{
+  "model": "registry.modulo",
   "pk": "caixa",
   "fields": {
     "nome": "Caixa",

@@ -10,7 +10,7 @@ from pathlib import Path
 import docker
 from django.utils import timezone
 
-from . import dominios, versoes
+from . import dominios, mcp, versoes
 
 logger = logging.getLogger(__name__)
 
@@ -107,13 +107,17 @@ class MotorProvisionamento:
             # senha_temp logged before deploy so it's preserved even if deploy fails
             self._log('criar_superuser', 'pendente', f'senha_temp:{senha_temp}')
 
-        stack_content = self._gerar_stack_yaml(slug, subdominio, versao, regiao, env_vars, labels_dominios)
+        servico_mcp = self.spec_mcp(versao)
+        stack_content = self._gerar_stack_yaml(
+            slug, subdominio, versao, regiao, env_vars, labels_dominios, servico_mcp=servico_mcp,
+        )
         stack_file = cliente_dir / 'stack.yml'
         stack_file.write_text(stack_content)
         if modo_migracao:
             stack_file = cliente_dir / 'stack-migracao.yml'
             stack_file.write_text(self._gerar_stack_yaml(
                 slug, subdominio, versao, regiao, env_vars, labels_dominios, replicas_app=0, traefik=False,
+                servico_mcp=servico_mcp,
             ))
         self._log('gerar_stack', 'concluido')
 
@@ -176,6 +180,7 @@ class MotorProvisionamento:
         # Só depois do web, que roda as migrations no entrypoint: o cron nunca
         # fica com código antigo contra o schema novo (era o que matava o loop).
         self.sincronizar_servico_cron(versao_nova)
+        self.sincronizar_servico_mcp(versao_nova)
         from .models import Cliente
         Cliente.objects.filter(pk=self.cliente.pk).update(versao_erp=versao_nova)
 
@@ -224,6 +229,68 @@ class MotorProvisionamento:
         if result.returncode != 0:
             raise RuntimeError(f'Falha ao sincronizar o serviço {nome}: {result.stderr.strip()}')
 
+    def spec_mcp(self, versao):
+        """Env, labels e réplicas do ``<slug>_mcp`` (ver ``registry/mcp.py``), sem tocar no Docker."""
+        lista = dominios.do_cliente(self.cliente)
+        return {
+            'env': mcp.env(self.cliente, versao, lista),
+            'labels': mcp.labels_traefik(self.cliente, lista),
+            'replicas': mcp.replicas_desejadas(self.cliente),
+        }
+
+    def sincronizar_servico_mcp(self, versao=None):
+        """Garante o serviço ``<slug>_mcp`` com a imagem do web, o env próprio e as réplicas do módulo.
+
+        Diferente do cron, **não** copia env nem volumes do web (segredos). Cria o serviço em clientes
+        provisionados antes dele; se já existe, atualiza imagem, env, labels (removendo routers de
+        domínio que saiu) e réplicas. ``traefik.enable`` segue o do web, que a migração entre
+        servidores liga e desliga.
+        """
+        slug = self.cliente.slug
+        nome = mcp.nome_servico(slug)
+        if versao:
+            versoes.exigir_sem_downgrade(self.cliente, versao)
+        spec_web = self._spec_servico(f'{slug}_web')
+        container = spec_web['TaskTemplate']['ContainerSpec']
+        imagem = f'{ERP_IMAGE}:{versao}' if versao else container['Image'].split('@')[0]
+        lista = dominios.do_cliente(self.cliente)
+        env = mcp.env(self.cliente, imagem.rsplit(':', 1)[-1], lista)
+        habilitado = (spec_web.get('Labels') or {}).get('traefik.enable', 'true') == 'true'
+        labels = mcp.labels_traefik(self.cliente, lista, habilitado=habilitado)
+        replicas = str(mcp.replicas_desejadas(self.cliente))
+
+        spec_mcp = self._spec_servico(nome, obrigatorio=False)
+        if spec_mcp is None:
+            cmd = [
+                'docker', 'service', 'create', '--detach', '--with-registry-auth',
+                '--name', nome,
+                '--label', f'com.docker.stack.namespace={slug}',
+                '--container-label', f'com.docker.stack.namespace={slug}',
+                '--network', f'{slug}_internal',
+                '--network', 'traefik-public',
+                '--replicas', replicas,
+                '--restart-condition', 'any', '--restart-delay', '60s', '--restart-window', '120s',
+                '--entrypoint', ' '.join(mcp.COMANDO),
+            ]
+            for constraint in (spec_web['TaskTemplate'].get('Placement') or {}).get('Constraints') or []:
+                cmd += ['--constraint', constraint]
+            for chave, valor in env.items():
+                cmd += ['--env', f'{chave}={valor}']
+            for chave, valor in labels.items():
+                cmd += ['--label', f'{chave}={valor}']
+            cmd.append(imagem)
+        else:
+            cmd = ['docker', 'service', 'update', '--detach', '--with-registry-auth', '--image', imagem,
+                   '--replicas', replicas]
+            for chave, valor in env.items():
+                cmd += ['--env-add', f'{chave}={valor}']
+            cmd += mcp.args_reconciliar(slug, spec_mcp.get('Labels') or {}, labels)
+            cmd.append(nome)
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f'Falha ao sincronizar o serviço {nome}: {result.stderr.strip()}')
+
     def _spec_servico(self, nome, obrigatorio=True):
         result = subprocess.run(
             ['docker', 'service', 'inspect', '--format', '{{json .Spec}}', nome],
@@ -256,6 +323,10 @@ class MotorProvisionamento:
         # Cliente suspenso não pode continuar disparando WhatsApp/e-mail pelo cron.
         if self._spec_servico(f'{self.cliente.slug}_cron', obrigatorio=False) is not None:
             subprocess.run(['docker', 'service', 'scale', f'{self.cliente.slug}_cron=0'], check=True)
+        # Nem o MCP: cliente fora do ar não expõe /mcp.
+        nome_mcp = mcp.nome_servico(self.cliente.slug)
+        if self._spec_servico(nome_mcp, obrigatorio=False) is not None:
+            subprocess.run(['docker', 'service', 'scale', f'{nome_mcp}=0'], check=True)
 
     def reativar(self):
         subprocess.run(['docker', 'service', 'scale', f'{self.cliente.slug}_web=1'], check=True)
@@ -263,6 +334,8 @@ class MotorProvisionamento:
             self.sincronizar_servico_cron()
         else:
             subprocess.run(['docker', 'service', 'scale', f'{self.cliente.slug}_cron=1'], check=True)
+        # Volta a seguir o módulo `agents` (e cria o serviço em cliente antigo).
+        self.sincronizar_servico_mcp()
 
     def _aguardar_servico(self, service_name, timeout=120):
         deadline = time.monotonic() + timeout
@@ -370,10 +443,15 @@ class MotorProvisionamento:
         }
 
     def _gerar_stack_yaml(self, slug, subdominio, versao, regiao, env_vars, labels_dominios=None,
-                          replicas_app=1, traefik=True):
-        """`labels_dominios`: labels dos domínios próprios (`dominios.labels_traefik`), valor bruto."""
+                          replicas_app=1, traefik=True, servico_mcp=None):
+        """`labels_dominios`: labels dos domínios próprios (`dominios.labels_traefik`), valor bruto.
+
+        `servico_mcp`: `spec_mcp()` (env, labels, réplicas). O bloco `mcp` usa só esse env, nunca o do
+        web, não tem volumes e segue `replicas_app`/`traefik` como o web (modo migração).
+        """
         env_block = '\n'.join(f'      {k}: "{v}"' for k, v in env_vars.items() if k != 'SLUG')
         labels_custom = dominios.labels_yaml(labels_dominios or {})
+        bloco_mcp = self._bloco_mcp_yaml(versao, regiao, servico_mcp, replicas_app, traefik) if servico_mcp else ''
         return f"""version: "3.8"
 services:
   web:
@@ -420,7 +498,7 @@ services:
         condition: any
         delay: 60s
         window: 120s
-
+{bloco_mcp}
   db:
     image: pgvector/pgvector:0.8.0-pg17
     environment:
@@ -456,4 +534,32 @@ networks:
   internal:
     driver: overlay
     attachable: true
+"""
+
+    @staticmethod
+    def _bloco_mcp_yaml(versao, regiao, servico_mcp, replicas_app, traefik):
+        replicas = min(replicas_app, servico_mcp['replicas'])
+        labels = dict(servico_mcp['labels'])
+        if not traefik:
+            labels['traefik.enable'] = 'false'
+        env_block = '\n'.join(f'      {k}: "{v}"' for k, v in servico_mcp['env'].items())
+        return f"""
+  mcp:
+    image: {ERP_IMAGE}:{versao}
+    entrypoint: {json.dumps(mcp.COMANDO)}
+    environment:
+{env_block}
+    networks:
+      - traefik-public
+      - internal
+    deploy:
+      replicas: {replicas}
+      placement:
+        constraints:
+          - node.labels.region == {regiao}
+      restart_policy:
+        condition: any
+        delay: 60s
+        window: 120s
+      labels:{dominios.labels_yaml(labels)}
 """

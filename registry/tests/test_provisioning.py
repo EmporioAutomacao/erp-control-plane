@@ -76,10 +76,14 @@ class MotorProvisionamentoImagemTests(SimpleTestCase):
         self.motor._aguardar_servico = lambda *args, **kwargs: None
         versoes_cron = []
         self.motor.sincronizar_servico_cron = versoes_cron.append
+        versoes_mcp = []
+        self.motor.sincronizar_servico_mcp = versoes_mcp.append
 
         self.motor.atualizar_versao('0.0.71')
 
         self.assertEqual(versoes_cron, ['0.0.71'])
+        # O MCP troca de imagem junto, depois do web (migrations) e do cron.
+        self.assertEqual(versoes_mcp, ['0.0.71'])
 
         run_mock.assert_called_once_with(
             [

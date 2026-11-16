@@ -153,11 +153,12 @@ class MotorForaDoArTests(TestCase):
         cliente = _cliente(status='suspenso')
         motor = MotorProvisionamento(cliente)
         with patch.object(motor, '_aguardar_servico') as aguardar, patch.object(motor, '_aguardar_http') as http, \
-                patch.object(motor, 'sincronizar_servico_cron') as cron:
+                patch.object(motor, 'sincronizar_servico_cron') as cron,                 patch.object(motor, 'sincronizar_servico_mcp') as mcp_sync:
             motor.atualizar_versao('0.0.149')
         aguardar.assert_not_called()
         http.assert_not_called()
         cron.assert_called_once_with('0.0.149')
+        mcp_sync.assert_called_once_with('0.0.149')
 
     def test_suspender_sem_servico_de_cron_nao_falha(self):
         cliente = _cliente(status='suspenso')

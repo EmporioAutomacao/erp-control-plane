@@ -38,9 +38,16 @@ class FakeMotor:
     implantacoes = []
     env = dict(SEGREDOS)
     falhar_executar = False
+    mcp_sincronizados = []
+    falhar_mcp = False
 
     def __init__(self, cliente):
         self.cliente = cliente
+
+    def sincronizar_servico_mcp(self):
+        if FakeMotor.falhar_mcp:
+            raise RuntimeError('rede traefik-public ausente')
+        FakeMotor.mcp_sincronizados.append(self.cliente.host.regiao_id)
 
     def executar(self, modo_migracao=False):
         if FakeMotor.falhar_executar:
@@ -61,6 +68,8 @@ class _Base(TestCase):
         FakeMotor.implantacoes = []
         FakeMotor.env = dict(SEGREDOS)
         FakeMotor.falhar_executar = False
+        FakeMotor.mcp_sincronizados = []
+        FakeMotor.falhar_mcp = False
         self.user = get_user_model().objects.create_superuser('mig', 'mig@example.com', 'SenhaSegura123!')
         self.plano = Plano.objects.create(slug='basico-mig', nome='Basico Mig', preco_mensal='0.00')
         self.regiao_b = Regiao.objects.create(slug='hostinger', nome='Hostinger')
@@ -185,10 +194,19 @@ class CaminhoFelizTests(_Base):
         self.assertIsNotNone(m.ponto_sem_volta_em)
         self.p['traefik'].assert_called_once_with('acme_web', True)
         self.assertEqual(self.escalas()[-1], ('acme_cron', 1))
+        # O stack de migração implanta o MCP parado e fora do Traefik: ele é religado no destino.
+        self.assertEqual(FakeMotor.mcp_sincronizados, ['hostinger'])
         self.assertEqual(m.volumes_residuais, {'no': 'no-a', 'volumes': ['acme_pgdata', 'acme_media', 'acme_backups']})
         self.cliente.refresh_from_db()
         self.assertEqual(self.cliente.host, self.host_b)
         self.assertEqual(self.cliente.status, 'ativo')
+
+    def test_falha_ao_religar_o_mcp_nao_pede_intervencao(self):
+        FakeMotor.falhar_mcp = True
+        self.ate_testando()
+        m = self.evento('teste_interno', {'ok': True, 'detalhe': 'ok'})
+        self.assertEqual(m.status, 'concluida')
+        self.assertIn('Servidor MCP do ERP não foi religado (rede traefik-public ausente)', m.log)
 
     def test_eventos_repetidos_ou_fora_de_hora_sao_ignorados(self):
         self.ate_restaurando()
@@ -358,6 +376,7 @@ class VoltaTests(_Base):
         self.assertEqual(self.escalas()[-2:], [('acme_cron', 1), ('acme_web', 1)])
         self.assertIsNone(m.volumes_residuais)
         self.p['traefik'].assert_not_called()
+        self.assertEqual(FakeMotor.mcp_sincronizados, [])  # stack não foi reimplantado: MCP intocado
 
     def test_backup_sem_sha256_volta(self):
         self.ate_backup()
@@ -383,6 +402,7 @@ class VoltaTests(_Base):
         self.assertEqual(m.status, 'revertida')
         self.p['traefik'].assert_called_with('acme_web', True)
         self.assertEqual(self.escalas()[-2:], [('acme_cron', 1), ('acme_web', 1)])
+        self.assertEqual(FakeMotor.mcp_sincronizados, ['anapolis'])
         self.assertEqual(m.volumes_residuais['no'], 'no-b')
         self.assertIsNone(m.ponto_sem_volta_em)
         return m
@@ -709,7 +729,9 @@ class ModoMigracaoProvisionamentoTests(TestCase):
         self.assertTrue(deploy[deploy.index('-c') + 1].endswith('stack-migracao.yml'))
         migr = (self.dir / 'stack-migracao.yml').read_text()
         normal = (self.dir / 'stack.yml').read_text()
-        self.assertEqual(migr.count('replicas: 0'), 2)
+        # web, cron e mcp parados; o mcp também fora do Traefik até o ponto sem volta.
+        self.assertEqual(migr.count('replicas: 0'), 3)
+        self.assertNotIn('"traefik.enable=true"', migr)
         self.assertIn('"traefik.enable=false"', migr)
         self.assertIn('node.labels.region == brasilia', migr)
         self.assertEqual(normal.count('replicas: 1'), 2)

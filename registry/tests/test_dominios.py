@@ -101,14 +101,16 @@ class NormalizacaoEValidacaoTests(_ComCliente):
 class EnvTests(TestCase):
     def test_allowed_hosts_so_dominios_que_servem(self):
         lista = [_d('loja.com.br', principal=True), _d('antiga.com.br', 'redirecionar'), _d('erp.loja2.com.br')]
-        self.assertEqual(dominios.allowed_hosts(_c(), lista), 'acme.ararasuite.com.br,loja.com.br,erp.loja2.com.br')
+        # `web`: nome interno do web, chamado pelo <slug>_mcp (só no ALLOWED_HOSTS, nunca em CSRF).
+        self.assertEqual(dominios.allowed_hosts(_c(), lista), 'acme.ararasuite.com.br,loja.com.br,erp.loja2.com.br,web')
         self.assertEqual(
             dominios.csrf_origins(_c(), lista),
             'https://acme.ararasuite.com.br,https://loja.com.br,https://erp.loja2.com.br',
         )
 
     def test_sem_dominios(self):
-        self.assertEqual(dominios.allowed_hosts(_c(), []), 'acme.ararasuite.com.br')
+        self.assertEqual(dominios.allowed_hosts(_c(), []), 'acme.ararasuite.com.br,web')
+        self.assertNotIn('web', dominios.csrf_origins(_c(), []))
 
 
 class LabelsTraefikTests(TestCase):
@@ -349,21 +351,23 @@ class AdminDominiosTests(_ComCliente):
         self.c.force_login(self.user)
 
     @patch('registry.cloudflare.sincronizar', return_value={'ok': True, 'mensagens': [('success', 'cf ok')], 'erro': ''})
+    @patch('registry.provisioning.MotorProvisionamento.sincronizar_servico_mcp')
     @patch('registry.provisioning.MotorProvisionamento.sincronizar_servico_cron')
     @patch('registry.swarm.labels_do_servico', return_value={
         'traefik.http.routers.acme-erp-custom.rule': 'Host(`velho.com.br`)'})
     @patch('subprocess.run')
-    def test_aplicar_configuracoes_reconcilia(self, run, _labels, _cron, cf):
+    def test_aplicar_configuracoes_reconcilia(self, run, _labels, _cron, mcp_sync, cf):
         run.return_value = SimpleNamespace(returncode=0, stdout='', stderr='')
         DominioCliente.objects.create(cliente=self.cliente, dominio='loja.com.br', principal=True)
         DominioCliente.objects.create(cliente=self.cliente, dominio='antiga.com.br', modo='redirecionar')
         r = self.c.get(reverse('admin:registry_cliente_aplicar_modulos', args=[self.cliente.pk]), follow=True)
         cmd = run.call_args[0][0]
-        self.assertIn('ALLOWED_HOSTS=acme.ararasuite.com.br,loja.com.br', cmd)
+        self.assertIn('ALLOWED_HOSTS=acme.ararasuite.com.br,loja.com.br,web', cmd)
         self.assertIn('--label-rm', cmd)
         self.assertIn('traefik.http.routers.acme-erp-custom.rule', cmd)
         self.assertIn('traefik.http.routers.acme-erp-custom-antiga_com_br.middlewares=acme-redir-loja_com_br', cmd)
         self.assertEqual(cmd[-1], 'acme_web')
+        mcp_sync.assert_called_once_with()
         cf.assert_called_once()
         self.assertContains(r, 'cf ok')
 

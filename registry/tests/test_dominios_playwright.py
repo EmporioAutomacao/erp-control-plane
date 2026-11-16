@@ -116,6 +116,7 @@ class DominiosPlaywrightTests(PlaywrightAdminTestCase):
         run = patch('subprocess.run', return_value=SimpleNamespace(returncode=0, stdout='', stderr='')).start()
         patch('registry.swarm.labels_do_servico', return_value={}).start()
         patch('registry.provisioning.MotorProvisionamento.sincronizar_servico_cron').start()
+        patch('registry.provisioning.MotorProvisionamento.sincronizar_servico_mcp').start()
         cf = patch('registry.cloudflare.sincronizar', return_value={
             'ok': True, 'mensagens': [('success', 'Cloudflare: loja.com.br criado')], 'erro': ''}).start()
 
@@ -130,7 +131,7 @@ class DominiosPlaywrightTests(PlaywrightAdminTestCase):
         self.page.get_by_text('Cloudflare: loja.com.br criado').first.wait_for()
         self.page.get_by_text('domínios=loja.com.br (+ pw-dom.ararasuite.com.br)').first.wait_for()
         cmd = run.call_args[0][0]
-        self.assertIn('ALLOWED_HOSTS=pw-dom.ararasuite.com.br,loja.com.br', cmd)
+        self.assertIn('ALLOWED_HOSTS=pw-dom.ararasuite.com.br,loja.com.br,web', cmd)
         self.assertIn('traefik.http.routers.pw-dom-erp-custom-loja_com_br.rule=Host(`loja.com.br`)', cmd)
         cf.assert_called_once()
 

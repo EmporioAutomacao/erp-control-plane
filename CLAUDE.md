@@ -93,6 +93,7 @@ Cada etapa de provisionamento é registrada em `ProvisionamentoLog` via `MotorPr
 | `slug` | Nome | Descrição |
 |---|---|---|
 | `assistente_comercial` | Assistente Comercial | IA para suporte e sugestões no processo de vendas |
+| `agents` | Agentes (Servidor MCP) | Acesso dos agentes de IA ao ERP pelo serviço `{slug}_mcp`. **Opt-in por cliente: nunca listar em plano da fixture** (o `carregar_dados_iniciais` o incluiria nos planos e ligaria o MCP sozinho) |
 | `caixa` | Caixa | Frente de caixa (PDV) para registro de vendas presenciais |
 | `cobranca` | Cobrança | Gestão de cobranças, boletos e inadimplência |
 | `compras` | Compras | Pedidos de compra e controle de fornecedores |
@@ -140,7 +141,7 @@ Todos os módulos têm `preco_mensal=0.00` — a cobrança é feita pelo plano. 
 
 ### Infraestrutura por cliente
 
-O `MotorProvisionamento` (`registry/provisioning.py`) gera um Docker Swarm stack com três serviços: `{slug}_web` (ERP Django), `{slug}_db` (PostgreSQL+pgvector), `{slug}_redis`. O placement usa `node.labels.region == {regiao}` do `HostInfraestrutura` associado. Os arquivos ficam em `CLIENTES_BASE_PATH/{slug}/`.
+O `MotorProvisionamento` (`registry/provisioning.py`) gera um Docker Swarm stack com três serviços: `{slug}_web` (ERP Django), `{slug}_db` (PostgreSQL+pgvector), `{slug}_redis`. Também `{slug}_cron` (executor de crons, env/volumes copiados do web) e `{slug}_mcp` (Servidor MCP do ERP, ligado pelo módulo `agents` do cliente, **com env próprio e sem volumes**: nunca copiar o env do web para ele) — ver `docs/registry/servico-mcp-por-cliente.md`. O placement usa `node.labels.region == {regiao}` do `HostInfraestrutura` associado. Os arquivos ficam em `CLIENTES_BASE_PATH/{slug}/`.
 
 **Método `destruir()`:** remove o stack, aguarda 15s, remove volumes (`pgdata`, `media`, `backups`), apaga o diretório e deleta o registro do banco.
 

@@ -482,7 +482,21 @@ def abrir(migracao_id):
     except Exception as exc:
         intervencao(migracao_id, f'Falha depois do ponto sem volta: {exc}')
         return
+    _sincronizar_mcp(migracao_id, m.cliente)
     concluir(migracao_id)
+
+
+def _sincronizar_mcp(migracao_id, cliente):
+    """Religa o ``<slug>_mcp`` (o stack de migração o implanta parado e fora do Traefik).
+
+    Falha aqui não é motivo de intervenção: o ERP já está no ar e o MCP não guarda dado.
+    """
+    from .provisioning import MotorProvisionamento
+    try:
+        MotorProvisionamento(cliente).sincronizar_servico_mcp()
+    except Exception as exc:
+        logger.warning('Migracao %s: falha ao sincronizar o MCP: %s', migracao_id, exc)
+        log(migracao_id, f'AVISO: o Servidor MCP do ERP não foi religado ({exc}). Clique em Aplicar Configurações.')
 
 
 def concluir(migracao_id):
@@ -584,6 +598,8 @@ def finalizar_reversao(migracao_id):
     except Exception as exc:
         intervencao(migracao_id, f'A volta para a origem falhou ao religar: {exc}')
         return
+    if m.host_trocado:
+        _sincronizar_mcp(migracao_id, m.cliente)
     residuais = (
         {'no': m.no_destino, 'volumes': [f'{slug}_{v}' for v in VOLUMES_STACK]} if m.host_trocado else None
     )

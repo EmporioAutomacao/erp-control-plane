@@ -1016,6 +1016,13 @@ class ClienteAdmin(ModelAdmin):
                     MotorProvisionamento(cliente).sincronizar_servico_cron()
                 except Exception as exc:
                     messages.warning(request, f'Falha ao sincronizar o serviço de crons ({slug}_cron): {exc}')
+                # Servidor MCP: réplicas pelo módulo `agents`, env e routers pelos domínios atuais.
+                try:
+                    from .provisioning import MotorProvisionamento
+
+                    MotorProvisionamento(cliente).sincronizar_servico_mcp()
+                except Exception as exc:
+                    messages.warning(request, f'Falha ao sincronizar o Servidor MCP do ERP ({slug}_mcp): {exc}')
                 if lista_dominios or cliente.dominios_aplicados:
                     self._mostrar_cloudflare(request, cloudflare.sincronizar(cliente))
             elif 'not found' in result.stderr:
